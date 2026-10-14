@@ -16,8 +16,14 @@ namespace PianoTeacher3D.Core
         /// <summary>曲目总时长（秒），由曲目加载时设置。</summary>
         public float TotalDuration { get; private set; }
 
-        /// <summary>播放速度倍率（1 = 原速，0.5 = 半速）。</summary>
-        public float PlaybackSpeed { get; set; } = 1f;
+        private float _playbackSpeed = 1f;
+
+        /// <summary>播放速度倍率（1 = 原速，0.5 = 半速）。clamp 到 [0.1, +∞)，防止负值导致时间倒退。</summary>
+        public float PlaybackSpeed
+        {
+            get => _playbackSpeed;
+            set => _playbackSpeed = Mathf.Max(0.1f, value);
+        }
 
         public bool IsLooping { get; set; }
 

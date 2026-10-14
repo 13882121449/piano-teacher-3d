@@ -15,6 +15,7 @@ namespace PianoTeacher3D.Piano
 
         public void Initialize()
         {
+            if (_source != null) return; // 幂等：避免重复 AddComponent
             _source = gameObject.AddComponent<AudioSource>();
             _source.playOnAwake = false;
 

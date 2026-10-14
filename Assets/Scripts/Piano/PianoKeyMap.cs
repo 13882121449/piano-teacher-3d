@@ -67,7 +67,8 @@ namespace PianoTeacher3D.Piano
                 meshT.SetParent(root, false);
                 meshT.localPosition = new Vector3(0f, keyHeight * 0.5f, keyLength * 0.5f);
                 meshT.localScale = new Vector3(keyWidth, keyHeight, keyLength);
-                mesh.GetComponent<Renderer>().sharedMaterial = black ? blackMat : whiteMat;
+                var keyMat = black ? blackMat : whiteMat;
+                if (keyMat != null) mesh.GetComponent<Renderer>().sharedMaterial = keyMat;
                 Destroy(mesh.GetComponent<Collider>()); // 无碰撞需求，避免误触
 
                 _keyRoots[pitch] = root;
@@ -115,13 +116,19 @@ namespace PianoTeacher3D.Piano
 
         private static Material CreateMaterial(Color color)
         {
-            var shader = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
-            var mat = new Material(shader)
+            var shader = Shader.Find("Standard")
+                ?? Shader.Find("Universal Render Pipeline/Lit")
+                ?? Shader.Find("Sprites/Default");
+            if (shader == null)
+            {
+                Debug.LogError("[PianoKeyMap] 未找到可用 shader，琴键材质创建失败");
+                return null;
+            }
+            return new Material(shader)
             {
                 name = $"KeyMat_{color}",
                 color = color
             };
-            return mat;
         }
     }
 }

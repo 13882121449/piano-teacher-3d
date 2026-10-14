@@ -70,13 +70,14 @@ public class MidiParserTests
     [Test]
     public void Parse_TempoChange_AffectsTiming()
     {
-        // 前半段 120BPM(500000)，后半段 60BPM(1000000)，PPQ 480
+        // NoteOn 在 tick 0（120BPM），tick 480 处变 60BPM，NoteOff 在 tick 960
+        // → 480 tick @120BPM(0.5s) + 480 tick @60BPM(1.0s) = 1.5s
         var data = BuildMidi(new[]
         {
-            Tempo(500000, 0),
-            Tempo(1000000, 480),   // tick 480 处变 60 BPM
-            NoteOn(0, 60, 100, 0),
-            NoteOff(0, 60, 960)    // 480 tick @120 + 480 tick @60 = 0.5s + 1.0s
+            Tempo(500000, 0),      // tick 0, 120 BPM
+            NoteOn(0, 60, 100, 0), // tick 0, Note On
+            Tempo(1000000, 480),   // tick 480, 60 BPM
+            NoteOff(0, 60, 480)    // tick 960, Note Off
         });
 
         var result = MidiParser.Parse(data);
@@ -159,7 +160,7 @@ public class MidiParserTests
     {
         var track = new List<byte>();
         foreach (var e in events) track.AddRange(e);
-        track.AddRange(new byte[] { 0xFF, 0x2F, 0x00 }); // End of Track
+        track.AddRange(new byte[] { 0x00, 0xFF, 0x2F, 0x00 }); // End of Track（delta 0 + meta 0x2F）
 
         var bytes = new List<byte>();
         bytes.AddRange(Ascii("MThd"));
