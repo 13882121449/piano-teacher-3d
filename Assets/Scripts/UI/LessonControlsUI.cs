@@ -76,7 +76,7 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        private void OnCameraModeChanged(Camera.CameraMode mode) => RefreshCameraLabel(mode);
+        private void OnCameraModeChanged(CameraControl.CameraMode mode) => RefreshCameraLabel(mode);
 
         // ==================== UI 构建 ====================
 
@@ -136,12 +136,12 @@ namespace PianoTeacher3D.UI
             if (_speedLabel != null) _speedLabel.text = $"速度 {speed:0.0}x";
         }
 
-        private void RefreshCameraLabel(Camera.CameraMode mode)
+        private void RefreshCameraLabel(CameraControl.CameraMode mode)
         {
             if (_cameraLabel != null) _cameraLabel.text = "视角：" + mode switch
             {
-                Camera.CameraMode.Closeup => "手部特写",
-                Camera.CameraMode.Full => "全景",
+                CameraControl.CameraMode.Closeup => "手部特写",
+                CameraControl.CameraMode.Full => "全景",
                 _ => "自由观察"
             };
         }

@@ -4,7 +4,7 @@ using UnityEngine;
 using PianoTeacher3D.MIDI;
 using PianoTeacher3D.Piano;
 using PianoTeacher3D.Avatar;
-using PianoTeacher3D.Camera;
+using PianoTeacher3D.CameraControl;
 
 namespace PianoTeacher3D.Core
 {

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace PianoTeacher3D.Camera
+namespace PianoTeacher3D.CameraControl
 {
     public enum CameraMode
     {
