@@ -1,0 +1,37 @@
+# ===== Unity 生成目录（可重新生成，不提交） =====
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+
+# ===== IDE =====
+.vs/
+.idea/
+.vscode/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svd
+*.userprefs
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== Unity Crash / 日志 =====
+sysinfo.txt
+*.stackdump
+crashlytics-build.properties
+
+# ===== 大型媒体资源（是否入库按体积与授权决定，必要时启用 Git LFS） =====
+# *.mp4
+# *.mov
+# *.wav
+# *.mp3
