@@ -29,6 +29,12 @@ namespace PianoTeacher3D.Core
         private PracticeHand _practiceHand = PracticeHand.Both;
         private float _lastTime; // 用于检测 Loop 跳转导致的时间回退
 
+        private PianoKeyHighlighter _highlighter;
+        private Metronome _metronome;
+        private SongAnalysis _analysis = new SongAnalysis();
+        private readonly List<MidiNoteEvent> _upcomingBuffer = new();
+        private float _highlightLookAhead = 0.6f;
+
         public bool HasSong => _currentSong != null && _currentSong.Success;
         public string CurrentSongName { get; private set; } = "";
         public PlaybackState PlaybackState => _timeline != null ? _timeline.State : PlaybackState.Stopped;
@@ -38,6 +44,25 @@ namespace PianoTeacher3D.Core
         public bool IsLooping => _timeline != null && _timeline.IsLooping;
         public int CurrentAvatarIndex => _avatar != null ? _avatar.CurrentIndex : 0;
 
+        /// <summary>当前琴键高亮模式。</summary>
+        public HighlightMode KeyHighlight => _highlighter != null ? _highlighter.Mode : HighlightMode.Off;
+
+        /// <summary>节拍器是否开启。</summary>
+        public bool MetronomeEnabled => _metronome != null && _metronome.Enabled;
+
+        /// <summary>每小节拍数（默认 4/4）。</summary>
+        public int BeatsPerBar => _metronome != null ? _metronome.BeatsPerBar : 4;
+
+        /// <summary>当前曲目分析结果（未加载曲目时为空分析，非 null）。</summary>
+        public SongAnalysis Analysis => _analysis;
+
+        /// <summary>琴键预提示提前量（秒），clamp 到 [0.05, 3]。</summary>
+        public float HighlightLookAhead
+        {
+            get => _highlightLookAhead;
+            set => _highlightLookAhead = Mathf.Clamp(value, 0.05f, 3f);
+        }
+
         // 供 UI 订阅
         public event System.Action<string> OnError;
         public event System.Action OnSongLoaded;
@@ -46,6 +71,10 @@ namespace PianoTeacher3D.Core
         public event System.Action<int> OnAvatarChanged;
         public event System.Action<CameraMode> OnCameraModeChanged;
         public event System.Action<PracticeHand> OnPracticeHandChanged;
+        public event System.Action<HighlightMode> OnHighlightModeChanged;
+        public event System.Action<bool> OnMetronomeToggled;
+        public event System.Action<int> OnMetronomeBeat;          // 参数：小节内拍序号（0 = 强拍）
+        public event System.Action<SongAnalysis> OnAnalysisReady;
 
         private void Awake()
         {
@@ -73,7 +102,45 @@ namespace PianoTeacher3D.Core
                 _scheduler.Tick(current);
             }
             _lastTime = current;
+
+            UpdateHighlightUpcoming(current);
+            _metronome?.Tick(current);
+
             OnProgressChanged?.Invoke(current, _timeline.TotalDuration);
+        }
+
+        /// <summary>
+        /// 每帧把预提示窗口 [当前时间, 当前时间 + 提前量) 内的音符推送给高亮器。
+        /// 分手练习时只提示当前练习手，保持与琴键动画/手部动作一致。
+        /// </summary>
+        private void UpdateHighlightUpcoming(float current)
+        {
+            if (_highlighter == null) return;
+
+            // 停止状态：不显示任何琴键提示（Stop 语义为完全复位，避免"已停止但仍亮着"的误导）
+            if (_timeline == null || _timeline.State == PlaybackState.Stopped)
+            {
+                if (_highlighter.HighlightedKeyCount > 0 || _highlighter.UpcomingNoteCount > 0)
+                    _highlighter.ClearAll();
+                return;
+            }
+
+            var mode = _highlighter.Mode;
+            if (mode != HighlightMode.Upcoming && mode != HighlightMode.Both) return;
+
+            _scheduler.CollectNotesInRange(current, current + _highlightLookAhead, _upcomingBuffer);
+
+            if (_practiceHand != PracticeHand.Both)
+            {
+                bool wantLeft = _practiceHand == PracticeHand.LeftOnly;
+                for (int i = _upcomingBuffer.Count - 1; i >= 0; i--)
+                {
+                    if (PianoNoteFilter.IsLeftHand(_upcomingBuffer[i].Pitch) != wantLeft)
+                        _upcomingBuffer.RemoveAt(i);
+                }
+            }
+
+            _highlighter.RefreshUpcoming(_upcomingBuffer);
         }
 
         // ==================== 场景装配 ====================
@@ -113,6 +180,15 @@ namespace PianoTeacher3D.Core
             _keyAnimator.Initialize(_keyMap);
             _audio = gameObject.AddComponent<PianoAudioSynth>();
             _audio.Initialize();
+
+            // 4.1 琴键高亮提示（方案 2.2）：与下压动画解耦，只改颜色
+            _highlighter = gameObject.AddComponent<PianoKeyHighlighter>();
+            _highlighter.Initialize(_keyMap);
+
+            // 4.2 节拍器（方案 2.2）：由统一时间轴驱动，不自建计时器
+            _metronome = gameObject.AddComponent<Metronome>();
+            _metronome.Initialize();
+            _metronome.OnBeat += beat => OnMetronomeBeat?.Invoke(beat);
 
             // 5. 人物（3 预设角色，坐于键盘前方 +Z 侧，面向 -Z 朝钢琴）
             var avatarRoot = new GameObject("Avatar");
@@ -176,9 +252,11 @@ namespace PianoTeacher3D.Core
             _scheduler.OnNoteOn += _audio.OnNoteOn;
             _scheduler.OnNoteOn += _handIK.OnNoteOn;
             _scheduler.OnNoteOn += _fingerPose.OnNoteOn;
+            _scheduler.OnNoteOn += _highlighter.OnNoteOn;
             _scheduler.OnNoteOff += _keyAnimator.OnNoteOff;
             _scheduler.OnNoteOff += _handIK.OnNoteOff;
             _scheduler.OnNoteOff += _fingerPose.OnNoteOff;
+            _scheduler.OnNoteOff += _highlighter.OnNoteOff;
         }
 
         // ==================== 曲目加载 ====================
@@ -230,8 +308,14 @@ namespace PianoTeacher3D.Core
             _practiceHand = PracticeHand.Both;
             _lastTime = 0f;
             _scheduler.Load(result.Notes);
+
+            // 节拍器拍点表 + 曲目分析（方案 2.2 节拍器 / 练习反馈）
+            _metronome?.Load(result.TempoChanges, result.TotalDurationSeconds);
+            _analysis = SongAnalyzer.Analyze(result.Notes, result.TempoChanges, result.TotalDurationSeconds);
+
             ResetPlayback();
             OnSongLoaded?.Invoke();
+            OnAnalysisReady?.Invoke(_analysis);
         }
 
         // ==================== 播放控制（转发到统一时间轴） ====================
@@ -390,6 +474,52 @@ namespace PianoTeacher3D.Core
             _keyAnimator?.ReleaseAll();
             _handIK?.ReleaseAll();
             _fingerPose?.ReleaseAll();
+            _highlighter?.ClearAll();
+            _metronome?.Reset(_timeline != null ? _timeline.CurrentTime : 0f);
+        }
+
+        // ==================== 琴键高亮 / 节拍器（方案 2.2） ====================
+
+        /// <summary>循环切换高亮模式：关闭 → 预提示+发声 → 仅发声 → 仅预提示 → 关闭。</summary>
+        public void CycleHighlightMode()
+        {
+            if (_highlighter == null) return;
+            HighlightMode next = _highlighter.Mode switch
+            {
+                HighlightMode.Off => HighlightMode.Both,
+                HighlightMode.Both => HighlightMode.Active,
+                HighlightMode.Active => HighlightMode.Upcoming,
+                _ => HighlightMode.Off
+            };
+            SetHighlightMode(next);
+        }
+
+        /// <summary>设置高亮模式（关闭时彻底清除颜色，不留残留）。</summary>
+        public void SetHighlightMode(HighlightMode mode)
+        {
+            if (_highlighter == null) return;
+            _highlighter.Mode = mode;
+            if (mode == HighlightMode.Off)
+            {
+                _highlighter.ClearAll();
+                _upcomingBuffer.Clear();
+            }
+            OnHighlightModeChanged?.Invoke(mode);
+        }
+
+        /// <summary>节拍器开关（未加载曲目时给出提示）。</summary>
+        public void ToggleMetronome()
+        {
+            if (_metronome == null) return;
+            if (!_metronome.Enabled && !RequireSong("节拍器")) return;
+            _metronome.Enabled = !_metronome.Enabled;
+            OnMetronomeToggled?.Invoke(_metronome.Enabled);
+        }
+
+        /// <summary>设置每小节拍数（4 = 4/4 拍）。</summary>
+        public void SetBeatsPerBar(int beatsPerBar)
+        {
+            if (_metronome != null) _metronome.BeatsPerBar = beatsPerBar;
         }
     }
 }

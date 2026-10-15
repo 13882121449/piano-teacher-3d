@@ -107,9 +107,64 @@ LessonSessionController.Update 每帧调用 MidiEventScheduler.Tick(CurrentTime)
 
 ## 7. 测试策略（对应方案 8）
 
-- **EditMode**：`MidiParser` 纯逻辑（正常/空/非法/和弦/配对/tempo）——不依赖场景。
-- **PlayMode**：`LessonTimeline` 状态机（Play/Pause/Stop/Seek/播完停止）。
+- **EditMode**：`MidiParser` 纯逻辑（正常/空/非法/和弦/配对/tempo）、`PianoNoteFilter`、`TempoChange`/拍点生成、`SongAnalyzer`。
+- **PlayMode**：`LessonTimeline` 状态机、视角/角色切换集成、错误处理、高亮/节拍器/分析教学功能、性能采样。
+- **Visual**：`VisualSnapshotTests`（`[Category("Visual")]`，无图形设备时自动跳过）。
 
 测试程序集位于 `Assets/Tests/EditMode` 与 `Assets/Tests/PlayMode`（Unity Test Framework 要求测试程序集在 `Assets` 下）。
 根目录 `Tests/` 为方案第 5 节「推荐 Git 仓库结构」约定的镜像目录（保留以忠实方案），
 实际可被 Test Runner 识别的是 `Assets/Tests/` 下的程序集。
+
+---
+
+## 8. 教学功能扩展（方案 2.2）
+
+### 8.1 琴键高亮提示
+
+| 组件 | 职责 |
+|---|---|
+| `Piano/HighlightMode`（枚举） | `Off` / `Upcoming`（预提示）/ `Active`（发声）/ `Both` |
+| `Piano/PianoKeyHighlighter` | 用 `MaterialPropertyBlock` 覆盖 `_Color`/`_BaseColor`；**不实例化材质**，88 键零额外材质与 draw call |
+
+- 配色语义：预提示 **暖金**、左手发声 **冷蓝**、右手发声 **暖橙**（左右手分界复用 `PianoNoteFilter.SplitPitch`）。
+- 与 `PianoKeyAnimator`（物理下压）**职责解耦**：高亮只改颜色，不动角度，关闭高亮不影响动画与时间轴。
+- 预提示窗口由 `LessonSessionController.HighlightLookAhead`（默认 0.6s，clamp 到 [0.05, 3]）控制，
+  每帧通过 `MidiEventScheduler.CollectNotesInRange()`（二分查找，O(log n + k)）取窗口内音符；
+  分手练习时只提示当前练习手。
+- **Stop 语义**：停止状态下一律不显示高亮（避免"已停止但仍亮着"的误导）；Seek/换曲/关闭高亮均彻底还原颜色。
+
+### 8.2 节拍器
+
+`Core/Metronome`：
+
+- **严格遵循方案 4.3**：不由自身创建计时器，`Tick(currentTime)` 由 `LessonSessionController` 用
+  `LessonTimeline` 的当前时间驱动，因此节拍与音乐、琴键、手部动作同源。
+- 拍点表由 `BuildBeatTimes(tempos, totalDuration)` 纯静态生成（分段按 tempo 累积，受 `MaxBeats` 上限保护），
+  输入来自 `MidiParseResult.TempoChanges`（秒制 tempo map，首项恒为 t=0）。
+- 击拍音为程序化合成（强拍 1320Hz / 弱拍 880Hz + 指数衰减包络），零第三方音频资产。
+- 时间回退（循环跳转 / Seek 回退）时重新定位游标且**不补发历史拍点**；`Enabled` 只控制发声，不影响游标推进。
+
+### 8.3 曲目分析与练习反馈
+
+`Core/SongAnalyzer` + `Core/SongAnalysis`（纯 C#，不依赖 UnityEngine）：
+
+- 统计：音符总数、左右手分布、黑键比例、和弦数/最大音数/最大跨度、音域、最快音间隔、BPM 范围。
+- 规则式练习建议（阈值集中定义为常量，便于调整）：单手占比 ≥ 60% 建议分手练习、黑键 ≥ 30% 提示指法、
+  跨度 ≥ 12 半音建议放慢、间隔 < 120ms 提示慢速、音域 ≥ 3 个八度提示手位移动等。
+- 任何输入（`null` / 空列表）都返回非 null 结果，`Suggestions` 永不为 null。
+
+### 8.4 数据流（与方案 4.3 一致）
+
+```text
+LessonTimeline（唯一时间源）
+    ↓ 每帧 CurrentTime
+LessonSessionController
+    ├── MidiEventScheduler.Tick ──→ PianoKeyAnimator / PianoAudioSynth / HandIK / FingerPose / PianoKeyHighlighter
+    ├── UpdateHighlightUpcoming ──→ MidiEventScheduler.CollectNotesInRange ──→ PianoKeyHighlighter
+    ├── Metronome.Tick ──→ 击拍音 + OnMetronomeBeat ──→ LessonControlsUI 拍点指示
+    └── OnProgressChanged ──→ LessonControlsUI
+```
+
+**踩坑记录**：`MaterialPropertyBlock` 等 Unity 原生对象**不可作为 MonoBehaviour 的字段初始化器**
+（`UnityException: CreateImpl is not allowed to be called from a MonoBehaviour constructor`），
+必须惰性创建或在 `Awake`/`Initialize` 中创建。

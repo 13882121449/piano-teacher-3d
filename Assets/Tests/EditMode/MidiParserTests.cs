@@ -154,6 +154,59 @@ public class MidiParserTests
         Assert.IsFalse(result.Success);
     }
 
+    // ==================== tempo map（方案 2.2 节拍器 / 练习反馈的数据基础） ====================
+
+    [Test]
+    public void Parse_NoTempoEvent_HasDefaultTempoChangeAtZero()
+    {
+        var data = BuildMidi(new[]
+        {
+            NoteOn(0, 60, 100, 0),
+            NoteOff(0, 60, 480)
+        });
+
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.IsNotNull(result.TempoChanges, "TempoChanges 不应为 null");
+        Assert.AreEqual(1, result.TempoChanges.Count);
+        Assert.AreEqual(0f, result.TempoChanges[0].TimeSeconds, 1e-4f, "首项必须为 t=0");
+        Assert.AreEqual(TempoChange.DefaultMpq, result.TempoChanges[0].MicrosecondsPerQuarter);
+        Assert.AreEqual(120f, result.TempoChanges[0].Bpm, 0.01f);
+    }
+
+    [Test]
+    public void Parse_TempoChange_TimeConvertedToSeconds()
+    {
+        // tick 0 起 120BPM；tick 480（= 1 拍 = 0.5s）起 60BPM
+        var data = BuildMidi(new[]
+        {
+            Tempo(500000, 0),
+            NoteOn(0, 60, 100, 0),
+            Tempo(1000000, 480),
+            NoteOff(0, 60, 480)
+        });
+
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(2, result.TempoChanges.Count);
+        Assert.AreEqual(0f, result.TempoChanges[0].TimeSeconds, 1e-3f);
+        Assert.AreEqual(0.5f, result.TempoChanges[1].TimeSeconds, 1e-3f, "480 tick @120BPM = 0.5s");
+        Assert.AreEqual(60f, result.TempoChanges[1].Bpm, 0.01f);
+    }
+
+    [Test]
+    public void Parse_FailedResult_StillExposesDefaultTempoChanges()
+    {
+        var result = MidiParser.Parse(new byte[0]);
+
+        Assert.IsFalse(result.Success);
+        Assert.IsNotNull(result.TempoChanges, "失败结果也不应返回 null tempo map");
+        Assert.AreEqual(1, result.TempoChanges.Count);
+        Assert.AreEqual(120f, result.TempoChanges[0].Bpm, 0.01f);
+    }
+
     // ==================== MIDI 字节构造 helper ====================
 
     private static byte[] BuildMidi(IEnumerable<byte[]> events, ushort division = 480)

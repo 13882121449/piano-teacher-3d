@@ -40,12 +40,8 @@ namespace PianoTeacher3D.Piano
 
         public static bool IsInRange(int pitch) => pitch >= MinPitch && pitch <= MaxPitch;
 
-        /// <summary>是否为黑键。</summary>
-        public static bool IsBlackKey(int pitch)
-        {
-            int pc = pitch % 12;
-            return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
-        }
+        /// <summary>是否为黑键（与 <see cref="MIDI.PianoNoteFilter.IsBlackKey"/> 共用同一判定）。</summary>
+        public static bool IsBlackKey(int pitch) => MIDI.PianoNoteFilter.IsBlackKey(pitch);
 
         public bool TryGetKey(int pitch, out Transform key) => _keyRoots.TryGetValue(pitch, out key);
 

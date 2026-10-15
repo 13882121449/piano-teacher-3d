@@ -12,6 +12,22 @@ namespace PianoTeacher3D.MIDI
         /// <summary>左右手分界音高（中央 C4 = 60）：&lt;60 属左手，&gt;=60 属右手。</summary>
         public const int SplitPitch = 60;
 
+        /// <summary>音级为黑键的 5 个半音（C#/D#/F#/G#/A#）。</summary>
+        private static readonly bool[] BlackPitchClasses =
+        {
+            false, true, false, true, false, false, true, false, true, false, true, false
+        };
+
+        /// <summary>是否为黑键（纯逻辑，供琴键映射与曲目分析共用）。</summary>
+        public static bool IsBlackKey(int pitch)
+        {
+            int pc = ((pitch % 12) + 12) % 12; // 负数音高也安全
+            return BlackPitchClasses[pc];
+        }
+
+        /// <summary>该音高是否属左手（低于 C4）。</summary>
+        public static bool IsLeftHand(int pitch) => pitch < SplitPitch;
+
         /// <summary>按练习模式过滤音符。Both 返回副本，LeftOnly/RightOnly 只保留对应手的音符。</summary>
         public static List<MidiNoteEvent> FilterByHand(IReadOnlyList<MidiNoteEvent> notes, PracticeHand hand)
         {

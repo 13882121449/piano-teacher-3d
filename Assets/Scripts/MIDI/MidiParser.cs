@@ -10,6 +10,11 @@ namespace PianoTeacher3D.MIDI
     /// </summary>
     public sealed class MidiParseResult
     {
+        private static readonly TempoChange[] DefaultTempo =
+        {
+            new TempoChange(0f, TempoChange.DefaultMpq)
+        };
+
         public bool Success { get; }
         public string Error { get; }
         public List<MidiNoteEvent> Notes { get; }
@@ -17,8 +22,15 @@ namespace PianoTeacher3D.MIDI
         public ushort Division { get; }
         public int TrackCount { get; }
 
+        /// <summary>
+        /// tempo 变化点（秒制，按时间升序，首项必为 t=0）。
+        /// 无 tempo 事件时返回单个 120 BPM 默认项，调用方无需判空。
+        /// </summary>
+        public IReadOnlyList<TempoChange> TempoChanges { get; }
+
         public MidiParseResult(bool success, string error, List<MidiNoteEvent> notes,
-            float totalDuration, ushort division, int trackCount)
+            float totalDuration, ushort division, int trackCount,
+            IReadOnlyList<TempoChange> tempoChanges = null)
         {
             Success = success;
             Error = error;
@@ -26,6 +38,7 @@ namespace PianoTeacher3D.MIDI
             TotalDurationSeconds = totalDuration;
             Division = division;
             TrackCount = trackCount;
+            TempoChanges = tempoChanges ?? DefaultTempo;
         }
 
         public static MidiParseResult Fail(string error)
@@ -225,7 +238,28 @@ namespace PianoTeacher3D.MIDI
                 }
 
                 notes.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
-                return new MidiParseResult(true, null, notes, (float)maxEndSeconds, division, trackCount);
+
+                // ---- 产出秒制 tempo 变化点（首项保证为 t=0）----
+                var tempoChanges = new List<TempoChange>();
+                foreach (var te in tempoSorted)
+                {
+                    float tSec = (float)TickToSeconds(te.tick);
+                    // 同一时间点重复出现时，后出现的覆盖前者（异常 MIDI 防御）
+                    if (tempoChanges.Count > 0 &&
+                        Math.Abs(tempoChanges[tempoChanges.Count - 1].TimeSeconds - tSec) < 1e-4f)
+                    {
+                        tempoChanges[tempoChanges.Count - 1] = new TempoChange(tSec, te.tempo);
+                    }
+                    else
+                    {
+                        tempoChanges.Add(new TempoChange(tSec, te.tempo));
+                    }
+                }
+                if (tempoChanges.Count == 0 || tempoChanges[0].TimeSeconds > 1e-4f)
+                    tempoChanges.Insert(0, new TempoChange(0f, DefaultTempo));
+
+                return new MidiParseResult(true, null, notes, (float)maxEndSeconds,
+                    division, trackCount, tempoChanges);
             }
             catch (EndOfStreamException)
             {

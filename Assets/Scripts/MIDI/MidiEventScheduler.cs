@@ -14,12 +14,14 @@ namespace PianoTeacher3D.MIDI
         public event System.Action<MidiNoteEvent> OnNoteOff;
 
         private readonly List<(float time, bool isOn, MidiNoteEvent note)> _events = new();
+        private readonly List<MidiNoteEvent> _sortedNotes = new();
         private int _cursor = 0;
 
         /// <summary>加载曲目的标准化音符事件，重建事件流。</summary>
         public void Load(IReadOnlyList<MidiNoteEvent> notes)
         {
             _events.Clear();
+            _sortedNotes.Clear();
             _cursor = 0;
             if (notes == null) return;
 
@@ -27,14 +29,47 @@ namespace PianoTeacher3D.MIDI
             {
                 _events.Add((n.StartTime, true, n));
                 _events.Add((n.EndTime, false, n));
+                _sortedNotes.Add(n);
             }
             _events.Sort((a, b) => a.time.CompareTo(b.time));
+            _sortedNotes.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
         }
 
         public void Clear()
         {
             _events.Clear();
+            _sortedNotes.Clear();
             _cursor = 0;
+        }
+
+        /// <summary>
+        /// 收集起始时间落在 [from, to) 区间内的音符（按 StartTime 升序），用于高亮预提示。
+        /// 基于已排序列表二分定位，复杂度 O(log n + k)。结果写入调用方提供的列表（会被清空）。
+        /// </summary>
+        public void CollectNotesInRange(float from, float to, List<MidiNoteEvent> result)
+        {
+            if (result == null) return;
+            result.Clear();
+            if (_sortedNotes.Count == 0 || to <= from) return;
+
+            for (int i = LowerBoundOfStart(from); i < _sortedNotes.Count; i++)
+            {
+                var n = _sortedNotes[i];
+                if (n.StartTime >= to) break;
+                result.Add(n);
+            }
+        }
+
+        private int LowerBoundOfStart(float time)
+        {
+            int lo = 0, hi = _sortedNotes.Count;
+            while (lo < hi)
+            {
+                int mid = lo + (hi - lo) / 2;
+                if (_sortedNotes[mid].StartTime < time) lo = mid + 1;
+                else hi = mid;
+            }
+            return lo;
         }
 
         /// <summary>按当前时间推进，触发所有到期事件。</summary>
