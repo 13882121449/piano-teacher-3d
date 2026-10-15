@@ -19,7 +19,7 @@ namespace PianoTeacher3D.Avatar
         public float PressAngle = 32f;  // 手指按下弯曲角度（绕 X 正角 = 指尖下压向琴键）
         public float RestAngle = 18f;   // 未按下时的自然弯曲（避免僵直的手型）
         public float SlerpSpeed = 15f;
-        public float SpreadAngle = 7f;  // 和弦手型左右张开角（绕 Y），按音高比例分配
+        public float SpreadAngle = 4f;  // 和弦手型左右张开角（绕 Y），按音高比例分配
 
         private const int MaxFingers = 8;
 

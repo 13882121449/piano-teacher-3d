@@ -18,10 +18,10 @@ namespace PianoTeacher3D.CameraControl
     {
         public CameraMode Mode { get; private set; } = CameraMode.Full;
 
-        [Header("全景预设（演奏者侧后方，可见人物、键盘与手）")]
-        public Vector3 FullPosition = new Vector3(0.82f, 1.58f, 1.58f);
-        public Vector3 FullTarget = new Vector3(-0.10f, 0.72f, 0.05f);
-        public float FullFov = 48f;
+        [Header("全景预设（演奏者右侧方，完整容纳人物 + 88 键琴身）")]
+        public Vector3 FullPosition = new Vector3(2.05f, 1.22f, 0.82f);
+        public Vector3 FullTarget = new Vector3(-0.24f, 0.74f, -0.02f);
+        public float FullFov = 50f;
 
         [Header("手部特写预设（俯角约 28°，可见手背与手指）")]
         public float CloseupFov = 34f;
