@@ -6,6 +6,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using PianoTeacher3D.Avatar;
 using PianoTeacher3D.Core;
+using PianoTeacher3D.MIDI;
 
 namespace PianoTeacher3D.Tests.PlayMode
 {
@@ -147,6 +148,69 @@ namespace PianoTeacher3D.Tests.PlayMode
             yield return null;
 
             Assert.AreEqual(0, _handIK.PoseIssueCount, "停止后不应出现姿态越界");
+        }
+
+        // ==================== 回归测试（本轮修复的缺陷） ====================
+
+        /// <summary>回归：左右手的手指分配必须互相隔离（缺陷 B1）。</summary>
+        [UnityTest]
+        public IEnumerator FingerPose_LeftAndRightAssignmentsAreIndependent()
+        {
+            var fingerPose = Object.FindFirstObjectByType<FingerPoseController>();
+            Assert.IsNotNull(fingerPose, "场景应包含 FingerPoseController");
+
+            // 左右手各喂一个按键，走两帧让 Update 完成分配
+            fingerPose.OnNoteOn(new MidiNoteEvent(48, 0f, 1f, 90, 0, 0)); // 左手（< C4）
+            fingerPose.OnNoteOn(new MidiNoteEvent(72, 0f, 1f, 90, 0, 0)); // 右手（≥ C4）
+            yield return null;
+            yield return null;
+
+            bool leftAssigned = false;
+            bool rightAssigned = false;
+            for (int f = 0; f < 5; f++)
+            {
+                if (fingerPose.GetFingerPitch(true, f) == 48) leftAssigned = true;
+                if (fingerPose.GetFingerPitch(false, f) == 72) rightAssigned = true;
+            }
+
+            fingerPose.ReleaseAll();
+
+            Assert.IsTrue(leftAssigned, "左手分配结果应保留（左右手数据必须隔离，不可互相覆盖）");
+            Assert.IsTrue(rightAssigned, "右手分配结果应保留");
+        }
+
+        /// <summary>回归：手腕目标经平滑后，单帧变化量应受限（缺陷 B3）。</summary>
+        [UnityTest]
+        public IEnumerator HandTarget_SmoothingLimitsPerFrameJump()
+        {
+            if (!_session.HasSong) Assert.Ignore("演示曲目未加载，跳过");
+
+            _session.Seek(0f);
+            _session.Play();
+            yield return null;
+            yield return null; // 跳过首次对齐帧
+
+            float maxJump = 0f;
+            var prevLeft = _handIK.LeftSmoothedTarget;
+            var prevRight = _handIK.RightSmoothedTarget;
+
+            for (int i = 0; i < 120; i++)
+            {
+                yield return null;
+
+                var left = _handIK.LeftSmoothedTarget;
+                var right = _handIK.RightSmoothedTarget;
+                maxJump = Mathf.Max(maxJump,
+                    Mathf.Max(Vector3.Distance(prevLeft, left), Vector3.Distance(prevRight, right)));
+
+                prevLeft = left;
+                prevRight = right;
+            }
+            _session.Pause();
+
+            Debug.Log($"[MOTION] 目标单帧最大变化 {maxJump * 1000f:0.#} mm（阈值 {_handIK.TargetJumpThreshold * 1000f:0.#} mm）");
+            Assert.Less(maxJump, 0.25f,
+                $"目标单帧变化应受分级约束（小变化精确对齐 / 大跳变限速），实际 {maxJump * 1000f:0.#} mm");
         }
     }
 }

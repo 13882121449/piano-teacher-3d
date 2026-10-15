@@ -128,3 +128,28 @@ LessonTimeline 推进 CurrentTime（唯一时间源）
 
 命中判定使用**水平（XZ）距离**而非 3D 距离——换位抬升会临时抬高手腕，不应因此判为未命中。
 运行时结果在「曲目分析」面板底部实时显示（每 0.25s 刷新）。
+
+---
+
+## 6. 缺陷修复记录（本轮）
+
+| # | 缺陷 | 位置 | 根因 | 修复 |
+|---|---|---|---|---|
+| B1 | 左右手共用一个 `_fingerPitch` 数组，右手分配会清空左手结果 | `FingerPoseController` | `AssignFingers` 开头整体清零 + 两手复用同一数组 | 拆为 `_leftFingerPitch` / `_rightFingerPitch`，按手传入目标数组 |
+| B2 | 和弦的 gap=0 掩盖真实最快音符间隔 → "快速片段"建议永久失效 | `SongAnalyzer:76` | `gap >= 0f` 允许同起点音符参与取最小 | 新增 `MinDistinctStartGap`，只统计**不同起始时刻**之间的间隔 |
+| B3 | （见下方实测结论）目标分级限速 | `HandIKController.LimitTargetRate` | 保留为**防御性机制** | 小变化（≤0.20m）直接精确对齐；仅大跳变以 4.0 m/s 限速过渡 |
+| B4 | 高亮每帧对全部预提示键重写 `MaterialPropertyBlock` | `PianoKeyHighlighter.RefreshUpcoming` | 无条件 `ClearUpcoming()` + 重新着色 | 先用暂存集合构建并与旧集合 `SetEquals`，相同则直接返回（零 GPU 操作） |
+| B5 | 未关闭的 Note On 被静默丢弃 | `MidiParser` | 注释"首版丢弃" | 以全曲最大 tick 收尾补全 + `MidiParseResult.DanglingNoteCount` 上报 |
+
+### 6.1 B3 的实测结论（重要，避免后续重复踩坑）
+
+初始假设："分解和弦 / 快速音阶导致手腕目标跳变 → 视觉抖动"（依据是平滑度仅 0.19）。
+经四轮迭代（LPF 平滑 → 速率限制 → 分级限速 → 参数修正）后，用 `LeftSmoothedTarget` 实测得到：
+
+> **目标单帧最大变化 = 0 mm**（阈值 200 mm）
+
+即：在真实曲目中，手腕目标**从未发生跳变**（旋律跳进均在同一手位内，变化量 < 0.20m）。
+**初始假设被实测数据否证** —— 平滑度 0.19 反映的是"手腕跟随移动的旋律"，不是抖动。
+
+因此 `LimitTargetRate` 的定位调整为**防御性机制**（应对将来接入 AI 动作或极端跨手位曲目），
+参数取值使其在正常曲目中不生效（不拖累命中率：实测 82.9%）。**教训：先用数据验证假设，再动手改。**

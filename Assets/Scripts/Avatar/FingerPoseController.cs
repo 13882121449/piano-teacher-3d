@@ -25,8 +25,11 @@ namespace PianoTeacher3D.Avatar
 
         private readonly HashSet<int> _pressed = new();
         private readonly List<int> _scratch = new();
-        private readonly int[] _fingerPitch = new int[MaxFingers];
         private readonly bool[] _used = new bool[MaxFingers];
+
+        // 左右手各持一份分配结果：必须隔离，否则后处理的手会清空前一只手的数据
+        private readonly int[] _leftFingerPitch = new int[MaxFingers];
+        private readonly int[] _rightFingerPitch = new int[MaxFingers];
 
         private IHandRig _leftHand;
         private IHandRig _rightHand;
@@ -44,14 +47,21 @@ namespace PianoTeacher3D.Avatar
 
         public void OnNoteOff(MidiNoteEvent e) => _pressed.Remove(e.Pitch);
 
-        public void ReleaseAll() => _pressed.Clear();
+        public void ReleaseAll()
+        {
+            _pressed.Clear();
+            for (int i = 0; i < MaxFingers; i++)
+            {
+                _leftFingerPitch[i] = -1;
+                _rightFingerPitch[i] = -1;
+            }
+        }
 
         /// <summary>指定手指当前分配到的音高（-1 = 未按下），供测试与调试使用。</summary>
         public int GetFingerPitch(bool leftHand, int fingerIndex)
         {
-            var hand = leftHand ? _leftHand : _rightHand;
-            if (hand == null || fingerIndex < 0 || fingerIndex >= MaxFingers) return -1;
-            return _fingerPitch[fingerIndex];
+            if (fingerIndex < 0 || fingerIndex >= MaxFingers) return -1;
+            return leftHand ? _leftFingerPitch[fingerIndex] : _rightFingerPitch[fingerIndex];
         }
 
         private void Update()
@@ -67,8 +77,11 @@ namespace PianoTeacher3D.Avatar
             int fingerCount = Mathf.Min(hand.Fingers.Count, MaxFingers);
             if (fingerCount == 0) return;
 
+            // 该手的分配结果数组（左右手隔离）
+            var assign = leftHand ? _leftFingerPitch : _rightFingerPitch;
+
             CollectHandPitches(leftHand);
-            AssignFingers(_scratch, fingerCount);
+            AssignFingers(_scratch, fingerCount, assign);
 
             int minPitch = _scratch.Count > 0 ? _scratch[0] : 0;
             int maxPitch = _scratch.Count > 0 ? _scratch[_scratch.Count - 1] : 0;
@@ -79,7 +92,7 @@ namespace PianoTeacher3D.Avatar
                 var finger = hand.Fingers[f];
                 if (finger == null) continue;
 
-                int pitch = _fingerPitch[f];
+                int pitch = assign[f];
                 float pressAngle = RestAngle;
                 float spreadAngle = 0f;
 
@@ -109,12 +122,13 @@ namespace PianoTeacher3D.Avatar
         /// <summary>
         /// 按音高比例把按键分配到手指：跨度大 → 手指展开；单音 → 中间手指。
         /// 同索引冲突时顺延到最近的空闲手指；手指用尽后复用理想索引（不越界）。
+        /// 结果写入 <paramref name="assign"/>（由调用方按手提供，左右手互不干扰）。
         /// </summary>
-        private void AssignFingers(List<int> pitches, int fingerCount)
+        private void AssignFingers(List<int> pitches, int fingerCount, int[] assign)
         {
             for (int i = 0; i < MaxFingers; i++)
             {
-                _fingerPitch[i] = -1;
+                assign[i] = -1;
                 _used[i] = false;
             }
             if (pitches.Count == 0) return;
@@ -129,7 +143,7 @@ namespace PianoTeacher3D.Avatar
                 int index = FindNearestFree(fingerCount, ideal);
 
                 _used[index] = true;
-                _fingerPitch[index] = pitches[i];
+                assign[index] = pitches[i];
             }
         }
 

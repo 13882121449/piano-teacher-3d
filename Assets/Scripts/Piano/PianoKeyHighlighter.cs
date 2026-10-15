@@ -39,6 +39,7 @@ namespace PianoTeacher3D.Piano
         private readonly HashSet<int> _active = new();
         private readonly HashSet<int> _upcoming = new();
         private readonly HashSet<int> _touched = new();
+        private readonly HashSet<int> _pending = new();   // 预提示集合暂存区（用于变更检测）
         private readonly List<int> _scratch = new();
 
         private MaterialPropertyBlock Block => _block ??= new MaterialPropertyBlock();
@@ -51,8 +52,8 @@ namespace PianoTeacher3D.Piano
             {
                 if (_mode == value) return;
                 _mode = value;
-                if (!WantsUpcoming) ClearUpcoming();
-                RecolorTouched();
+                if (!WantsUpcoming) _upcoming.Clear();
+                RecolorAll();
             }
         }
 
@@ -65,6 +66,12 @@ namespace PianoTeacher3D.Piano
         /// <summary>当前处于预提示状态的音符数。</summary>
         public int UpcomingNoteCount => _upcoming.Count;
 
+        /// <summary>
+        /// 累计 MaterialPropertyBlock 写入次数（性能诊断与测试用）。
+        /// 预提示集合未变化时不应增长——用于验证「集合不变则不重写材质」的优化。
+        /// </summary>
+        public int MpbWriteCount { get; private set; }
+
         private bool WantsUpcoming => _mode == HighlightMode.Upcoming || _mode == HighlightMode.Both;
 
         public void Initialize(PianoKeyMap keyMap)
@@ -73,6 +80,7 @@ namespace PianoTeacher3D.Piano
             _renderers.Clear();
             _active.Clear();
             _upcoming.Clear();
+            _pending.Clear();
             _touched.Clear();
         }
 
@@ -97,18 +105,25 @@ namespace PianoTeacher3D.Piano
         /// </summary>
         public void RefreshUpcoming(IReadOnlyList<MidiNoteEvent> notes)
         {
-            ClearUpcoming();
-
-            if (!WantsUpcoming || notes == null) return;
-
-            for (int i = 0; i < notes.Count; i++)
+            // 先把新集合构建到暂存区，再与当前集合比较：
+            // 集合无变化时直接返回，避免每帧对全部预提示键重写 MaterialPropertyBlock。
+            _pending.Clear();
+            if (WantsUpcoming && notes != null)
             {
-                int pitch = notes[i].Pitch;
-                if (!PianoKeyMap.IsInRange(pitch)) continue;
-                if (_active.Contains(pitch)) continue;   // 已按下：保持发声色
-                if (!_upcoming.Add(pitch)) continue;
-                Recolor(pitch);
+                for (int i = 0; i < notes.Count; i++)
+                {
+                    int pitch = notes[i].Pitch;
+                    if (!PianoKeyMap.IsInRange(pitch)) continue;
+                    if (_active.Contains(pitch)) continue;   // 已按下：保持发声色
+                    _pending.Add(pitch);
+                }
             }
+
+            if (_pending.SetEquals(_upcoming)) return;   // 无变化 → 零 GPU 操作
+
+            _upcoming.Clear();
+            _upcoming.UnionWith(_pending);
+            RecolorAll();
         }
 
         /// <summary>清空全部高亮并恢复琴键原始颜色（停止播放 / 换曲 / Seek / 关闭高亮时调用）。</summary>
@@ -119,6 +134,7 @@ namespace PianoTeacher3D.Piano
 
             _active.Clear();
             _upcoming.Clear();
+            _pending.Clear();
             _touched.Clear();
 
             for (int i = 0; i < _scratch.Count; i++)
@@ -134,24 +150,22 @@ namespace PianoTeacher3D.Piano
         private void ClearUpcoming()
         {
             if (_upcoming.Count == 0) return;
-
-            _scratch.Clear();
-            _scratch.AddRange(_upcoming);
             _upcoming.Clear();
-
-            if (_mode != HighlightMode.Off)
-            {
-                for (int i = 0; i < _scratch.Count; i++) Recolor(_scratch[i]);
-            }
-            _scratch.Clear();
+            RecolorAll();
         }
 
-        private void RecolorTouched()
+        /// <summary>重算所有涉及琴键的颜色（已着色键 ∪ 当前预提示键）。</summary>
+        private void RecolorAll()
         {
-            if (_touched.Count == 0) return;
+            if (_mode == HighlightMode.Off && _touched.Count == 0) return;
 
             _scratch.Clear();
             _scratch.AddRange(_touched);
+            foreach (var pitch in _upcoming)
+            {
+                if (!_touched.Contains(pitch)) _scratch.Add(pitch);
+            }
+
             for (int i = 0; i < _scratch.Count; i++) Recolor(_scratch[i]);
             _scratch.Clear();
         }
@@ -188,6 +202,7 @@ namespace PianoTeacher3D.Piano
             block.SetColor(ColorId, color);
             block.SetColor(BaseColorId, color);
             r.SetPropertyBlock(block);
+            MpbWriteCount++;
             _touched.Add(pitch);
         }
 
@@ -195,7 +210,9 @@ namespace PianoTeacher3D.Piano
         {
             if (!_touched.Remove(pitch)) return;
             var r = GetRenderer(pitch);
-            if (r != null) r.SetPropertyBlock(null);
+            if (r == null) return;
+            r.SetPropertyBlock(null);
+            MpbWriteCount++;
         }
 
         private Renderer GetRenderer(int pitch)

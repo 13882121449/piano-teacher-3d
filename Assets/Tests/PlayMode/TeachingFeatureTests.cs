@@ -155,6 +155,25 @@ namespace PianoTeacher3D.Tests.PlayMode
                 "回到同一位置应得到完全相同的着色集合（证明状态是重建而非累积）");
         }
 
+        /// <summary>回归：预提示集合未变化时不应重写材质属性块（缺陷 B4）。</summary>
+        [UnityTest]
+        public IEnumerator Highlight_StableUpcomingSet_DoesNotRewriteMaterials()
+        {
+            if (!_session.HasSong) Assert.Ignore("演示曲目未加载，跳过");
+
+            _session.SetHighlightMode(HighlightMode.Both);
+            _session.Seek(2f);
+            yield return null;
+            yield return null; // Paused 态：预提示集合已静止
+
+            int before = _highlighter.MpbWriteCount;
+            for (int i = 0; i < 30; i++) yield return null;
+            int after = _highlighter.MpbWriteCount;
+
+            Assert.AreEqual(before, after,
+                "预提示集合未变化时不应重写材质属性块（避免每帧无谓的 GPU 状态操作）");
+        }
+
         // ==================== 节拍器 ====================
 
         [UnityTest]

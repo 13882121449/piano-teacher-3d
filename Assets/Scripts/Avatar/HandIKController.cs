@@ -30,6 +30,8 @@ namespace PianoTeacher3D.Avatar
         public float GlideThreshold = 0.07f; // 水平位移超过该值视为换位，触发抬升过渡（米）
         public float GlideLift = 0.055f;     // 换位过程中的额外抬升高度（米）
         public float MaxStepPerFrame = 0.035f; // 单帧最大位移（米）：硬约束，防瞬移与动作失控
+        public float TargetMaxSpeed = 4.0f;       // 大跳变时的目标变化速率上限（米/秒）；0 = 不限速
+        public float TargetJumpThreshold = 0.20f; // 目标变化小于该值（同手位内旋律跳进）时直接精确对齐
 
         [Header("姿态校验（防穿模）")]
         public bool EnablePoseClamp = true;
@@ -57,6 +59,8 @@ namespace PianoTeacher3D.Avatar
         private readonly HandMotionAccumulator _metrics = new();
         private Vector3 _leftTargetPos, _rightTargetPos;
         private bool _leftHasTarget, _rightHasTarget;
+        private Vector3 _leftSmoothedTarget, _rightSmoothedTarget;
+        private bool _hasSmoothedTarget;
 
         /// <summary>动作质量累加器（Session / 测试读取）。</summary>
         public HandMotionAccumulator Metrics => _metrics;
@@ -66,6 +70,12 @@ namespace PianoTeacher3D.Avatar
 
         /// <summary>最近若干条异常姿态描述（用于诊断，最多保留 8 条）。</summary>
         public IReadOnlyList<string> PoseIssues => _poseIssues;
+
+        /// <summary>左手当前平滑后的目标位置（供测试与调试；未经平滑时为原始目标）。</summary>
+        public Vector3 LeftSmoothedTarget => _leftSmoothedTarget;
+
+        /// <summary>右手当前平滑后的目标位置（供测试与调试；未经平滑时为原始目标）。</summary>
+        public Vector3 RightSmoothedTarget => _rightSmoothedTarget;
 
         /// <summary>当前使用的姿态允许范围（钢琴几何就绪后有效）。</summary>
         public bool TryGetPoseLimits(out HandPoseLimits limits)
@@ -103,6 +113,7 @@ namespace PianoTeacher3D.Avatar
             _pressed.Clear();
             _lastNoteTime = float.NaN;   // 复位间隔统计，避免 Seek 后沿用旧节奏
             _avgNoteGap = 0.4f;
+            _hasSmoothedTarget = false;  // 复位目标平滑，Seek 后重新对齐而非从旧目标滑过去
         }
 
         /// <summary>重置动作质量指标与姿态告警记录（换曲或重新开始测量时调用）。</summary>
@@ -152,7 +163,7 @@ namespace PianoTeacher3D.Avatar
             if (hand == null || shoulder == null || arm == null) return;
 
             var current = hand.Wrist.position;
-            var target = ApplyGlideLift(current, rawTarget);
+            var target = ApplyGlideLift(current, LimitTargetRate(leftHand, rawTarget));
             var next = Vector3.Lerp(current, target, Time.deltaTime * MoveSpeed * CurrentSpeedScale());
 
             // 硬约束：单帧位移上限（对应方案阶段五「避免动作失控」，杜绝瞬移观感）
@@ -170,6 +181,52 @@ namespace PianoTeacher3D.Avatar
 
             hand.Wrist.position = next;
             StretchArm(shoulder, arm, hand.Wrist);
+        }
+
+        /// <summary>
+        /// 分级限制目标位置变化：
+        /// ① 小变化（同一手位内的音程移动，≤ <see cref="TargetJumpThreshold"/>）**直接精确对齐**
+        ///    —— 保证「目标琴键命中率」不被平滑拖累；
+        /// ② 大跳变（换手位）才以 <see cref="TargetMaxSpeed"/> 限速过渡，抑制单帧抖跳。
+        /// </summary>
+        private Vector3 LimitTargetRate(bool leftHand, Vector3 rawTarget)
+        {
+            if (!_hasSmoothedTarget)
+            {
+                // 首次采样直接对齐，避免从原点插值飞入
+                _leftSmoothedTarget = _rightSmoothedTarget = rawTarget;
+                _hasSmoothedTarget = true;
+                return rawTarget;
+            }
+
+            var current = leftHand ? _leftSmoothedTarget : _rightSmoothedTarget;
+
+            if (TargetJumpThreshold <= 0f || Vector3.Distance(current, rawTarget) <= TargetJumpThreshold)
+            {
+                if (leftHand) _leftSmoothedTarget = rawTarget;
+                else _rightSmoothedTarget = rawTarget;
+                return rawTarget;
+            }
+
+            if (TargetMaxSpeed <= 0f) return rawTarget;
+
+            float maxStep = TargetMaxSpeed * Time.deltaTime;
+            if (leftHand)
+            {
+                _leftSmoothedTarget = MoveTowards(_leftSmoothedTarget, rawTarget, maxStep);
+                return _leftSmoothedTarget;
+            }
+            _rightSmoothedTarget = MoveTowards(_rightSmoothedTarget, rawTarget, maxStep);
+            return _rightSmoothedTarget;
+        }
+
+        /// <summary>朝目标移动最多 <paramref name="maxDelta"/> 距离；距离不超过该值时直接精确到达。</summary>
+        private static Vector3 MoveTowards(Vector3 current, Vector3 target, float maxDelta)
+        {
+            var delta = target - current;
+            float distance = delta.magnitude;
+            if (distance < 1e-6f || distance <= maxDelta) return target;
+            return current + delta * (maxDelta / distance);
         }
 
         /// <summary>

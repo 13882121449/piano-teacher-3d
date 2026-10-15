@@ -28,9 +28,15 @@ namespace PianoTeacher3D.MIDI
         /// </summary>
         public IReadOnlyList<TempoChange> TempoChanges { get; }
 
+        /// <summary>
+        /// 缺少 Note Off 而被解析器按曲目末尾补全的音符数（异常 MIDI 提示）。
+        /// 为 0 表示所有音符都有正常结束时间。
+        /// </summary>
+        public int DanglingNoteCount { get; }
+
         public MidiParseResult(bool success, string error, List<MidiNoteEvent> notes,
             float totalDuration, ushort division, int trackCount,
-            IReadOnlyList<TempoChange> tempoChanges = null)
+            IReadOnlyList<TempoChange> tempoChanges = null, int danglingNoteCount = 0)
         {
             Success = success;
             Error = error;
@@ -39,6 +45,7 @@ namespace PianoTeacher3D.MIDI
             Division = division;
             TrackCount = trackCount;
             TempoChanges = tempoChanges ?? DefaultTempo;
+            DanglingNoteCount = danglingNoteCount < 0 ? 0 : danglingNoteCount;
         }
 
         public static MidiParseResult Fail(string error)
@@ -205,7 +212,20 @@ namespace PianoTeacher3D.MIDI
                         // 悬空 Note Off（无对应 On）忽略
                     }
                 }
-                // 未关闭的 Note On 首版丢弃（无自然结束时间）
+                // 未关闭的 Note On：以全曲最大 tick 收尾（不再丢弃），并计数以便上报异常
+                int danglingCount = 0;
+                foreach (var kv in pending)
+                {
+                    var stack = kv.Value;
+                    while (stack.Count > 0)
+                    {
+                        var on = stack.Pop();
+                        danglingCount++;
+                        if (maxTick > on.tick)
+                            rawNotes.Add((on.tick, maxTick, kv.Key.pitch, on.velocity, on.track, kv.Key.ch));
+                    }
+                }
+                pending.Clear();
 
                 // ---- tick → 秒（依据 tempo map 分段累积）----
                 var tempoSorted = tempoEvents.OrderBy(e => e.tick).ToList();
@@ -259,7 +279,7 @@ namespace PianoTeacher3D.MIDI
                     tempoChanges.Insert(0, new TempoChange(0f, DefaultTempo));
 
                 return new MidiParseResult(true, null, notes, (float)maxEndSeconds,
-                    division, trackCount, tempoChanges);
+                    division, trackCount, tempoChanges, danglingCount);
             }
             catch (EndOfStreamException)
             {

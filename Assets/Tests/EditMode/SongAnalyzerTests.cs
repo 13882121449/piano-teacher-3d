@@ -249,5 +249,36 @@ namespace PianoTeacher3D.Tests.EditMode
 
             Assert.Greater(a.Suggestions.Count, 0, "任何非空曲目都应至少有一条建议");
         }
+
+        // ==================== 回归：和弦不应掩盖最快间隔（缺陷 B2） ====================
+
+        [Test]
+        public void Analyze_ChordPlusFastNotes_FastestGapReflectsRealFastPart()
+        {
+            var notes = new List<MidiNoteEvent>
+            {
+                Note(60, 0f), Note(64, 0f), Note(67, 0f), // 三音和弦：相邻 gap = 0（同一起点）
+                Note(72, 0.06f), Note(74, 0.12f)          // 真实快速连接：间隔 60ms
+            };
+
+            var a = SongAnalyzer.Analyze(notes);
+
+            Assert.AreEqual(1, a.ChordCount);
+            Assert.AreEqual(0.06f, a.FastestNoteGap, 1e-3f,
+                "和弦的 0 间隔不应参与统计，否则会掩盖真实快速片段");
+            Assert.IsTrue(a.Suggestions.Exists(s => s.Contains("快速音符")), "应给出快速片段建议");
+        }
+
+        [Test]
+        public void Analyze_OnlySimultaneousNotes_NoFastSuggestion()
+        {
+            var notes = new List<MidiNoteEvent> { Note(60, 0f), Note(64, 0f), Note(67, 0f) };
+
+            var a = SongAnalyzer.Analyze(notes);
+
+            Assert.AreEqual(0f, a.FastestNoteGap, "全为同起始时刻时无「不同起点」间隔可统计");
+            Assert.IsFalse(a.Suggestions.Exists(s => s.Contains("快速音符")),
+                "无真实快速片段时不应误报");
+        }
     }
 }

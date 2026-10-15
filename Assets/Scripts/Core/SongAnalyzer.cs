@@ -25,6 +25,13 @@ namespace PianoTeacher3D.Core
         /// <summary>相邻音符间隔小于该秒数时视为快速片段。</summary>
         public const float FastNoteGapSeconds = 0.12f;
 
+        /// <summary>
+        /// 判定「不同起始时刻」的最小间隔（秒）。
+        /// 用于排除同一和弦内起点完全相同（gap ≈ 0）的音符——否则和弦会把
+        /// 「最快音符间隔」掩盖为 0，导致快速片段建议失效。
+        /// </summary>
+        public const float MinDistinctStartGap = 0.001f;
+
         /// <summary>音域达到该八度数时提示手位移动。</summary>
         public const float WideOctaveRange = 3f;
 
@@ -73,7 +80,8 @@ namespace PianoTeacher3D.Core
                 if (i > 0)
                 {
                     float gap = n.StartTime - sorted[i - 1].StartTime;
-                    if (gap >= 0f && gap < fastestGap) fastestGap = gap;
+                    // 只统计不同起始时刻之间的间隔（同和弦的 gap≈0 不参与，避免掩盖真实快速片段）
+                    if (gap > MinDistinctStartGap && gap < fastestGap) fastestGap = gap;
                 }
 
                 float end = n.EndTime;

@@ -287,6 +287,45 @@ public class MidiParserTests
             Assert.GreaterOrEqual(result.Notes[i].StartTime, result.Notes[i - 1].StartTime);
     }
 
+    // ==================== 回归：未关闭 Note On 不再静默丢弃（缺陷 B5） ====================
+
+    [Test]
+    public void Parse_UnclosedNoteOn_IsCompletedNotDroppedAndCounted()
+    {
+        // 两个 Note On 均无对应 Note Off；另有一个悬空 Note Off 仅用于推进轨道末尾
+        var data = BuildMidi(new[]
+        {
+            Tempo(500000, 0),
+            NoteOn(0, 60, 100, 0),
+            NoteOn(0, 64, 90, 120),
+            NoteOff(0, 72, 240)
+        });
+
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(2, result.Notes.Count, "未关闭的音符不应被丢弃");
+        Assert.AreEqual(2, result.DanglingNoteCount, "应上报被补全的音符数");
+        Assert.Greater(result.Notes[0].Duration, 0f, "补全的音符应有正的持续时间");
+    }
+
+    [Test]
+    public void Parse_AllNotesProperlyClosed_DanglingCountIsZero()
+    {
+        var data = BuildMidi(new[]
+        {
+            Tempo(500000, 0),
+            NoteOn(0, 60, 100, 0),
+            NoteOff(0, 60, 480)
+        });
+
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(1, result.Notes.Count);
+        Assert.AreEqual(0, result.DanglingNoteCount, "正常曲目不应上报异常音符");
+    }
+
     // ==================== MIDI 字节构造 helper ====================
 
     private static byte[] BuildMidi(IEnumerable<byte[]> events, ushort division = 480)
