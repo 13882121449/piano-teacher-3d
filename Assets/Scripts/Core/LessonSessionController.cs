@@ -239,13 +239,14 @@ namespace PianoTeacher3D.Core
         public void PlayPause()
         {
             if (_timeline == null) return;
-            if (_timeline.State == PlaybackState.Playing) _timeline.Pause();
-            else _timeline.Play();
+            if (_timeline.State == PlaybackState.Playing) { _timeline.Pause(); return; }
+            if (!RequireSong("播放")) return;
+            _timeline.Play();
         }
 
         public void Play()
         {
-            if (!HasSong) { OnError?.Invoke("尚未加载曲目"); return; }
+            if (!RequireSong("播放")) return;
             _timeline?.Play();
         }
 
@@ -259,7 +260,7 @@ namespace PianoTeacher3D.Core
 
         public void Restart()
         {
-            if (!HasSong) return;
+            if (!RequireSong("重播")) return;
             _timeline?.Restart();
             _scheduler.SeekTo(0f);
             ResetPlaybackState();
@@ -346,6 +347,7 @@ namespace PianoTeacher3D.Core
         public void ToggleLoop()
         {
             if (_timeline == null) return;
+            if (!RequireSong("循环")) return;
             if (_timeline.IsLooping) _timeline.ClearLoop();
             else _timeline.SetLoop(0f, _timeline.TotalDuration);
         }
@@ -357,9 +359,22 @@ namespace PianoTeacher3D.Core
             if (_currentSong == null || _timeline == null || _scheduler == null) return;
             float current = _timeline.CurrentTime;
             var filtered = PianoNoteFilter.FilterByHand(_currentSong.Notes, _practiceHand);
+            if (filtered.Count == 0 && _practiceHand != PracticeHand.Both)
+            {
+                string handName = _practiceHand == PracticeHand.LeftOnly ? "左手" : "右手";
+                OnError?.Invoke($"{handName}在本曲目中没有音符（该手将为静默）");
+            }
             _scheduler.Load(filtered);
             ResetPlaybackState();
             _scheduler.SeekTo(current);
+        }
+
+        /// <summary>统一守卫：未加载曲目时给出用户可见提示并返回 false（避免"点了没反应"）。</summary>
+        private bool RequireSong(string action)
+        {
+            if (HasSong) return true;
+            OnError?.Invoke($"{action}失败：尚未加载曲目");
+            return false;
         }
 
         // ==================== 内部 ====================

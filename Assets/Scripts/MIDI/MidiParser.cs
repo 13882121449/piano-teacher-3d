@@ -237,14 +237,33 @@ namespace PianoTeacher3D.MIDI
             }
         }
 
-        /// <summary>解析磁盘上的 MIDI 文件。</summary>
+        /// <summary>解析磁盘上的 MIDI 文件（含 IO 异常防护，任何失败都返回 Fail 而非抛出）。</summary>
         public static MidiParseResult ParseFile(string path)
         {
             if (string.IsNullOrEmpty(path))
                 return MidiParseResult.Fail("文件路径为空");
             if (!File.Exists(path))
                 return MidiParseResult.Fail($"文件不存在：{path}");
-            byte[] data = File.ReadAllBytes(path);
+
+            byte[] data;
+            try
+            {
+                data = File.ReadAllBytes(path);
+            }
+            catch (IOException ex)
+            {
+                // 文件被占用 / 磁盘错误 / 路径过长等
+                return MidiParseResult.Fail($"文件读取失败（可能被占用或损坏）：{ex.Message}");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return MidiParseResult.Fail($"无权限读取文件：{path}");
+            }
+            catch (Exception ex)
+            {
+                return MidiParseResult.Fail($"读取文件异常：{ex.Message}");
+            }
+
             return Parse(data);
         }
 

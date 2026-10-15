@@ -171,45 +171,45 @@ namespace PianoTeacher3D.UI
         {
             if (_playBtn == null) return;
             bool playing = state == Core.PlaybackState.Playing;
-            _playBtn.GetComponentInChildren<Text>().text = playing ? "暂停" : "播放";
+            UITheme.SetButtonLabel(_playBtn, playing ? "暂停" : "播放");
             UITheme.SetButtonActive(_playBtn, playing);
         }
 
         private void RefreshSpeedLabel(float speed)
         {
             if (_speedBtn == null) return;
-            _speedBtn.GetComponentInChildren<Text>().text = $"速度 {speed:0.0}x";
+            UITheme.SetButtonLabel(_speedBtn, $"速度 {speed:0.0}x");
             UITheme.SetButtonActive(_speedBtn, Mathf.Abs(speed - 1f) > 0.01f);
         }
 
         private void RefreshCameraLabel(CameraControl.CameraMode mode)
         {
             if (_cameraBtn == null) return;
-            _cameraBtn.GetComponentInChildren<Text>().text = mode switch
+            UITheme.SetButtonLabel(_cameraBtn, mode switch
             {
                 CameraControl.CameraMode.Closeup => "视角：特写",
                 CameraControl.CameraMode.Full => "视角：全景",
                 _ => "视角：自由"
-            };
+            });
             UITheme.SetButtonActive(_cameraBtn, mode != CameraControl.CameraMode.Full);
         }
 
         private void RefreshLoopState(bool looping)
         {
             if (_loopBtn == null) return;
-            _loopBtn.GetComponentInChildren<Text>().text = looping ? "循环 ✓" : "循环";
+            UITheme.SetButtonLabel(_loopBtn, looping ? "循环 ✓" : "循环");
             UITheme.SetButtonActive(_loopBtn, looping);
         }
 
         private void RefreshHandLabel(Core.PracticeHand hand)
         {
             if (_handBtn == null) return;
-            _handBtn.GetComponentInChildren<Text>().text = hand switch
+            UITheme.SetButtonLabel(_handBtn, hand switch
             {
                 Core.PracticeHand.LeftOnly => "左手练习",
                 Core.PracticeHand.RightOnly => "右手练习",
                 _ => "双手练习"
-            };
+            });
             UITheme.SetButtonActive(_handBtn, hand != Core.PracticeHand.Both);
         }
 

@@ -253,6 +253,19 @@ namespace PianoTeacher3D.UI
                 text.color = active ? TextOnAccent : TextPrimary;
         }
 
+        /// <summary>安全获取按钮内文本（UI 结构异常时返回 null，避免 NRE）。</summary>
+        public static Text GetLabel(Button btn)
+        {
+            return btn != null ? btn.GetComponentInChildren<Text>() : null;
+        }
+
+        /// <summary>安全设置按钮文本（按钮或文本缺失时静默跳过）。</summary>
+        public static void SetButtonLabel(Button btn, string content)
+        {
+            var label = GetLabel(btn);
+            if (label != null) label.text = content;
+        }
+
         /// <summary>创建进度条（圆角轨道 + 强调色填充 + 圆形手柄）。</summary>
         public static Slider CreateSlider(Transform parent, string name, Vector2 pos, Vector2 size)
         {
