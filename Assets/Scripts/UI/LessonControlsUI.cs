@@ -18,6 +18,8 @@ namespace PianoTeacher3D.UI
         private Text _playLabel;
         private Text _speedLabel;
         private Text _cameraLabel;
+        private Text _loopLabel;
+        private Text _handLabel;
         private bool _suppressSlider;
 
         private static Font _cachedFont;
@@ -30,10 +32,13 @@ namespace PianoTeacher3D.UI
             _session.OnProgressChanged += OnProgressChanged;
             _session.OnSongLoaded += OnSongLoaded;
             _session.OnCameraModeChanged += OnCameraModeChanged;
+            _session.OnPracticeHandChanged += OnPracticeHandChanged;
             BuildUI();
             RefreshPlayLabel(_session.PlaybackState);
             RefreshSpeedLabel(_session.PlaybackSpeed);
             RefreshCameraLabel(_session.CameraMode);
+            RefreshLoopLabel(_session.IsLooping);
+            RefreshHandLabel(_session.PracticeHand);
         }
 
         private void OnDestroy()
@@ -44,6 +49,7 @@ namespace PianoTeacher3D.UI
             _session.OnProgressChanged -= OnProgressChanged;
             _session.OnSongLoaded -= OnSongLoaded;
             _session.OnCameraModeChanged -= OnCameraModeChanged;
+            _session.OnPracticeHandChanged -= OnPracticeHandChanged;
         }
 
         // ==================== 事件回调 ====================
@@ -78,6 +84,8 @@ namespace PianoTeacher3D.UI
 
         private void OnCameraModeChanged(CameraControl.CameraMode mode) => RefreshCameraLabel(mode);
 
+        private void OnPracticeHandChanged(Core.PracticeHand hand) => RefreshHandLabel(hand);
+
         // ==================== UI 构建 ====================
 
         private void BuildUI()
@@ -97,32 +105,41 @@ namespace PianoTeacher3D.UI
             _statusText = CreateText(canvasGo.transform, "曲目：加载中…", new Vector2(0f, 330f), new Vector2(1200f, 40f), 22);
 
             // 底部控制栏
-            var bar = CreatePanel(canvasGo.transform, new Vector2(0f, -320f), new Vector2(1240f, 90f));
+            var bar = CreatePanel(canvasGo.transform, new Vector2(0f, -300f), new Vector2(1240f, 130f));
 
             // 进度条 + 时间
-            _progressSlider = CreateSlider(bar.transform, new Vector2(0f, 24f), new Vector2(1000f, 20f));
+            _progressSlider = CreateSlider(bar.transform, new Vector2(0f, 40f), new Vector2(1000f, 20f));
             _progressSlider.onValueChanged.AddListener(v =>
             {
                 if (!_suppressSlider) _session?.SeekNormalized(v);
             });
-            _timeText = CreateText(bar.transform, "00:00 / 00:00", new Vector2(0f, -12f), new Vector2(300f, 24f), 16);
+            _timeText = CreateText(bar.transform, "00:00 / 00:00", new Vector2(0f, 15f), new Vector2(300f, 24f), 16);
 
-            // 按钮行
-            float btnY = -40f;
+            // 按钮（两行：第一行播放/练习控制，第二行视图切换）
             float btnW = 150f;
-            var playBtn = CreateButton(bar.transform, "播放", new Vector2(-500f, btnY), new Vector2(btnW, 44f), () => _session?.PlayPause());
+            var playBtn = CreateButton(bar.transform, "播放", new Vector2(-320f, -20f), new Vector2(btnW, 44f), () => _session?.PlayPause());
             _playLabel = playBtn.GetComponentInChildren<Text>();
-            CreateButton(bar.transform, "停止", new Vector2(-340f, btnY), new Vector2(btnW, 44f), () => _session?.Stop());
-            CreateButton(bar.transform, "重新播放", new Vector2(-180f, btnY), new Vector2(btnW, 44f), () => _session?.Restart());
+            CreateButton(bar.transform, "停止", new Vector2(-160f, -20f), new Vector2(btnW, 44f), () => _session?.Stop());
+            CreateButton(bar.transform, "重新播放", new Vector2(0f, -20f), new Vector2(btnW, 44f), () => _session?.Restart());
 
-            var speedBtn = CreateButton(bar.transform, "速度", new Vector2(-20f, btnY), new Vector2(btnW, 44f), () => _session?.CycleSpeed());
+            var loopBtn = CreateButton(bar.transform, "循环", new Vector2(160f, -20f), new Vector2(btnW, 44f), () =>
+            {
+                _session?.ToggleLoop();
+                RefreshLoopLabel(_session != null && _session.IsLooping);
+            });
+            _loopLabel = loopBtn.GetComponentInChildren<Text>();
+
+            var handBtn = CreateButton(bar.transform, "双手练习", new Vector2(320f, -20f), new Vector2(btnW, 44f), () => _session?.CyclePracticeHand());
+            _handLabel = handBtn.GetComponentInChildren<Text>();
+
+            var speedBtn = CreateButton(bar.transform, "速度", new Vector2(-240f, -75f), new Vector2(btnW, 44f), () => _session?.CycleSpeed());
             _speedLabel = speedBtn.GetComponentInChildren<Text>();
 
-            var camBtn = CreateButton(bar.transform, "视角", new Vector2(140f, btnY), new Vector2(btnW, 44f), () => _session?.CycleCameraMode());
+            var camBtn = CreateButton(bar.transform, "视角", new Vector2(-80f, -75f), new Vector2(btnW, 44f), () => _session?.CycleCameraMode());
             _cameraLabel = camBtn.GetComponentInChildren<Text>();
 
-            CreateButton(bar.transform, "重置视角 (R)", new Vector2(300f, btnY), new Vector2(180f, 44f), () => _session?.ResetCamera());
-            CreateButton(bar.transform, "切换角色", new Vector2(490f, btnY), new Vector2(btnW, 44f), () => _session?.CycleAvatar());
+            CreateButton(bar.transform, "重置视角 (R)", new Vector2(80f, -75f), new Vector2(btnW, 44f), () => _session?.ResetCamera());
+            CreateButton(bar.transform, "切换角色", new Vector2(240f, -75f), new Vector2(btnW, 44f), () => _session?.CycleAvatar());
         }
 
         private void RefreshPlayLabel(Core.PlaybackState state)
@@ -143,6 +160,21 @@ namespace PianoTeacher3D.UI
                 CameraControl.CameraMode.Closeup => "手部特写",
                 CameraControl.CameraMode.Full => "全景",
                 _ => "自由观察"
+            };
+        }
+
+        private void RefreshLoopLabel(bool looping)
+        {
+            if (_loopLabel != null) _loopLabel.text = looping ? "循环：开" : "循环：关";
+        }
+
+        private void RefreshHandLabel(Core.PracticeHand hand)
+        {
+            if (_handLabel != null) _handLabel.text = hand switch
+            {
+                Core.PracticeHand.LeftOnly => "左手练习",
+                Core.PracticeHand.RightOnly => "右手练习",
+                _ => "双手练习"
             };
         }
 

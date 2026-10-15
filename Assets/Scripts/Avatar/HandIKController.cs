@@ -10,8 +10,6 @@ namespace PianoTeacher3D.Avatar
     /// </summary>
     public class HandIKController : MonoBehaviour
     {
-        public const int SplitPitch = 60; // C4，左右手分界
-
         [Header("手部目标几何")]
         public float HandHeight = 0.5f;   // 手在键面上方高度
         public float HandDepth = 2.5f;    // 相对键后端的深度偏移（白键中段）
@@ -65,7 +63,7 @@ namespace PianoTeacher3D.Avatar
             int? best = null;
             foreach (var pitch in _pressed)
             {
-                bool isLeft = pitch < SplitPitch;
+                bool isLeft = pitch < MIDI.PianoNoteFilter.SplitPitch;
                 if (isLeft != leftHand) continue;
                 if (!best.HasValue) { best = pitch; continue; }
                 if (leftHand && pitch < best.Value) best = pitch;    // 左手取最低音

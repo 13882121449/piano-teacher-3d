@@ -45,7 +45,7 @@ namespace PianoTeacher3D.Avatar
             var pitches = new List<int>();
             foreach (var p in _pressed)
             {
-                bool isLeft = p < HandIKController.SplitPitch;
+                bool isLeft = p < MIDI.PianoNoteFilter.SplitPitch;
                 if (isLeft == leftHand) pitches.Add(p);
             }
             pitches.Sort();

@@ -26,12 +26,16 @@ namespace PianoTeacher3D.Core
         private CameraModeController _camera;
 
         private MidiParseResult _currentSong;
+        private PracticeHand _practiceHand = PracticeHand.Both;
+        private float _lastTime; // 用于检测 Loop 跳转导致的时间回退
 
         public bool HasSong => _currentSong != null && _currentSong.Success;
         public string CurrentSongName { get; private set; } = "";
         public PlaybackState PlaybackState => _timeline != null ? _timeline.State : PlaybackState.Stopped;
         public float PlaybackSpeed => _timeline != null ? _timeline.PlaybackSpeed : 1f;
         public CameraMode CameraMode => _camera != null ? _camera.Mode : CameraMode.Full;
+        public PracticeHand PracticeHand => _practiceHand;
+        public bool IsLooping => _timeline != null && _timeline.IsLooping;
 
         // 供 UI 订阅
         public event System.Action<string> OnError;
@@ -40,6 +44,7 @@ namespace PianoTeacher3D.Core
         public event System.Action<float, float> OnProgressChanged; // current, total
         public event System.Action<int> OnAvatarChanged;
         public event System.Action<CameraMode> OnCameraModeChanged;
+        public event System.Action<PracticeHand> OnPracticeHandChanged;
 
         private void Awake()
         {
@@ -54,8 +59,20 @@ namespace PianoTeacher3D.Core
         private void Update()
         {
             if (_timeline == null || _scheduler == null) return;
-            _scheduler.Tick(_timeline.CurrentTime);
-            OnProgressChanged?.Invoke(_timeline.CurrentTime, _timeline.TotalDuration);
+
+            float current = _timeline.CurrentTime;
+            if (current < _lastTime - 0.001f)
+            {
+                // Loop 跳转导致时间回退：清空后重建 seek 点处的按键/手部状态
+                ResetPlaybackState();
+                _scheduler.SeekTo(current);
+            }
+            else
+            {
+                _scheduler.Tick(current);
+            }
+            _lastTime = current;
+            OnProgressChanged?.Invoke(current, _timeline.TotalDuration);
         }
 
         // ==================== 场景装配 ====================
@@ -178,6 +195,9 @@ namespace PianoTeacher3D.Core
             _currentSong = result;
             CurrentSongName = Path.GetFileNameWithoutExtension(path);
             _timeline.SetDuration(result.TotalDurationSeconds);
+            _timeline.ClearLoop();
+            _practiceHand = PracticeHand.Both;
+            _lastTime = 0f;
             _scheduler.Load(result.Notes);
             ResetPlayback();
             OnSongLoaded?.Invoke();
@@ -273,6 +293,42 @@ namespace PianoTeacher3D.Core
             _avatar.SwitchAvatar(index);
             _fingerPose.Initialize(_avatar.LeftHand, _avatar.RightHand);
             OnAvatarChanged?.Invoke(_avatar.CurrentIndex);
+        }
+
+        // ==================== 练习模式 / 循环（方案 2.2） ====================
+
+        public void CyclePracticeHand()
+        {
+            SetPracticeHand((PracticeHand)(((int)_practiceHand + 1) % 3));
+        }
+
+        /// <summary>切换练习模式（双手 / 仅左手 / 仅右手），保持播放进度连续。</summary>
+        public void SetPracticeHand(PracticeHand hand)
+        {
+            if (_practiceHand == hand) return;
+            _practiceHand = hand;
+            ReloadFilteredNotes();
+            OnPracticeHandChanged?.Invoke(hand);
+        }
+
+        /// <summary>整曲循环开关（A-B 片段循环可用 SetLoop 精确设置）。</summary>
+        public void ToggleLoop()
+        {
+            if (_timeline == null) return;
+            if (_timeline.IsLooping) _timeline.ClearLoop();
+            else _timeline.SetLoop(0f, _timeline.TotalDuration);
+        }
+
+        public void SetLoop(float start, float end) => _timeline?.SetLoop(start, end);
+
+        private void ReloadFilteredNotes()
+        {
+            if (_currentSong == null || _timeline == null || _scheduler == null) return;
+            float current = _timeline.CurrentTime;
+            var filtered = PianoNoteFilter.FilterByHand(_currentSong.Notes, _practiceHand);
+            _scheduler.Load(filtered);
+            ResetPlaybackState();
+            _scheduler.SeekTo(current);
         }
 
         // ==================== 内部 ====================

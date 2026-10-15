@@ -27,6 +27,12 @@ namespace PianoTeacher3D.Core
 
         public bool IsLooping { get; set; }
 
+        /// <summary>A-B 循环起点（秒）。IsLooping 且 LoopEnd &gt; LoopStart 时生效。</summary>
+        public float LoopStart { get; private set; }
+
+        /// <summary>A-B 循环终点（秒）。</summary>
+        public float LoopEnd { get; private set; }
+
         public event System.Action<PlaybackState> OnStateChanged;
         public event System.Action<float> OnTimeChanged;
 
@@ -40,13 +46,17 @@ namespace PianoTeacher3D.Core
             {
                 if (IsLooping)
                 {
-                    CurrentTime = 0f;
+                    CurrentTime = LoopStart;
                 }
                 else
                 {
                     CurrentTime = TotalDuration;
                     ChangeState(PlaybackState.Paused); // 播完停在结尾，不归零
                 }
+            }
+            else if (IsLooping && LoopEnd > LoopStart && CurrentTime >= LoopEnd)
+            {
+                CurrentTime = LoopStart; // A-B 循环跳回
             }
 
             OnTimeChanged?.Invoke(CurrentTime);
@@ -57,12 +67,29 @@ namespace PianoTeacher3D.Core
             TotalDuration = Mathf.Max(0f, seconds);
         }
 
+        /// <summary>设置 A-B 循环区间；区间无效（end &lt;= start）时自动关闭循环。</summary>
+        public void SetLoop(float start, float end)
+        {
+            float max = Mathf.Max(0f, TotalDuration);
+            LoopStart = Mathf.Clamp(start, 0f, max);
+            LoopEnd = Mathf.Clamp(end, LoopStart, max);
+            IsLooping = LoopEnd > LoopStart;
+        }
+
+        /// <summary>关闭循环并复位区间。</summary>
+        public void ClearLoop()
+        {
+            LoopStart = 0f;
+            LoopEnd = 0f;
+            IsLooping = false;
+        }
+
         public void Play()
         {
             if (State == PlaybackState.Playing) return;
             if (TotalDuration > 0f && CurrentTime >= TotalDuration)
             {
-                CurrentTime = 0f; // 播完后再次播放 = 重新开始
+                CurrentTime = IsLooping ? LoopStart : 0f; // 播完后再次播放 = 从循环起点重新开始
             }
             ChangeState(PlaybackState.Playing);
         }

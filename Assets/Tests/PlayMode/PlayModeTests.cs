@@ -82,4 +82,46 @@ public class LessonTimelineTests
         Assert.AreEqual(PlaybackState.Paused, _timeline.State);
         Assert.AreEqual(0.3f, _timeline.CurrentTime, 0.01f);
     }
+
+    [UnityTest]
+    public IEnumerator Loop_JumpBackToLoopStart()
+    {
+        _timeline.SetDuration(10f);
+        _timeline.SetLoop(2f, 3f);
+        _timeline.Seek(2.9f);
+        _timeline.Play();
+        yield return new WaitForSeconds(0.3f); // 越过 3.0 → 跳回 2.0
+        Assert.AreEqual(PlaybackState.Playing, _timeline.State);
+        Assert.Less(_timeline.CurrentTime, 3.0f, "应跳回循环起点，不应越过 loopEnd");
+        Assert.GreaterOrEqual(_timeline.CurrentTime, 2.0f);
+    }
+
+    [Test]
+    public void SetLoop_InvalidRange_DisablesLooping()
+    {
+        _timeline.SetDuration(10f);
+        _timeline.SetLoop(5f, 3f); // end < start → 无效区间
+        Assert.IsFalse(_timeline.IsLooping);
+    }
+
+    [Test]
+    public void SetLoop_ClampsToDuration()
+    {
+        _timeline.SetDuration(10f);
+        _timeline.SetLoop(-1f, 100f); // clamp 到 [0, 10]
+        Assert.AreEqual(0f, _timeline.LoopStart);
+        Assert.AreEqual(10f, _timeline.LoopEnd);
+        Assert.IsTrue(_timeline.IsLooping);
+    }
+
+    [Test]
+    public void ClearLoop_ResetsAndDisables()
+    {
+        _timeline.SetDuration(10f);
+        _timeline.SetLoop(2f, 5f);
+        _timeline.ClearLoop();
+        Assert.IsFalse(_timeline.IsLooping);
+        Assert.AreEqual(0f, _timeline.LoopStart);
+        Assert.AreEqual(0f, _timeline.LoopEnd);
+    }
 }
