@@ -35,3 +35,6 @@ crashlytics-build.properties
 # *.mov
 # *.wav
 # *.mp3
+
+# 一键验证脚本的中间产物
+_verify_out/

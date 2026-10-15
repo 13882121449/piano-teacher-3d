@@ -77,6 +77,29 @@ namespace PianoTeacher3D.Avatar
         public IHandRig LeftHand => _rigs[_currentIndex].LeftHand;
         public IHandRig RightHand => _rigs[_currentIndex].RightHand;
 
+        /// <summary>当前角色的标准 Humanoid 骨架（方案 4.1 / 3.2）。未构建时为 null。</summary>
+        public AvatarRigBuilder.Skeleton CurrentSkeleton =>
+            (_rigs != null && _currentIndex >= 0 && _currentIndex < _rigs.Count) ? _rigs[_currentIndex].Skeleton : null;
+
+        /// <summary>当前角色的骨架是否为 Unity 认可的合法 Humanoid。</summary>
+        public bool HasHumanoidRig => CurrentSkeleton != null && CurrentSkeleton.IsHumanoid;
+
+        /// <summary>取指定角色的骨架（测试与调试用）。索引越界返回 null。</summary>
+        public AvatarRigBuilder.Skeleton GetSkeleton(int index) =>
+            (_rigs != null && index >= 0 && index < _rigs.Count) ? _rigs[index].Skeleton : null;
+
+        /// <summary>在骨架根上绑定 Animator（必须与 Avatar 的根为同一 GameObject）。</summary>
+        private static Animator AttachHumanoidAnimator(AvatarRigBuilder.Skeleton skeleton)
+        {
+            if (skeleton == null || skeleton.Root == null || !skeleton.IsHumanoid) return null;
+
+            var animator = skeleton.Root.gameObject.AddComponent<Animator>();
+            animator.avatar = skeleton.Avatar;
+            animator.applyRootMotion = false;
+            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            return animator;
+        }
+
         /// <summary>预生成全部角色，默认显示第一个。</summary>
         public void BuildAvatars()
         {
@@ -115,6 +138,14 @@ namespace PianoTeacher3D.Avatar
             public Transform RightArm;
             public IHandRig LeftHand;
             public IHandRig RightHand;
+
+            /// <summary>标准 Humanoid 骨架（方案 4.1 / 3.2）。</summary>
+            public AvatarRigBuilder.Skeleton Skeleton;
+
+            /// <summary>绑定 Humanoid Avatar 的 Animator（骨架有效时非 null）。</summary>
+            public Animator Animator;
+
+            public bool HasHumanoidRig => Skeleton != null && Skeleton.IsHumanoid;
         }
 
         private AvatarRig BuildAvatarRig(AvatarPreset p)
@@ -125,6 +156,12 @@ namespace PianoTeacher3D.Avatar
 
             float s = p.Height / BaseHeight;          // 体型缩放（相对基准人）
             float headR = 0.105f * p.HeadScale * s;   // 头半径（基准头身比约 1:6.9）
+
+            // ---- 标准 Humanoid 骨架 + Avatar（方案 4.1「支持 Humanoid 骨骼的模型」）----
+            // 骨架为纯坐标节点（无 Renderer，不参与渲染），视觉仍由下方程序化网格提供；
+            // 未来替换为真实 GLB 模型时，只需把外部网格挂到同一套骨骼上。
+            rig.Skeleton = AvatarRigBuilder.Build(root.transform, s);
+            rig.Animator = AttachHumanoidAnimator(rig.Skeleton);
 
             var skinMat = CreateMaterial(p.SkinColor);
             var clothMat = CreateMaterial(p.ClothColor);
