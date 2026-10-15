@@ -207,6 +207,86 @@ public class MidiParserTests
         Assert.AreEqual(120f, result.TempoChanges[0].Bpm, 0.01f);
     }
 
+    // ==================== 方案 8.1：快速 / 长 / 弱 / 强音事件 ====================
+
+    [Test]
+    public void Parse_VeryShortNote_PreservesSmallDuration()
+    {
+        // 5ms 的极短音符（480 PPQ @120BPM → 1 tick ≈ 1.04ms；5 tick ≈ 5.2ms）
+        var data = BuildMidi(new[]
+        {
+            Tempo(500000, 0),
+            NoteOn(0, 60, 100, 0),
+            NoteOff(0, 60, 5)
+        });
+
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(1, result.Notes.Count);
+        Assert.Greater(result.Notes[0].Duration, 0f, "极短音符仍应有正的持续时间");
+        Assert.Less(result.Notes[0].Duration, 0.02f);
+    }
+
+    [Test]
+    public void Parse_LongNote_PreservesLargeDuration()
+    {
+        // 10 拍长音（480 PPQ × 10 = 4800 tick @120BPM ≈ 5 秒）
+        var data = BuildMidi(new[]
+        {
+            Tempo(500000, 0),
+            NoteOn(0, 60, 100, 0),
+            NoteOff(0, 60, 4800)
+        });
+
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(5f, result.Notes[0].Duration, 0.02f);
+        Assert.AreEqual(5f, result.TotalDurationSeconds, 0.02f);
+    }
+
+    [Test]
+    public void Parse_ExtremeVelocity_PreservedExactly()
+    {
+        // 最弱（1）与最强（127）都应原样保留
+        var data = BuildMidi(new[]
+        {
+            Tempo(500000, 0),
+            NoteOn(0, 60, 1, 0),
+            NoteOff(0, 60, 240),
+            NoteOn(0, 64, 127, 0),
+            NoteOff(0, 64, 240)
+        });
+
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(2, result.Notes.Count);
+        Assert.AreEqual(1, result.Notes[0].Velocity, "最弱力度应保留为 1");
+        Assert.AreEqual(127, result.Notes[1].Velocity, "最强力度应保留为 127");
+    }
+
+    [Test]
+    public void Parse_RapidSequence_AllNotesRetained()
+    {
+        // 连续 16 个 1/16 音符（每个 120 tick ≈ 0.125s），全部应保留且时间递增
+        var events = new List<byte[]> { Tempo(500000, 0) };
+        for (int i = 0; i < 16; i++)
+        {
+            events.Add(NoteOn(0, 60 + i, 90, 0));
+            events.Add(NoteOff(0, 60 + i, 120));
+        }
+
+        var data = BuildMidi(events);
+        var result = MidiParser.Parse(data);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(16, result.Notes.Count, "快速连续音符不应丢失");
+        for (int i = 1; i < result.Notes.Count; i++)
+            Assert.GreaterOrEqual(result.Notes[i].StartTime, result.Notes[i - 1].StartTime);
+    }
+
     // ==================== MIDI 字节构造 helper ====================
 
     private static byte[] BuildMidi(IEnumerable<byte[]> events, ushort division = 480)

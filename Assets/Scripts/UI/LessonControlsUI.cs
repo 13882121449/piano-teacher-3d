@@ -27,9 +27,11 @@ namespace PianoTeacher3D.UI
         private GameObject _analysisPanel;
         private Text _analysisText;
         private Text _suggestionText;
+        private Text _motionText;
         private bool _suppressSlider;
         private int _flashBeat = -1;
         private float _beatFlashUntil;
+        private float _lastMotionRefresh;
 
         public void Initialize(Core.LessonSessionController session)
         {
@@ -89,6 +91,14 @@ namespace PianoTeacher3D.UI
             {
                 _flashBeat = -1;
                 RefreshBeatIndicator();
+            }
+
+            // 分析面板可见时，定期刷新动作质量（方案阶段五验收量化）
+            if (_analysisPanel != null && _analysisPanel.activeSelf &&
+                Time.unscaledTime - _lastMotionRefresh > 0.25f)
+            {
+                _lastMotionRefresh = Time.unscaledTime;
+                if (_motionText != null) _motionText.text = BuildMotionText();
             }
         }
 
@@ -236,16 +246,19 @@ namespace PianoTeacher3D.UI
         private void BuildAnalysisPanel(Transform canvas)
         {
             _analysisPanel = UITheme.CreatePanel(canvas, "AnalysisPanel",
-                new Vector2(370f, 30f), new Vector2(480f, 440f), UITheme.PanelBg).gameObject;
+                new Vector2(370f, 20f), new Vector2(480f, 500f), UITheme.PanelBg).gameObject;
 
-            UITheme.CreateText(_analysisPanel.transform, "曲目分析", new Vector2(0f, 186f), new Vector2(440f, 34f),
+            UITheme.CreateText(_analysisPanel.transform, "曲目分析", new Vector2(0f, 214f), new Vector2(440f, 34f),
                 UITheme.FontTitle, UITheme.Accent);
 
-            _analysisText = UITheme.CreateText(_analysisPanel.transform, "", new Vector2(0f, 50f),
-                new Vector2(440f, 220f), UITheme.FontSmall, UITheme.TextPrimary, TextAnchor.UpperLeft);
+            _analysisText = UITheme.CreateText(_analysisPanel.transform, "", new Vector2(0f, 96f),
+                new Vector2(440f, 200f), UITheme.FontSmall, UITheme.TextPrimary, TextAnchor.UpperLeft);
 
-            _suggestionText = UITheme.CreateText(_analysisPanel.transform, "", new Vector2(0f, -128f),
-                new Vector2(440f, 140f), UITheme.FontSmall, UITheme.TextSecondary, TextAnchor.UpperLeft);
+            _suggestionText = UITheme.CreateText(_analysisPanel.transform, "", new Vector2(0f, -56f),
+                new Vector2(440f, 160f), UITheme.FontSmall, UITheme.TextSecondary, TextAnchor.UpperLeft);
+
+            _motionText = UITheme.CreateText(_analysisPanel.transform, "", new Vector2(0f, -200f),
+                new Vector2(440f, 70f), UITheme.FontSmall, UITheme.Accent, TextAnchor.UpperLeft);
 
             _analysisPanel.SetActive(false);
         }
@@ -376,6 +389,21 @@ namespace PianoTeacher3D.UI
             for (int i = 0; i < analysis.Suggestions.Count; i++)
                 sb.Append("· ").Append(analysis.Suggestions[i]).Append('\n');
             _suggestionText.text = sb.ToString();
+
+            if (_motionText != null) _motionText.text = BuildMotionText();
+        }
+
+        /// <summary>动作质量文本（方案阶段五验收：动作连续性 / 目标琴键命中率 / 左右手协调）。</summary>
+        private string BuildMotionText()
+        {
+            if (_session == null) return "";
+            var report = _session.HandMotion;
+            if (report == null) return "";
+            if (report.Samples == 0) return "动作质量：待采样（播放后统计）";
+
+            string pose = _session.PoseIssueCount == 0 ? "穿模 0" : $"穿模告警 {_session.PoseIssueCount}";
+            return $"动作质量：命中率 {report.HitRate * 100f:0}% · 平滑度 {report.Smoothness:0.00} · {pose}\n" +
+                   $"最大帧位移 {report.MaxStepDistance * 1000f:0.#} mm · 双手协调 {report.CoordinationRatio * 100f:0}% · 采样 {report.Samples}";
         }
 
         private static int Percent(float ratio) => (int)(ratio * 100f + 0.5f);

@@ -56,6 +56,15 @@ namespace PianoTeacher3D.Core
         /// <summary>当前曲目分析结果（未加载曲目时为空分析，非 null）。</summary>
         public SongAnalysis Analysis => _analysis;
 
+        /// <summary>
+        /// 手部动作质量报告（方案阶段五验收量化：动作连续性 / 目标琴键命中率 / 左右手协调）。
+        /// 未装配手部 IK 时返回 null。
+        /// </summary>
+        public HandMotionReport HandMotion => _handIK != null ? _handIK.BuildMotionReport() : null;
+
+        /// <summary>累计检测到并已钳制的异常姿态（穿模风险）次数；0 表示全程无穿模。</summary>
+        public int PoseIssueCount => _handIK != null ? _handIK.PoseIssueCount : 0;
+
         /// <summary>琴键预提示提前量（秒），clamp 到 [0.05, 3]。</summary>
         public float HighlightLookAhead
         {
@@ -105,6 +114,7 @@ namespace PianoTeacher3D.Core
 
             UpdateHighlightUpcoming(current);
             _metronome?.Tick(current);
+            _handIK?.Tick(current);
 
             OnProgressChanged?.Invoke(current, _timeline.TotalDuration);
         }
@@ -312,6 +322,7 @@ namespace PianoTeacher3D.Core
             // 节拍器拍点表 + 曲目分析（方案 2.2 节拍器 / 练习反馈）
             _metronome?.Load(result.TempoChanges, result.TotalDurationSeconds);
             _analysis = SongAnalyzer.Analyze(result.Notes, result.TempoChanges, result.TotalDurationSeconds);
+            _handIK?.ResetMetrics();   // 换曲后重新开始动作质量测量
 
             ResetPlayback();
             OnSongLoaded?.Invoke();

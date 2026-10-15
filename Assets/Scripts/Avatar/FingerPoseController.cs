@@ -1,20 +1,33 @@
 using System.Collections.Generic;
 using UnityEngine;
+using PianoTeacher3D.MIDI;
 
 namespace PianoTeacher3D.Avatar
 {
     /// <summary>
-    /// 控制基础手指姿态（方案 4.2）。首版为简化姿态：
-    /// 按下键按 pitch 排序后映射到手指（指1..指5 对应低..高），按下弯曲、抬起伸直。
+    /// 控制基础手指姿态（方案 4.2）。
+    /// <para>
+    /// 阶段五改进（方案 7 阶段五「改善手指姿态」）：由原先「按音高排序取前 N 根手指」
+    /// 改为 <b>按音高比例映射手指索引</b>——跨度大时手指自然展开、跨度小时相邻收拢，
+    /// 并按音高比例给出左右张开角（和弦手型）；单音默认落在中间手指，更接近自然手型。
+    /// 冲突时顺延到最近空闲手指；按键数超过手指数时复用理想手指，不会越界。
+    /// </para>
     /// 不承诺专业指法准确性（方案 2.3）。
     /// </summary>
     public class FingerPoseController : MonoBehaviour
     {
-        public float PressAngle = 32f; // 手指按下弯曲角度（绕 X 正角 = 指尖下压向琴键）
-        public float RestAngle = 18f;  // 未按下时的自然弯曲（避免僵直的手型）
+        public float PressAngle = 32f;  // 手指按下弯曲角度（绕 X 正角 = 指尖下压向琴键）
+        public float RestAngle = 18f;   // 未按下时的自然弯曲（避免僵直的手型）
         public float SlerpSpeed = 15f;
+        public float SpreadAngle = 7f;  // 和弦手型左右张开角（绕 Y），按音高比例分配
+
+        private const int MaxFingers = 8;
 
         private readonly HashSet<int> _pressed = new();
+        private readonly List<int> _scratch = new();
+        private readonly int[] _fingerPitch = new int[MaxFingers];
+        private readonly bool[] _used = new bool[MaxFingers];
+
         private IHandRig _leftHand;
         private IHandRig _rightHand;
 
@@ -24,14 +37,22 @@ namespace PianoTeacher3D.Avatar
             _rightHand = rightHand;
         }
 
-        public void OnNoteOn(MIDI.MidiNoteEvent e)
+        public void OnNoteOn(MidiNoteEvent e)
         {
             if (Piano.PianoKeyMap.IsInRange(e.Pitch)) _pressed.Add(e.Pitch);
         }
 
-        public void OnNoteOff(MIDI.MidiNoteEvent e) => _pressed.Remove(e.Pitch);
+        public void OnNoteOff(MidiNoteEvent e) => _pressed.Remove(e.Pitch);
 
         public void ReleaseAll() => _pressed.Clear();
+
+        /// <summary>指定手指当前分配到的音高（-1 = 未按下），供测试与调试使用。</summary>
+        public int GetFingerPitch(bool leftHand, int fingerIndex)
+        {
+            var hand = leftHand ? _leftHand : _rightHand;
+            if (hand == null || fingerIndex < 0 || fingerIndex >= MaxFingers) return -1;
+            return _fingerPitch[fingerIndex];
+        }
 
         private void Update()
         {
@@ -43,23 +64,88 @@ namespace PianoTeacher3D.Avatar
         {
             if (hand == null) return;
 
-            var pitches = new List<int>();
-            foreach (var p in _pressed)
-            {
-                bool isLeft = p < MIDI.PianoNoteFilter.SplitPitch;
-                if (isLeft == leftHand) pitches.Add(p);
-            }
-            pitches.Sort();
+            int fingerCount = Mathf.Min(hand.Fingers.Count, MaxFingers);
+            if (fingerCount == 0) return;
 
-            int pressedCount = Mathf.Min(pitches.Count, hand.Fingers.Count);
-            for (int f = 0; f < hand.Fingers.Count; f++)
+            CollectHandPitches(leftHand);
+            AssignFingers(_scratch, fingerCount);
+
+            int minPitch = _scratch.Count > 0 ? _scratch[0] : 0;
+            int maxPitch = _scratch.Count > 0 ? _scratch[_scratch.Count - 1] : 0;
+            int span = maxPitch - minPitch;
+
+            for (int f = 0; f < hand.Fingers.Count && f < MaxFingers; f++)
             {
                 var finger = hand.Fingers[f];
                 if (finger == null) continue;
-                float targetAngle = f < pressedCount ? PressAngle : RestAngle;
-                var target = Quaternion.Euler(targetAngle, 0f, 0f);
+
+                int pitch = _fingerPitch[f];
+                float pressAngle = RestAngle;
+                float spreadAngle = 0f;
+
+                if (pitch >= 0)
+                {
+                    pressAngle = PressAngle;
+                    // 和弦手型：按该音高在整个音高区间中的比例决定张开方向与幅度
+                    float ratio = span > 0 ? (pitch - minPitch) / (float)span : 0.5f;
+                    spreadAngle = (ratio - 0.5f) * 2f * SpreadAngle;
+                }
+
+                var target = Quaternion.Euler(pressAngle, spreadAngle, 0f);
                 finger.localRotation = Quaternion.Slerp(finger.localRotation, target, Time.deltaTime * SlerpSpeed);
             }
+        }
+
+        private void CollectHandPitches(bool leftHand)
+        {
+            _scratch.Clear();
+            foreach (var pitch in _pressed)
+            {
+                if (PianoNoteFilter.IsLeftHand(pitch) == leftHand) _scratch.Add(pitch);
+            }
+            _scratch.Sort();
+        }
+
+        /// <summary>
+        /// 按音高比例把按键分配到手指：跨度大 → 手指展开；单音 → 中间手指。
+        /// 同索引冲突时顺延到最近的空闲手指；手指用尽后复用理想索引（不越界）。
+        /// </summary>
+        private void AssignFingers(List<int> pitches, int fingerCount)
+        {
+            for (int i = 0; i < MaxFingers; i++)
+            {
+                _fingerPitch[i] = -1;
+                _used[i] = false;
+            }
+            if (pitches.Count == 0) return;
+
+            int minPitch = pitches[0];
+            int span = pitches[pitches.Count - 1] - minPitch;
+
+            for (int i = 0; i < pitches.Count; i++)
+            {
+                float ratio = span > 0 ? (pitches[i] - minPitch) / (float)span : 0.5f;
+                int ideal = Mathf.RoundToInt(ratio * (fingerCount - 1));
+                int index = FindNearestFree(fingerCount, ideal);
+
+                _used[index] = true;
+                _fingerPitch[index] = pitches[i];
+            }
+        }
+
+        private int FindNearestFree(int fingerCount, int ideal)
+        {
+            ideal = Mathf.Clamp(ideal, 0, fingerCount - 1);
+            if (!_used[ideal]) return ideal;
+
+            for (int d = 1; d < fingerCount; d++)
+            {
+                int lower = ideal - d;
+                int upper = ideal + d;
+                if (lower >= 0 && !_used[lower]) return lower;
+                if (upper < fingerCount && !_used[upper]) return upper;
+            }
+            return ideal; // 按键数 ≥ 手指数：复用理想手指
         }
     }
 }
