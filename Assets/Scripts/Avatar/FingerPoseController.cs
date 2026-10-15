@@ -10,7 +10,8 @@ namespace PianoTeacher3D.Avatar
     /// </summary>
     public class FingerPoseController : MonoBehaviour
     {
-        public float PressAngle = -35f; // 手指按下弯曲角度
+        public float PressAngle = 32f; // 手指按下弯曲角度（绕 X 正角 = 指尖下压向琴键）
+        public float RestAngle = 18f;  // 未按下时的自然弯曲（避免僵直的手型）
         public float SlerpSpeed = 15f;
 
         private readonly HashSet<int> _pressed = new();
@@ -55,7 +56,7 @@ namespace PianoTeacher3D.Avatar
             {
                 var finger = hand.Fingers[f];
                 if (finger == null) continue;
-                float targetAngle = f < pressedCount ? PressAngle : 0f;
+                float targetAngle = f < pressedCount ? PressAngle : RestAngle;
                 var target = Quaternion.Euler(targetAngle, 0f, 0f);
                 finger.localRotation = Quaternion.Slerp(finger.localRotation, target, Time.deltaTime * SlerpSpeed);
             }

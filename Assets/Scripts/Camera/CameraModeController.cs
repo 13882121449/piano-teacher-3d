@@ -18,24 +18,24 @@ namespace PianoTeacher3D.CameraControl
     {
         public CameraMode Mode { get; private set; } = CameraMode.Full;
 
-        [Header("全景预设")]
-        public Vector3 FullPosition = new Vector3(0f, 9f, -20f);
-        public Vector3 FullTarget = new Vector3(0f, 1.5f, 0f);
-        public float FullFov = 50f;
+        [Header("全景预设（演奏者侧后方，可见人物、键盘与手）")]
+        public Vector3 FullPosition = new Vector3(0.82f, 1.58f, 1.58f);
+        public Vector3 FullTarget = new Vector3(-0.10f, 0.72f, 0.05f);
+        public float FullFov = 48f;
 
-        [Header("手部特写预设")]
-        public float CloseupFov = 32f;
-        public float CloseupBack = 3.2f;  // 摄像机在手腕后上方距离
-        public float CloseupHeight = 1.6f;
+        [Header("手部特写预设（俯角约 28°，可见手背与手指）")]
+        public float CloseupFov = 34f;
+        public float CloseupBack = 0.44f;  // 摄像机在手腕后上方距离
+        public float CloseupHeight = 0.24f;
 
         [Header("自由观察")]
         public float OrbitSensitivity = 4f;
         public float ZoomSensitivity = 3f;
-        public float MinDistance = 4f;
-        public float MaxDistance = 45f;
+        public float MinDistance = 0.5f;
+        public float MaxDistance = 6f;
         public float MinPitch = 5f;
         public float MaxPitch = 85f;
-        public float MinHeight = 0.6f; // 防穿地
+        public float MinHeight = 0.15f; // 防穿地
 
         [Header("过渡")]
         public float TransitionSpeed = 6f;
@@ -117,9 +117,9 @@ namespace PianoTeacher3D.CameraControl
         private void ComputeCloseup(out Vector3 pos, out Vector3 look)
         {
             look = HandsCenter();
-            // 摄像机位于手腕中心后上方，向前下方观察，避免手指被琴身遮挡
-            var offset = new Vector3(0f, CloseupHeight, -CloseupBack);
-            pos = look + _cam.transform.right * 0f + offset;
+            // 摄像机位于手腕后上方（+Z = 演奏者侧），向前下方俯视键盘与手背，避免被琴身遮挡
+            var offset = new Vector3(0f, CloseupHeight, CloseupBack);
+            pos = look + offset;
         }
 
         private Vector3 HandsCenter()

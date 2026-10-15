@@ -10,9 +10,9 @@ namespace PianoTeacher3D.Avatar
     /// </summary>
     public class HandIKController : MonoBehaviour
     {
-        [Header("手部目标几何")]
-        public float HandHeight = 0.5f;   // 手在键面上方高度
-        public float HandDepth = 2.5f;    // 相对键后端的深度偏移（白键中段）
+        [Header("手部目标几何（真实钢琴尺度，米）")]
+        public float HandHeight = 0.768f; // 手在键面上方（键面约 0.742m，按下时指尖落到键面）
+        public float HandDepth = 0.12f;   // 相对键根（世界 z≈-0.075）的深度偏移
         public float MoveSpeed = 12f;     // 手腕移动平滑速度
 
         private AvatarManager _avatar;
@@ -78,7 +78,7 @@ namespace PianoTeacher3D.Avatar
             return new Vector3(p.x, HandHeight, p.z + HandDepth);
         }
 
-        private Vector3 DefaultHandPos(float side) => new Vector3(side * 8f, HandHeight, 1.5f);
+        private Vector3 DefaultHandPos(float side) => new Vector3(side * 0.30f, HandHeight, 0.10f);
 
         private static void StretchArm(Transform shoulder, Transform arm, Transform wrist)
         {

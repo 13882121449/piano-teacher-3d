@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -23,24 +22,21 @@ namespace PianoTeacher3D.UI
 
         private void BuildUI()
         {
-            EnsureEventSystem();
+            UITheme.EnsureEventSystem();
+            var canvas = UITheme.CreateCanvas(transform, "MainMenuCanvas");
 
-            var canvasGo = new GameObject("MainMenuCanvas");
-            canvasGo.transform.SetParent(transform, false);
-            var canvas = canvasGo.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scaler = canvasGo.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1280f, 720f);
-            canvasGo.AddComponent<GraphicRaycaster>();
+            // 标题区
+            UITheme.CreateText(canvas.transform, "钢琴 3D 教学", new Vector2(0f, 268f), new Vector2(700f, 64f),
+                UITheme.FontTitle + 22, UITheme.Accent, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UITheme.CreateText(canvas.transform, "选择曲目开始练习", new Vector2(0f, 216f), new Vector2(500f, 32f),
+                UITheme.FontButton, UITheme.TextSecondary);
 
-            CreateText(canvasGo.transform, "钢琴 3D 教学", new Vector2(0f, 280f), new Vector2(600f, 80f), 46);
-            CreateText(canvasGo.transform, "选择曲目开始", new Vector2(0f, 220f), new Vector2(400f, 36f), 22);
-
+            // 曲目列表
             var songs = ListSongs();
             if (songs.Count == 0)
             {
-                CreateText(canvasGo.transform, "StreamingAssets/Songs 下未找到 .mid 曲目", new Vector2(0f, 0f), new Vector2(700f, 36f), 20);
+                UITheme.CreateText(canvas.transform, "StreamingAssets/Songs 下未找到 .mid 曲目",
+                    new Vector2(0f, 60f), new Vector2(760f, 32f), UITheme.FontButton, UITheme.Error);
                 return;
             }
 
@@ -48,9 +44,14 @@ namespace PianoTeacher3D.UI
             {
                 string path = songs[i];
                 string name = Path.GetFileNameWithoutExtension(path);
-                var pos = new Vector2(0f, 140f - i * 70f);
-                CreateButton(canvasGo.transform, name, pos, new Vector2(460f, 52f), () => LoadLesson(path));
+                var pos = new Vector2(0f, 150f - i * 76f);
+                UITheme.CreateButton(canvas.transform, name, pos, new Vector2(480f, 56f),
+                    () => LoadLesson(path), UITheme.FontTitle - 4);
             }
+
+            // 底部操作提示
+            UITheme.CreateText(canvas.transform, "空格 播放/暂停　·　R 重置视角　·　[ 重播",
+                new Vector2(0f, -310f), new Vector2(760f, 28f), UITheme.FontSmall, UITheme.TextSecondary);
         }
 
         private static List<string> ListSongs()
@@ -67,64 +68,6 @@ namespace PianoTeacher3D.UI
         {
             SelectedSongPath = songPath;
             SceneManager.LoadScene("PianoLesson");
-        }
-
-        private static Font GetFont()
-        {
-            var f = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            if (f == null) f = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            return f;
-        }
-
-        private static void EnsureEventSystem()
-        {
-            if (Object.FindFirstObjectByType<EventSystem>() != null) return;
-            var es = new GameObject("EventSystem");
-            es.AddComponent<EventSystem>();
-            es.AddComponent<StandaloneInputModule>();
-        }
-
-        private static Text CreateText(Transform parent, string content, Vector2 anchoredPos, Vector2 size, int fontSize)
-        {
-            var go = new GameObject("Text");
-            go.transform.SetParent(parent, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchoredPosition = anchoredPos;
-            rt.sizeDelta = size;
-            var text = go.AddComponent<Text>();
-            text.font = GetFont();
-            text.text = content;
-            text.fontSize = fontSize;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
-            return text;
-        }
-
-        private static void CreateButton(Transform parent, string label, Vector2 anchoredPos, Vector2 size, UnityEngine.Events.UnityAction onClick)
-        {
-            var go = new GameObject($"Btn_{label}");
-            go.transform.SetParent(parent, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchoredPosition = anchoredPos;
-            rt.sizeDelta = size;
-
-            var img = go.AddComponent<Image>();
-            img.color = new Color(0.2f, 0.22f, 0.3f);
-            var btn = go.AddComponent<Button>();
-            btn.targetGraphic = img;
-            btn.onClick.AddListener(onClick);
-
-            var textGo = new GameObject("Text");
-            textGo.transform.SetParent(go.transform, false);
-            var textRt = textGo.AddComponent<RectTransform>();
-            textRt.anchorMin = Vector2.zero; textRt.anchorMax = Vector2.one;
-            textRt.offsetMin = Vector2.zero; textRt.offsetMax = Vector2.zero;
-            var text = textGo.AddComponent<Text>();
-            text.font = GetFont();
-            text.text = label;
-            text.fontSize = 24;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
         }
     }
 }

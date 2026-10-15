@@ -36,6 +36,7 @@ namespace PianoTeacher3D.Core
         public CameraMode CameraMode => _camera != null ? _camera.Mode : CameraMode.Full;
         public PracticeHand PracticeHand => _practiceHand;
         public bool IsLooping => _timeline != null && _timeline.IsLooping;
+        public int CurrentAvatarIndex => _avatar != null ? _avatar.CurrentIndex : 0;
 
         // 供 UI 订阅
         public event System.Action<string> OnError;
@@ -86,12 +87,26 @@ namespace PianoTeacher3D.Core
             // 2. MIDI 事件调度器
             _scheduler = gameObject.AddComponent<MidiEventScheduler>();
 
-            // 3. 钢琴（程序化 88 键，居中）
+            // 3. 钢琴（真实比例 88 键 + 立式琴体，居中于 X）
             var piano = new GameObject("Piano");
             piano.transform.SetParent(transform, false);
-            piano.transform.localPosition = new Vector3(-26f, 0f, 0f); // 52 白键宽 52，居中
             _keyMap = piano.AddComponent<PianoKeyMap>();
             _keyMap.BuildKeys();
+            piano.transform.localPosition = new Vector3(-_keyMap.TotalWidth * 0.5f, 0f, 0f);
+
+            // 3.1 地面（深色地板，界定场景空间）
+            var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            floor.name = "Floor";
+            floor.transform.SetParent(transform, false);
+            floor.transform.localPosition = new Vector3(0f, -0.03f, 0.2f);
+            floor.transform.localScale = new Vector3(6f, 0.06f, 6f);
+            Destroy(floor.GetComponent<Collider>());
+            var floorShader = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
+            if (floorShader != null)
+            {
+                floor.GetComponent<Renderer>().sharedMaterial =
+                    new Material(floorShader) { color = new Color(0.105f, 0.115f, 0.135f) };
+            }
 
             // 4. 琴键动画 + 音频
             _keyAnimator = gameObject.AddComponent<PianoKeyAnimator>();
@@ -99,10 +114,11 @@ namespace PianoTeacher3D.Core
             _audio = gameObject.AddComponent<PianoAudioSynth>();
             _audio.Initialize();
 
-            // 5. 人物（3 预设角色，坐于钢琴前 -Z 侧）
+            // 5. 人物（3 预设角色，坐于键盘前方 +Z 侧，面向 -Z 朝钢琴）
             var avatarRoot = new GameObject("Avatar");
             avatarRoot.transform.SetParent(transform, false);
-            avatarRoot.transform.localPosition = new Vector3(0f, 0f, -7f);
+            avatarRoot.transform.localPosition = new Vector3(0f, 0f, 0.42f);
+            avatarRoot.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
             _avatar = avatarRoot.AddComponent<AvatarManager>();
             _avatar.BuildAvatars();
 
@@ -112,7 +128,7 @@ namespace PianoTeacher3D.Core
             _fingerPose = gameObject.AddComponent<FingerPoseController>();
             _fingerPose.Initialize(_avatar.LeftHand, _avatar.RightHand);
 
-            // 7. 摄像机控制
+            // 7. 摄像机控制 + 环境氛围
             var cam = Camera.main;
             if (cam == null)
             {
@@ -120,10 +136,14 @@ namespace PianoTeacher3D.Core
                 cam = camGo.AddComponent<Camera>();
                 camGo.AddComponent<AudioListener>();
             }
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = PianoTeacher3D.UI.UITheme.SceneBg;
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.38f, 0.40f, 0.47f);
             _camera = gameObject.AddComponent<CameraModeController>();
             _camera.Initialize(cam, _avatar);
 
-            // 8. 灯光（确保存在并设置为主方向光）
+            // 8. 灯光（主方向光 + 键盘补光）
             var light = Object.FindFirstObjectByType<Light>();
             if (light == null)
             {
@@ -131,8 +151,19 @@ namespace PianoTeacher3D.Core
                 light = lightGo.AddComponent<Light>();
             }
             light.type = LightType.Directional;
-            light.intensity = 1f;
-            light.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+            light.intensity = 1.2f;
+            light.color = new Color(1f, 0.96f, 0.90f); // 微暖，配合暖金主题
+            light.transform.rotation = Quaternion.Euler(42f, -32f, 0f);
+
+            // 键盘上方点光：提升琴键与手部的可读性
+            var keyLightGo = new GameObject("KeyLight");
+            keyLightGo.transform.SetParent(transform, false);
+            var keyLight = keyLightGo.AddComponent<Light>();
+            keyLight.type = LightType.Point;
+            keyLight.range = 2.4f;
+            keyLight.intensity = 1.1f;
+            keyLight.color = new Color(1f, 0.97f, 0.92f);
+            keyLightGo.transform.localPosition = new Vector3(0f, 1.65f, 0.35f);
 
             // 9. UI
             var controlsUI = gameObject.AddComponent<PianoTeacher3D.UI.LessonControlsUI>();

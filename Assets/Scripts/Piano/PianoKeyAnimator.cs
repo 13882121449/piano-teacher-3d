@@ -50,7 +50,7 @@ namespace PianoTeacher3D.Piano
             foreach (var kv in _targetAngle)
             {
                 if (!_keyMap.TryGetKey(kv.Key, out var key) || key == null) continue;
-                var target = Quaternion.Euler(-kv.Value, 0f, 0f);
+                var target = Quaternion.Euler(kv.Value, 0f, 0f); // 绕 X 正角：键前端（+Z）向下按下
                 key.localRotation = Quaternion.Slerp(key.localRotation, target, Time.deltaTime * _slerpSpeed);
             }
         }

@@ -19,7 +19,7 @@ namespace PianoTeacher3D.Avatar
     public class AvatarPreset
     {
         public string Name;
-        public float Height = 1.4f;
+        public float Height = 1.45f;
         public float HeadScale = 1f;
         public Color SkinColor = new Color(0.96f, 0.85f, 0.74f);
         public Color ClothColor = new Color(0.3f, 0.5f, 0.9f);
@@ -29,31 +29,35 @@ namespace PianoTeacher3D.Avatar
 
     /// <summary>
     /// 管理人物加载、选择与切换（方案 4.2 / 3.2）。
-    /// 预生成 3 个程序化人形（写实女性/写实男性/卡通），切换仅替换外观与手部引用，
-    /// 不触碰时间轴与演奏状态（方案「人物与演奏解耦」）。
+    /// 预生成 3 个程序化人形（写实女性 / 写实男性 / 卡通），采用真实人体比例
+    /// （头身比约 1:7，含肩、躯干收腰、坐姿腿部、五官与琴凳），零外部模型资产。
+    /// 切换仅替换外观与手部引用，不触碰时间轴与演奏状态（方案「人物与演奏解耦」）。
     /// </summary>
     public class AvatarManager : MonoBehaviour
     {
         public const int AvatarCount = 3;
 
+        /// <summary>基准人体身高（其余预设按 Height/基准 等比缩放）。</summary>
+        private const float BaseHeight = 1.45f;
+
         private readonly List<AvatarPreset> _presets = new()
         {
             new AvatarPreset
             {
-                Name = "写实女性", Height = 1.35f, HeadScale = 0.95f,
-                SkinColor = new Color(0.98f, 0.88f, 0.78f), ClothColor = new Color(0.78f, 0.35f, 0.4f),
+                Name = "写实女性", Height = 1.38f, HeadScale = 0.94f,
+                SkinColor = new Color(0.97f, 0.86f, 0.78f), ClothColor = new Color(0.62f, 0.27f, 0.33f),
                 HairStyle = 0, Cartoon = false
             },
             new AvatarPreset
             {
-                Name = "写实男性", Height = 1.5f, HeadScale = 1.0f,
-                SkinColor = new Color(0.85f, 0.72f, 0.6f), ClothColor = new Color(0.25f, 0.4f, 0.7f),
+                Name = "写实男性", Height = 1.52f, HeadScale = 1.0f,
+                SkinColor = new Color(0.86f, 0.73f, 0.62f), ClothColor = new Color(0.20f, 0.29f, 0.45f),
                 HairStyle = 1, Cartoon = false
             },
             new AvatarPreset
             {
-                Name = "卡通角色", Height = 1.25f, HeadScale = 1.45f,
-                SkinColor = new Color(1f, 0.92f, 0.8f), ClothColor = new Color(0.3f, 0.8f, 0.5f),
+                Name = "卡通角色", Height = 1.26f, HeadScale = 1.42f,
+                SkinColor = new Color(1f, 0.92f, 0.82f), ClothColor = new Color(0.24f, 0.62f, 0.45f),
                 HairStyle = 2, Cartoon = true
             }
         };
@@ -100,7 +104,7 @@ namespace PianoTeacher3D.Avatar
 
         public void SwitchNext() => SwitchAvatar((_currentIndex + 1) % AvatarCount);
 
-        // ---- 程序化人形构建（零外部模型资产） ----
+        // ==================== 程序化人形构建（真实比例，零外部模型资产） ====================
 
         private sealed class AvatarRig
         {
@@ -119,102 +123,130 @@ namespace PianoTeacher3D.Avatar
             var root = new GameObject("Avatar");
             root.transform.SetParent(transform, false);
 
-            float torsoHalf = p.Height * 0.18f;
-            float torsoY = p.Height * 0.32f;
-            float shoulderY = p.Height * 0.55f;
-            float shoulderSpan = p.Height * 0.28f;
-            float headY = p.Height * 0.72f;
+            float s = p.Height / BaseHeight;          // 体型缩放（相对基准人）
+            float headR = 0.105f * p.HeadScale * s;   // 头半径（基准头身比约 1:6.9）
 
-            // 躯干
-            var torso = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            torso.name = "Torso";
-            torso.transform.SetParent(root.transform, false);
-            torso.transform.localPosition = new Vector3(0f, torsoY, 0f);
-            torso.transform.localScale = new Vector3(p.Height * 0.34f, torsoHalf, p.Height * 0.22f);
-            Paint(torso, p.ClothColor);
+            var skinMat = CreateMaterial(p.SkinColor);
+            var clothMat = CreateMaterial(p.ClothColor);
+            var darkMat = CreateMaterial(new Color(0.16f, 0.16f, 0.19f));
+            var hairMat = CreateMaterial(p.HairStyle == 2
+                ? new Color(0.22f, 0.58f, 0.92f)
+                : new Color(0.155f, 0.125f, 0.105f));
 
-            // 头 + 发型
-            var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            head.name = "Head";
-            head.transform.SetParent(root.transform, false);
-            head.transform.localPosition = new Vector3(0f, headY, 0f);
-            float headR = p.Height * 0.11f * p.HeadScale;
-            head.transform.localScale = Vector3.one * (headR * 2f);
-            Paint(head, p.SkinColor);
-            BuildHair(root.transform, p, headY, headR);
+            // ---- 琴凳 ----
+            CreatePart(PrimitiveType.Cube, root.transform, "Stool",
+                new Vector3(0f, 0.42f * s, 0.10f * s),
+                new Vector3(0.34f * s, 0.05f * s, 0.26f * s), darkMat);
 
-            // 左右肩
+            // ---- 腿（坐姿：大腿前伸 + 小腿垂直 + 脚）----
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float x = side * 0.105f * s;
+                CreatePart(PrimitiveType.Capsule, root.transform, $"Thigh_{side}",
+                    new Vector3(x, 0.50f * s, 0.17f * s),
+                    new Vector3(0.105f * s, 0.14f * s, 0.105f * s), clothMat,
+                    Quaternion.Euler(90f, 0f, 0f));
+                CreatePart(PrimitiveType.Capsule, root.transform, $"Shin_{side}",
+                    new Vector3(x, 0.29f * s, 0.31f * s),
+                    new Vector3(0.095f * s, 0.21f * s, 0.095f * s), clothMat);
+                CreatePart(PrimitiveType.Cube, root.transform, $"Foot_{side}",
+                    new Vector3(x, 0.035f * s, 0.37f * s),
+                    new Vector3(0.085f * s, 0.07f * s, 0.19f * s), darkMat);
+            }
+
+            // ---- 躯干（方体：髋 → 收腰 → 胸腔，比球体更接近着衣人体）----
+            CreatePart(PrimitiveType.Cube, root.transform, "Hip",
+                new Vector3(0f, 0.52f * s, 0f), new Vector3(0.31f * s, 0.13f * s, 0.21f * s), clothMat);
+            CreatePart(PrimitiveType.Cube, root.transform, "Waist",
+                new Vector3(0f, 0.66f * s, 0f), new Vector3(0.27f * s, 0.15f * s, 0.19f * s), clothMat);
+            CreatePart(PrimitiveType.Cube, root.transform, "Chest",
+                new Vector3(0f, 0.83f * s, 0f), new Vector3(0.34f * s, 0.21f * s, 0.21f * s), clothMat);
+
+            // ---- 肩（空节点供 IK 使用 + 视觉肩球）----
+            // 注意：人物在装配时整体旋转 180°（面向 -Z 朝钢琴），故 local +X 的节点旋转后位于世界 -X，
+            // 即演奏者左手侧（负责低音键）。左右手必须按此映射，否则双臂会交叉。
             var lShoulder = new GameObject("LeftShoulder").transform;
             lShoulder.SetParent(root.transform, false);
-            lShoulder.localPosition = new Vector3(-shoulderSpan, shoulderY, 0f);
+            lShoulder.localPosition = new Vector3(0.185f * s, 0.95f * s, 0f);
+            CreatePart(PrimitiveType.Sphere, lShoulder, "Ball", Vector3.zero, Vector3.one * (0.10f * s), clothMat);
+
             var rShoulder = new GameObject("RightShoulder").transform;
             rShoulder.SetParent(root.transform, false);
-            rShoulder.localPosition = new Vector3(shoulderSpan, shoulderY, 0f);
+            rShoulder.localPosition = new Vector3(-0.185f * s, 0.95f * s, 0f);
+            CreatePart(PrimitiveType.Sphere, rShoulder, "Ball", Vector3.zero, Vector3.one * (0.10f * s), clothMat);
 
-            // 左右手臂（胶囊，由 HandIKController 每帧拉伸肩→腕）
-            var lArm = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            lArm.name = "LeftArm";
-            lArm.transform.SetParent(root.transform, false);
-            lArm.transform.localScale = new Vector3(p.Height * 0.06f, 0.5f, p.Height * 0.06f);
-            Paint(lArm, p.SkinColor);
-            var rArm = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            rArm.name = "RightArm";
-            rArm.transform.SetParent(root.transform, false);
-            rArm.transform.localScale = new Vector3(p.Height * 0.06f, 0.5f, p.Height * 0.06f);
-            Paint(rArm, p.SkinColor);
+            // ---- 颈 + 头 + 五官 ----
+            CreatePart(PrimitiveType.Capsule, root.transform, "Neck",
+                new Vector3(0f, 1.02f * s, 0f), new Vector3(0.065f * s, 0.04f * s, 0.065f * s), skinMat);
 
-            // 左右手
-            var lHand = BuildHand(root.transform, "LeftHand", p, -1f);
-            var rHand = BuildHand(root.transform, "RightHand", p, 1f);
+            float headY = 1.14f * s;
+            CreatePart(PrimitiveType.Sphere, root.transform, "Head",
+                new Vector3(0f, headY, 0f), Vector3.one * (headR * 2f), skinMat);
+            float eyeR = headR * 0.13f;
+            CreatePart(PrimitiveType.Sphere, root.transform, "Eye_L",
+                new Vector3(-headR * 0.40f, headY + headR * 0.06f, headR * 0.86f),
+                Vector3.one * (eyeR * 2f), darkMat);
+            CreatePart(PrimitiveType.Sphere, root.transform, "Eye_R",
+                new Vector3(headR * 0.40f, headY + headR * 0.06f, headR * 0.86f),
+                Vector3.one * (eyeR * 2f), darkMat);
+            CreatePart(PrimitiveType.Sphere, root.transform, "Nose",
+                new Vector3(0f, headY - headR * 0.14f, headR * 0.97f),
+                Vector3.one * (headR * 0.15f), skinMat);
+
+            BuildHair(root.transform, p, headY, headR, hairMat);
+
+            // ---- 手臂（单段胶囊，由 HandIKController 逐帧拉伸肩→腕）----
+            var lArm = CreatePart(PrimitiveType.Capsule, root.transform, "LeftArm",
+                new Vector3(-0.20f * s, 0.90f * s, 0.10f * s),
+                new Vector3(0.048f * s, 0.28f * s, 0.048f * s), skinMat);
+            var rArm = CreatePart(PrimitiveType.Capsule, root.transform, "RightArm",
+                new Vector3(0.20f * s, 0.90f * s, 0.10f * s),
+                new Vector3(0.048f * s, 0.28f * s, 0.048f * s), skinMat);
+
+            // ---- 手 ----
+            var lHand = BuildHand(root.transform, "LeftHand", skinMat, s, +1f);
+            var rHand = BuildHand(root.transform, "RightHand", skinMat, s, -1f);
 
             rig.Root = root;
             rig.LeftShoulder = lShoulder;
             rig.RightShoulder = rShoulder;
-            rig.LeftArm = lArm.transform;
-            rig.RightArm = rArm.transform;
+            rig.LeftArm = lArm;
+            rig.RightArm = rArm;
             rig.LeftHand = lHand;
             rig.RightHand = rHand;
             return rig;
         }
 
-        private IHandRig BuildHand(Transform parent, string name, AvatarPreset p, float side)
+        /// <summary>构建单手：手腕 → 手掌 → 5 指（手指沿 +Z 延伸，可由姿态控制器弯曲）。</summary>
+        private static IHandRig BuildHand(Transform parent, string name, Material skinMat, float s, float side)
         {
-            float handScale = p.Height * 0.06f;
+            float handScale = 0.052f * s;
 
             var wrist = new GameObject(name).transform;
             wrist.SetParent(parent, false);
-            wrist.localPosition = new Vector3(side * p.Height * 0.28f, p.Height * 0.5f, p.Height * 0.1f);
+            wrist.localPosition = new Vector3(side * 0.20f * s, 0.90f * s, 0.10f * s);
 
-            var palm = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            palm.name = "Palm";
-            palm.transform.SetParent(wrist, false);
-            palm.transform.localPosition = new Vector3(0f, 0f, handScale);
-            palm.transform.localScale = new Vector3(handScale * 1.6f, handScale * 0.6f, handScale * 2f);
-            Paint(palm, p.SkinColor);
-            Object.Destroy(palm.GetComponent<Collider>());
+            var palm = CreatePart(PrimitiveType.Cube, wrist, "Palm",
+                new Vector3(0f, 0f, handScale * 0.62f),
+                new Vector3(handScale * 1.18f, handScale * 0.38f, handScale * 1.30f), skinMat);
 
             var fingers = new List<Transform>(5);
             for (int f = 0; f < 5; f++)
             {
                 var fingerRoot = new GameObject($"Finger{f + 1}").transform;
                 fingerRoot.SetParent(wrist, false);
-                float fx = (f - 2) * handScale * 0.45f;
-                fingerRoot.localPosition = new Vector3(fx, 0f, handScale * 2f);
-                fingerRoot.localRotation = Quaternion.Euler(0f, 0f, 0f);
+                fingerRoot.localPosition = new Vector3((f - 2) * handScale * 0.38f, 0f, handScale * 1.32f);
 
-                var finger = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                finger.name = "Mesh";
-                finger.transform.SetParent(fingerRoot, false);
-                float len = handScale * (1.6f + (f == 0 ? 0.2f : 0f) - Mathf.Abs(f - 2) * 0.12f);
-                finger.transform.localPosition = new Vector3(0f, 0f, len * 0.5f);
-                finger.transform.localScale = new Vector3(handScale * 0.35f, len * 0.5f, handScale * 0.35f);
-                Paint(finger, p.SkinColor);
-                Object.Destroy(finger.GetComponent<Collider>());
+                float len = handScale * (1.85f - Mathf.Abs(f - 2) * 0.12f);
+                CreatePart(PrimitiveType.Capsule, fingerRoot, "Mesh",
+                    new Vector3(0f, 0f, len * 0.5f),
+                    new Vector3(handScale * 0.26f, len * 0.5f, handScale * 0.26f), skinMat,
+                    Quaternion.Euler(90f, 0f, 0f)); // 胶囊默认沿 Y，转 90° 使其沿 Z（手指伸出方向）
 
                 fingers.Add(fingerRoot);
             }
 
-            return new HandRig(wrist, palm.transform, fingers);
+            return new HandRig(wrist, palm, fingers);
         }
 
         private sealed class HandRig : IHandRig
@@ -231,46 +263,58 @@ namespace PianoTeacher3D.Avatar
             }
         }
 
-        private static void BuildHair(Transform parent, AvatarPreset p, float headY, float headR)
+        private static void BuildHair(Transform parent, AvatarPreset p, float headY, float headR, Material hairMat)
         {
-            var hair = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            hair.name = "Hair";
-            hair.transform.SetParent(parent, false);
-            hair.transform.localPosition = new Vector3(0f, headY + headR * 0.15f, 0f);
-            hair.transform.localScale = Vector3.one * (headR * 2.15f);
-            Paint(hair, p.HairStyle == 2 ? new Color(0.2f, 0.6f, 0.95f) : new Color(0.15f, 0.12f, 0.1f));
+            // 基础发帽（覆盖头顶与后部，露出面部）
+            CreatePart(PrimitiveType.Sphere, parent, "HairCap",
+                new Vector3(0f, headY + headR * 0.30f, -headR * 0.16f),
+                new Vector3(headR * 1.92f, headR * 1.62f, headR * 1.92f), hairMat);
 
             if (p.HairStyle == 0)
             {
-                // 长发：后侧两个拉长球体
-                for (int i = 0; i < 2; i++)
+                // 长发：贴头两侧的披肩发（短而靠后，避免夸张的"双马尾"感）
+                for (int i = -1; i <= 1; i += 2)
                 {
-                    var strand = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                    strand.name = "HairStrand";
-                    strand.transform.SetParent(parent, false);
-                    strand.transform.localPosition = new Vector3((i == 0 ? -1f : 1f) * headR * 0.5f, headY - headR * 0.7f, -headR * 0.2f);
-                    strand.transform.localScale = new Vector3(headR * 0.8f, headR * 1.6f, headR * 0.8f);
-                    Paint(strand, new Color(0.15f, 0.12f, 0.1f));
+                    CreatePart(PrimitiveType.Capsule, parent, $"HairSide_{i}",
+                        new Vector3(i * headR * 0.82f, headY - headR * 0.42f, -headR * 0.38f),
+                        new Vector3(headR * 0.40f, headR * 0.62f, headR * 0.40f), hairMat);
                 }
+                CreatePart(PrimitiveType.Capsule, parent, "HairBack",
+                    new Vector3(0f, headY - headR * 0.55f, -headR * 0.80f),
+                    new Vector3(headR * 1.20f, headR * 0.75f, headR * 0.38f), hairMat);
             }
             else if (p.HairStyle == 2)
             {
-                // 卡通呆毛：头顶一根细长胶囊
-                var ahoge = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                ahoge.name = "Ahoge";
-                ahoge.transform.SetParent(parent, false);
-                ahoge.transform.localPosition = new Vector3(0f, headY + headR * 1.4f, 0f);
-                ahoge.transform.localScale = new Vector3(headR * 0.3f, headR * 0.7f, headR * 0.3f);
-                ahoge.transform.localRotation = Quaternion.Euler(20f, 0f, 0f);
-                Paint(ahoge, new Color(0.2f, 0.6f, 0.95f));
+                // 卡通呆毛
+                var ahoge = CreatePart(PrimitiveType.Capsule, parent, "Ahoge",
+                    new Vector3(0f, headY + headR * 1.45f, 0f),
+                    new Vector3(headR * 0.16f, headR * 0.60f, headR * 0.16f), hairMat);
+                ahoge.localRotation = Quaternion.Euler(18f, 0f, 0f);
             }
         }
 
-        private static void Paint(GameObject go, Color c)
+        // ==================== 构建辅助 ====================
+
+        private static Transform CreatePart(PrimitiveType type, Transform parent, string name,
+            Vector3 localPos, Vector3 localScale, Material mat, Quaternion? rot = null)
+        {
+            var go = GameObject.CreatePrimitive(type);
+            go.name = name;
+            var t = go.transform;
+            t.SetParent(parent, false);
+            t.localPosition = localPos;
+            t.localScale = localScale;
+            if (rot.HasValue) t.localRotation = rot.Value;
+            if (mat != null) go.GetComponent<Renderer>().sharedMaterial = mat;
+            Object.Destroy(go.GetComponent<Collider>()); // 纯视觉件，无碰撞需求
+            return t;
+        }
+
+        private static Material CreateMaterial(Color c)
         {
             var shader = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
-            var mat = new Material(shader) { color = c };
-            go.GetComponent<Renderer>().sharedMaterial = mat;
+            if (shader == null) return null;
+            return new Material(shader) { color = c };
         }
     }
 }

@@ -1,28 +1,27 @@
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace PianoTeacher3D.UI
 {
     /// <summary>
-    /// 连接播放、暂停、进度、速度和视角按钮（方案 4.2）。
-    /// 程序化生成 UGUI 底部控制栏；纯表现层，只调用 <see cref="Core.LessonSessionController"/> 的公开接口。
+    /// 连接播放、暂停、进度、速度、循环、练习模式与视角按钮（方案 4.2）。
+    /// 布局：顶部左侧曲目信息栏 + 底部控制栏（进度条 + 9 个分组按钮）。
+    /// 按钮带激活态高亮（播放中/循环开/分手练习/非原速/非全景）。
+    /// 纯表现层，只调用 <see cref="Core.LessonSessionController"/> 的公开接口。
     /// </summary>
     public class LessonControlsUI : MonoBehaviour
     {
         private Core.LessonSessionController _session;
 
-        private Text _statusText;
+        private Text _songText;
         private Text _timeText;
         private Slider _progressSlider;
-        private Text _playLabel;
-        private Text _speedLabel;
-        private Text _cameraLabel;
-        private Text _loopLabel;
-        private Text _handLabel;
+        private Button _playBtn;
+        private Button _loopBtn;
+        private Button _handBtn;
+        private Button _speedBtn;
+        private Button _cameraBtn;
         private bool _suppressSlider;
-
-        private static Font _cachedFont;
 
         public void Initialize(Core.LessonSessionController session)
         {
@@ -33,12 +32,15 @@ namespace PianoTeacher3D.UI
             _session.OnSongLoaded += OnSongLoaded;
             _session.OnCameraModeChanged += OnCameraModeChanged;
             _session.OnPracticeHandChanged += OnPracticeHandChanged;
+
             BuildUI();
+
             RefreshPlayLabel(_session.PlaybackState);
             RefreshSpeedLabel(_session.PlaybackSpeed);
             RefreshCameraLabel(_session.CameraMode);
-            RefreshLoopLabel(_session.IsLooping);
+            RefreshLoopState(_session.IsLooping);
             RefreshHandLabel(_session.PracticeHand);
+            OnSongLoaded();
         }
 
         private void OnDestroy()
@@ -52,23 +54,35 @@ namespace PianoTeacher3D.UI
             _session.OnPracticeHandChanged -= OnPracticeHandChanged;
         }
 
+        private void Update()
+        {
+            if (_session == null) return;
+            // 键盘快捷键：空格 播放/暂停，R 重置视角，[ 重播
+            if (Input.GetKeyDown(KeyCode.Space)) _session.PlayPause();
+            if (Input.GetKeyDown(KeyCode.R)) _session.ResetCamera();
+            if (Input.GetKeyDown(KeyCode.LeftBracket)) _session.Restart();
+        }
+
         // ==================== 事件回调 ====================
 
         private void ShowError(string msg)
         {
-            if (_statusText != null) _statusText.text = $"⚠ {msg}";
+            if (_songText != null)
+            {
+                _songText.text = $"⚠ {msg}";
+                _songText.color = UITheme.Error;
+            }
             Debug.LogError($"[PianoTeacher3D] {msg}");
         }
 
         private void OnSongLoaded()
         {
-            if (_statusText != null) _statusText.text = $"曲目：{_session.CurrentSongName}";
+            if (_songText == null) return;
+            _songText.color = UITheme.TextPrimary;
+            _songText.text = _session.HasSong ? $"♪ {_session.CurrentSongName}" : "尚未加载曲目";
         }
 
-        private void OnPlaybackStateChanged(Core.PlaybackState state)
-        {
-            RefreshPlayLabel(state);
-        }
+        private void OnPlaybackStateChanged(Core.PlaybackState state) => RefreshPlayLabel(state);
 
         private void OnProgressChanged(float current, float total)
         {
@@ -90,217 +104,113 @@ namespace PianoTeacher3D.UI
 
         private void BuildUI()
         {
-            EnsureEventSystem();
+            UITheme.EnsureEventSystem();
+            var canvas = UITheme.CreateCanvas(transform, "LessonControlsCanvas");
 
-            var canvasGo = new GameObject("LessonControlsCanvas");
-            canvasGo.transform.SetParent(transform, false);
-            var canvas = canvasGo.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scaler = canvasGo.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1280f, 720f);
-            canvasGo.AddComponent<GraphicRaycaster>();
+            // ---- 顶部左侧：曲目信息栏 ----
+            var infoBar = UITheme.CreatePanel(canvas.transform, "InfoBar",
+                new Vector2(-390f, 322f), new Vector2(460f, 46f), UITheme.PanelBg);
+            _songText = UITheme.CreateText(infoBar, "♪ 加载中…", Vector2.zero, new Vector2(424f, 40f),
+                UITheme.FontButton, UITheme.TextPrimary, TextAnchor.MiddleLeft);
+            _songText.rectTransform.anchorMin = new Vector2(0f, 0.5f);
+            _songText.rectTransform.anchorMax = new Vector2(0f, 0.5f);
+            _songText.rectTransform.pivot = new Vector2(0f, 0.5f);
+            _songText.rectTransform.anchoredPosition = new Vector2(18f, 0f);
 
-            // 状态文本（顶部）
-            _statusText = CreateText(canvasGo.transform, "曲目：加载中…", new Vector2(0f, 330f), new Vector2(1200f, 40f), 22);
+            // ---- 底部控制栏 ----
+            var bar = UITheme.CreatePanel(canvas.transform, "ControlBar",
+                new Vector2(0f, -296f), new Vector2(1240f, 136f), UITheme.PanelBg);
 
-            // 底部控制栏
-            var bar = CreatePanel(canvasGo.transform, new Vector2(0f, -300f), new Vector2(1240f, 130f));
-
-            // 进度条 + 时间
-            _progressSlider = CreateSlider(bar.transform, new Vector2(0f, 40f), new Vector2(1000f, 20f));
+            _progressSlider = UITheme.CreateSlider(bar, "Progress", new Vector2(0f, 44f), new Vector2(1150f, 16f));
             _progressSlider.onValueChanged.AddListener(v =>
             {
                 if (!_suppressSlider) _session?.SeekNormalized(v);
             });
-            _timeText = CreateText(bar.transform, "00:00 / 00:00", new Vector2(0f, 15f), new Vector2(300f, 24f), 16);
+            _timeText = UITheme.CreateText(bar, "00:00 / 00:00", new Vector2(0f, 20f), new Vector2(320f, 20f),
+                UITheme.FontSmall, UITheme.TextSecondary);
 
-            // 按钮（两行：第一行播放/练习控制，第二行视图切换）
-            float btnW = 150f;
-            var playBtn = CreateButton(bar.transform, "播放", new Vector2(-320f, -20f), new Vector2(btnW, 44f), () => _session?.PlayPause());
-            _playLabel = playBtn.GetComponentInChildren<Text>();
-            CreateButton(bar.transform, "停止", new Vector2(-160f, -20f), new Vector2(btnW, 44f), () => _session?.Stop());
-            CreateButton(bar.transform, "重新播放", new Vector2(0f, -20f), new Vector2(btnW, 44f), () => _session?.Restart());
+            // ---- 按钮行（9 个均分，间距 138）----
+            const float y = -36f;
+            const float w = 130f;
+            const float step = 138f;
 
-            var loopBtn = CreateButton(bar.transform, "循环", new Vector2(160f, -20f), new Vector2(btnW, 44f), () =>
+            _playBtn = UITheme.CreateButton(bar, "播放", new Vector2(-4 * step, y), new Vector2(w, 42f),
+                () => _session?.PlayPause());
+            UITheme.CreateButton(bar, "停止", new Vector2(-3 * step, y), new Vector2(w, 42f),
+                () => _session?.Stop());
+            UITheme.CreateButton(bar, "重播", new Vector2(-2 * step, y), new Vector2(w, 42f),
+                () => _session?.Restart());
+
+            _loopBtn = UITheme.CreateButton(bar, "循环", new Vector2(-1 * step, y), new Vector2(w, 42f), () =>
             {
                 _session?.ToggleLoop();
-                RefreshLoopLabel(_session != null && _session.IsLooping);
+                RefreshLoopState(_session != null && _session.IsLooping);
             });
-            _loopLabel = loopBtn.GetComponentInChildren<Text>();
 
-            var handBtn = CreateButton(bar.transform, "双手练习", new Vector2(320f, -20f), new Vector2(btnW, 44f), () => _session?.CyclePracticeHand());
-            _handLabel = handBtn.GetComponentInChildren<Text>();
+            _handBtn = UITheme.CreateButton(bar, "双手练习", new Vector2(0f, y), new Vector2(w, 42f),
+                () => _session?.CyclePracticeHand());
 
-            var speedBtn = CreateButton(bar.transform, "速度", new Vector2(-240f, -75f), new Vector2(btnW, 44f), () => _session?.CycleSpeed());
-            _speedLabel = speedBtn.GetComponentInChildren<Text>();
+            _speedBtn = UITheme.CreateButton(bar, "速度", new Vector2(1 * step, y), new Vector2(w, 42f), () =>
+            {
+                _session?.CycleSpeed();
+                RefreshSpeedLabel(_session != null ? _session.PlaybackSpeed : 1f);
+            });
 
-            var camBtn = CreateButton(bar.transform, "视角", new Vector2(-80f, -75f), new Vector2(btnW, 44f), () => _session?.CycleCameraMode());
-            _cameraLabel = camBtn.GetComponentInChildren<Text>();
+            _cameraBtn = UITheme.CreateButton(bar, "视角", new Vector2(2 * step, y), new Vector2(w, 42f),
+                () => _session?.CycleCameraMode());
 
-            CreateButton(bar.transform, "重置视角 (R)", new Vector2(80f, -75f), new Vector2(btnW, 44f), () => _session?.ResetCamera());
-            CreateButton(bar.transform, "切换角色", new Vector2(240f, -75f), new Vector2(btnW, 44f), () => _session?.CycleAvatar());
+            UITheme.CreateButton(bar, "重置视角", new Vector2(3 * step, y), new Vector2(w, 42f),
+                () => _session?.ResetCamera());
+            UITheme.CreateButton(bar, "切换角色", new Vector2(4 * step, y), new Vector2(w, 42f),
+                () => _session?.CycleAvatar());
         }
+
+        // ==================== 状态刷新（含激活态） ====================
 
         private void RefreshPlayLabel(Core.PlaybackState state)
         {
-            if (_playLabel == null) return;
-            _playLabel.text = state == Core.PlaybackState.Playing ? "暂停" : "播放";
+            if (_playBtn == null) return;
+            bool playing = state == Core.PlaybackState.Playing;
+            _playBtn.GetComponentInChildren<Text>().text = playing ? "暂停" : "播放";
+            UITheme.SetButtonActive(_playBtn, playing);
         }
 
         private void RefreshSpeedLabel(float speed)
         {
-            if (_speedLabel != null) _speedLabel.text = $"速度 {speed:0.0}x";
+            if (_speedBtn == null) return;
+            _speedBtn.GetComponentInChildren<Text>().text = $"速度 {speed:0.0}x";
+            UITheme.SetButtonActive(_speedBtn, Mathf.Abs(speed - 1f) > 0.01f);
         }
 
         private void RefreshCameraLabel(CameraControl.CameraMode mode)
         {
-            if (_cameraLabel != null) _cameraLabel.text = "视角：" + mode switch
+            if (_cameraBtn == null) return;
+            _cameraBtn.GetComponentInChildren<Text>().text = mode switch
             {
-                CameraControl.CameraMode.Closeup => "手部特写",
-                CameraControl.CameraMode.Full => "全景",
-                _ => "自由观察"
+                CameraControl.CameraMode.Closeup => "视角：特写",
+                CameraControl.CameraMode.Full => "视角：全景",
+                _ => "视角：自由"
             };
+            UITheme.SetButtonActive(_cameraBtn, mode != CameraControl.CameraMode.Full);
         }
 
-        private void RefreshLoopLabel(bool looping)
+        private void RefreshLoopState(bool looping)
         {
-            if (_loopLabel != null) _loopLabel.text = looping ? "循环：开" : "循环：关";
+            if (_loopBtn == null) return;
+            _loopBtn.GetComponentInChildren<Text>().text = looping ? "循环 ✓" : "循环";
+            UITheme.SetButtonActive(_loopBtn, looping);
         }
 
         private void RefreshHandLabel(Core.PracticeHand hand)
         {
-            if (_handLabel != null) _handLabel.text = hand switch
+            if (_handBtn == null) return;
+            _handBtn.GetComponentInChildren<Text>().text = hand switch
             {
                 Core.PracticeHand.LeftOnly => "左手练习",
                 Core.PracticeHand.RightOnly => "右手练习",
                 _ => "双手练习"
             };
-        }
-
-        // ==================== UGUI 辅助 ====================
-
-        private static Font GetFont()
-        {
-            if (_cachedFont != null) return _cachedFont;
-            _cachedFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            if (_cachedFont == null) _cachedFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            return _cachedFont;
-        }
-
-        private static void EnsureEventSystem()
-        {
-            if (Object.FindFirstObjectByType<EventSystem>() != null) return;
-            var es = new GameObject("EventSystem");
-            es.AddComponent<EventSystem>();
-            es.AddComponent<StandaloneInputModule>();
-        }
-
-        private static RectTransform CreatePanel(Transform parent, Vector2 anchoredPos, Vector2 size)
-        {
-            var go = new GameObject("Panel");
-            go.transform.SetParent(parent, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchoredPosition = anchoredPos;
-            rt.sizeDelta = size;
-            var img = go.AddComponent<Image>();
-            img.color = new Color(0.08f, 0.08f, 0.1f, 0.9f);
-            return rt;
-        }
-
-        private static Text CreateText(Transform parent, string content, Vector2 anchoredPos, Vector2 size, int fontSize)
-        {
-            var go = new GameObject("Text");
-            go.transform.SetParent(parent, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchoredPosition = anchoredPos;
-            rt.sizeDelta = size;
-            var text = go.AddComponent<Text>();
-            text.font = GetFont();
-            text.text = content;
-            text.fontSize = fontSize;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
-            return text;
-        }
-
-        private static Slider CreateSlider(Transform parent, Vector2 anchoredPos, Vector2 size)
-        {
-            var go = new GameObject("ProgressSlider");
-            go.transform.SetParent(parent, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchoredPosition = anchoredPos;
-            rt.sizeDelta = size;
-
-            var bg = new GameObject("Background");
-            bg.transform.SetParent(go.transform, false);
-            var bgRt = bg.AddComponent<RectTransform>();
-            bgRt.anchorMin = Vector2.zero; bgRt.anchorMax = Vector2.one;
-            bgRt.offsetMin = Vector2.zero; bgRt.offsetMax = Vector2.zero;
-            bg.AddComponent<Image>().color = new Color(0.25f, 0.25f, 0.3f);
-
-            var fillArea = new GameObject("Fill Area");
-            fillArea.transform.SetParent(go.transform, false);
-            var faRt = fillArea.AddComponent<RectTransform>();
-            faRt.anchorMin = Vector2.zero; faRt.anchorMax = Vector2.one;
-            faRt.offsetMin = new Vector2(5f, 5f); faRt.offsetMax = new Vector2(-5f, -5f);
-
-            var fill = new GameObject("Fill");
-            fill.transform.SetParent(fillArea.transform, false);
-            var fillRt = fill.AddComponent<RectTransform>();
-            fillRt.anchorMin = Vector2.zero; fillRt.anchorMax = Vector2.one;
-            fillRt.sizeDelta = new Vector2(10f, 0f);
-            fill.AddComponent<Image>().color = new Color(0.9f, 0.6f, 0.2f);
-
-            var handleArea = new GameObject("Handle Slide Area");
-            handleArea.transform.SetParent(go.transform, false);
-            var haRt = handleArea.AddComponent<RectTransform>();
-            haRt.anchorMin = Vector2.zero; haRt.anchorMax = Vector2.one;
-            haRt.offsetMin = new Vector2(5f, 0f); haRt.offsetMax = new Vector2(-5f, 0f);
-
-            var handle = new GameObject("Handle");
-            handle.transform.SetParent(handleArea.transform, false);
-            var hRt = handle.AddComponent<RectTransform>();
-            hRt.sizeDelta = new Vector2(14f, 14f);
-            handle.AddComponent<Image>().color = Color.white;
-
-            var slider = go.AddComponent<Slider>();
-            slider.fillRect = fillRt;
-            slider.handleRect = hRt;
-            slider.targetGraphic = handle.GetComponent<Image>();
-            slider.minValue = 0f;
-            slider.maxValue = 1f;
-            slider.value = 0f;
-            return slider;
-        }
-
-        private static Button CreateButton(Transform parent, string label, Vector2 anchoredPos, Vector2 size, UnityEngine.Events.UnityAction onClick)
-        {
-            var go = new GameObject($"Btn_{label}");
-            go.transform.SetParent(parent, false);
-            var rt = go.AddComponent<RectTransform>();
-            rt.anchoredPosition = anchoredPos;
-            rt.sizeDelta = size;
-
-            var img = go.AddComponent<Image>();
-            img.color = new Color(0.2f, 0.22f, 0.3f);
-            var btn = go.AddComponent<Button>();
-            btn.targetGraphic = img;
-            btn.onClick.AddListener(onClick);
-
-            var textGo = new GameObject("Text");
-            textGo.transform.SetParent(go.transform, false);
-            var textRt = textGo.AddComponent<RectTransform>();
-            textRt.anchorMin = Vector2.zero; textRt.anchorMax = Vector2.one;
-            textRt.offsetMin = Vector2.zero; textRt.offsetMax = Vector2.zero;
-            var text = textGo.AddComponent<Text>();
-            text.font = GetFont();
-            text.text = label;
-            text.fontSize = 20;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
-
-            return btn;
+            UITheme.SetButtonActive(_handBtn, hand != Core.PracticeHand.Both);
         }
 
         private static string FormatTime(float seconds)
