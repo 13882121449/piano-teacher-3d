@@ -38,3 +38,9 @@ crashlytics-build.properties
 
 # 一键验证脚本的中间产物
 _verify_out/
+
+# ===== 交付整理（2026-10-18） =====
+# Unity Test Runner 残留场景（每次跑 PlayMode 自动生成）
+InitTestScene*.unity*
+# 历史遗留的嵌套空 Unity 工程（仅 SampleScene，不参与本项目构建）
+/Piano/

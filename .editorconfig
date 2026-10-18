@@ -1,0 +1,67 @@
+# Piano Teacher 3D — 编辑器约定（对应评估文档 P1-11）
+# 目标：统一缩进 / 换行 / 命名，让格式差异不进入 diff。
+# 说明：Unity 2022.3 使用 C# 9，因此不启用 C# 10+ 语法相关规则。
+
+root = true
+
+[*]
+charset = utf-8-bom
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.cs]
+indent_size = 4
+tab_width = 4
+
+# --- 基础 C# 风格 ---
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_indent_case_contents = true
+csharp_space_after_cast = false
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_prefer_braces = when_multiline:suggestion
+
+# --- 命名规范（与现有代码一致，snake_case 仅用于私有字段） ---
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+dotnet_naming_rule.interfaces_start_with_i.symbols = interfaces
+dotnet_naming_rule.interfaces_start_with_i.style = i_prefixed
+dotnet_naming_rule.interfaces_start_with_i.severity = warning
+
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_style.i_prefixed.required_prefix = I
+dotnet_naming_style.i_prefixed.capitalization = pascal_case
+
+# --- 代码质量（先以 suggestion 报告历史问题，不阻塞开发） ---
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
+
+# 架构与性能约定（对应 README 8.4）
+dotnet_diagnostic.CA1822.severity = none      # 允许实例方法（Unity 组件常见）
+dotnet_diagnostic.IDE0051.severity = suggestion
+dotnet_diagnostic.IDE0060.severity = suggestion
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.py]
+indent_size = 4
+max_line_length = 120

@@ -13,6 +13,14 @@ namespace PianoTeacher3D.Avatar
     /// 骨骼命名严格对应 <see cref="HumanBodyBones"/>，因此未来替换为真实 GLB 模型时，
     /// 只需把外部网格挂到同一套骨骼上，其余逻辑（IK / 手指姿态 / 换装）无需改动。
     /// </para>
+    /// <para>
+    /// <b>骨架与可见网格分离</b>（审查 1.1 方案 A「先建立统一建模规范」/ 第 4 章 AvatarRigBuilder 行）：
+    /// 本类只产出<b>纯坐标节点</b>（不挂任何 Renderer，见 PlayMode 测试 HumanoidRig_DoesNotAffectVisibleGeometry），
+    /// 人物的可见形状由 <c>AvatarManager</c> 依 <see cref="AvatarBodyMetrics"/> 统一尺寸表生成。
+    /// 手指骨骼此处仍为<b>每指 1 段</b>（映射到 Humanoid 的 Proximal，保证 Avatar 合法且与既有测试兼容）；
+    /// 可见手指的近端/中段/末端三段结构是 <c>IHandRig.Fingers</c> 根节点的子节点链，
+    /// 段数由 <see cref="AvatarQualityConfig.FingerSegments"/> 控制。
+    /// </para>
     /// </summary>
     public static class AvatarRigBuilder
     {
@@ -141,37 +149,44 @@ namespace PianoTeacher3D.Avatar
             t.SetParent(hand, false);
 
             // 手指自手掌前端（+Z）伸出，横向按解剖顺序展开（拇指在一侧、小指在另一侧）
-            float lateral = (index - 2) * 0.014f * scale * (left ? 1f : -1f);
+            // 【左右约定】左手（left=true）位于局部 −X（旋转 180° 后 = 世界 +X = 角色真正的左手侧）。
+            // 拇指必须在内侧（朝身体中线），因此左手的横向偏移取负号。
+            float lateral = (index - 2) * 0.014f * scale * (left ? -1f : 1f);
             float length = (0.055f - Mathf.Abs(index - 2) * 0.004f) * scale;
             t.localPosition = new Vector3(lateral, 0f, length);
             return t;
         }
 
-        /// <summary>相对父骨骼的局部位置（坐姿人体，比例参照 AvatarManager 的预设）。</summary>
+        /// <summary>
+        /// 相对父骨骼的局部位置（坐姿人体）。
+        /// 绝对高度/肩宽取自统一角色尺寸表 <see cref="AvatarBodyMetrics"/>，
+        /// 其余偏移为链式局部量（父节点已包含各自高度），因此数值与可见网格严格同源。
+        /// </summary>
         private static Vector3 LocalPositionOf(string node, float s) => node switch
         {
-            "Hips" => new Vector3(0f, 0.52f * s, 0f),
+            "Hips" => new Vector3(0f, AvatarBodyMetrics.SittingHipHeight * s, 0f),
             "Spine" => new Vector3(0f, 0.14f * s, 0f),
             "Chest" => new Vector3(0f, 0.17f * s, 0f),
             "UpperChest" => new Vector3(0f, 0.08f * s, 0f),
             "Neck" => new Vector3(0f, 0.11f * s, 0f),
             "Head" => new Vector3(0f, 0.12f * s, 0f),
 
-            "LeftShoulder" => new Vector3(0.185f * s, 0.04f * s, 0f),
-            "LeftUpperArm" => new Vector3(0.030f * s, 0f, 0f),
-            "LeftLowerArm" => new Vector3(0.210f * s, 0f, 0f),
-            "LeftHand" => new Vector3(0.200f * s, 0f, 0f),
+            // 【左右约定】「Left*」写局部 −X（整体旋转 180° 后 = 世界 +X = 角色左手侧 = 低音侧）
+            "LeftShoulder" => new Vector3(-AvatarBodyMetrics.ShoulderHalfWidth * s, 0.04f * s, 0f),
+            "LeftUpperArm" => new Vector3(-0.030f * s, 0f, 0f),
+            "LeftLowerArm" => new Vector3(-AvatarBodyMetrics.UpperArmLength * s, 0f, 0f),
+            "LeftHand" => new Vector3(-AvatarBodyMetrics.LowerArmLength * s, 0f, 0f),
 
-            "RightShoulder" => new Vector3(-0.185f * s, 0.04f * s, 0f),
-            "RightUpperArm" => new Vector3(-0.030f * s, 0f, 0f),
-            "RightLowerArm" => new Vector3(-0.210f * s, 0f, 0f),
-            "RightHand" => new Vector3(-0.200f * s, 0f, 0f),
+            "RightShoulder" => new Vector3(AvatarBodyMetrics.ShoulderHalfWidth * s, 0.04f * s, 0f),
+            "RightUpperArm" => new Vector3(0.030f * s, 0f, 0f),
+            "RightLowerArm" => new Vector3(AvatarBodyMetrics.UpperArmLength * s, 0f, 0f),
+            "RightHand" => new Vector3(AvatarBodyMetrics.LowerArmLength * s, 0f, 0f),
 
-            "LeftUpperLeg" => new Vector3(0.100f * s, -0.04f * s, 0f),
+            "LeftUpperLeg" => new Vector3(-0.100f * s, -0.04f * s, 0f),
             "LeftLowerLeg" => new Vector3(0f, -0.26f * s, 0f),
             "LeftFoot" => new Vector3(0f, -0.26f * s, 0.07f * s),
 
-            "RightUpperLeg" => new Vector3(-0.100f * s, -0.04f * s, 0f),
+            "RightUpperLeg" => new Vector3(0.100f * s, -0.04f * s, 0f),
             "RightLowerLeg" => new Vector3(0f, -0.26f * s, 0f),
             "RightFoot" => new Vector3(0f, -0.26f * s, 0.07f * s),
 

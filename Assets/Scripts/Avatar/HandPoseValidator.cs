@@ -92,7 +92,82 @@ namespace PianoTeacher3D.Avatar
                 Mathf.Clamp(wrist.z, limits.MinZ, limits.MaxZ));
         }
 
-        /// <summary>两侧手腕是否发生交叉（左手跑到右手右侧）。左手应为较小 X。</summary>
-        public static bool AreHandsCrossed(Vector3 leftWrist, Vector3 rightWrist) => leftWrist.x > rightWrist.x;
+        /// <summary>
+        /// 两侧手腕是否发生交叉。
+        /// <para>
+        /// 【左右约定】角色面向 -Z，其左手在世界 <b>+X</b>（低音侧，也是教学画面左侧），
+        /// 因此「交叉」= 左手的 X 反而小于右手。改造前该判定方向相反，会把正常手位误报为交叉。
+        /// </para>
+        /// </summary>
+        public static bool AreHandsCrossed(Vector3 leftWrist, Vector3 rightWrist) => leftWrist.x < rightWrist.x;
+
+        // ==================== 指尖目标误差与手指姿态异常（审查 1.2C / 第 4 章 HandPoseValidator 行） ====================
+        // 全部为纯静态、不依赖场景与 MonoBehaviour，可单测；不修改任何既有签名。
+
+        /// <summary>指尖到目标键面按压点的误差（米）。</summary>
+        public static float FingertipError(Vector3 fingertip, Vector3 target) => Vector3.Distance(fingertip, target);
+
+        /// <summary>
+        /// 校验指尖是否落在目标键面容差内。返回 null 表示正常；否则返回人类可读的问题描述。
+        /// </summary>
+        public static string ValidateFingertip(Vector3 fingertip, Vector3 target, float tolerance)
+        {
+            float error = Vector3.Distance(fingertip, target);
+            if (error > tolerance + Tolerance)
+                return $"指尖偏离目标键面（误差 {error * 1000f:0.#} mm > 容差 {tolerance * 1000f:0.#} mm）";
+            return null;
+        }
+
+        /// <summary>是否「离键悬空」：指尖高于目标键面超过允许高度（按键时不应出现）。</summary>
+        public static bool IsHovering(Vector3 fingertip, Vector3 target, float hoverHeight)
+            => fingertip.y - target.y > hoverHeight + Tolerance;
+
+        /// <summary>
+        /// 手指姿态异常检查：指根 → 指尖的实际方向与期望方向的夹角是否超出允许范围。
+        /// 返回 null 表示正常；否则返回人类可读的问题描述（与 <see cref="Validate"/> 的返回约定一致）。
+        /// </summary>
+        public static string ValidateFingerPose(Vector3 fingerRoot, Vector3 fingerTip,
+            Vector3 expectedDirection, float maxAngleDegrees)
+        {
+            var actual = fingerTip - fingerRoot;
+            if (actual.sqrMagnitude < 1e-8f)
+                return "手指姿态异常：指节长度退化（指根与指尖重合）";
+
+            if (expectedDirection.sqrMagnitude < 1e-8f) return null;
+
+            float angle = Vector3.Angle(actual, expectedDirection);
+            if (angle > maxAngleDegrees)
+                return $"手指姿态异常：指节偏离期望方向 {angle:0.#}°（上限 {maxAngleDegrees:0.#}°）";
+            return null;
+        }
+
+        /// <summary>拇指轴与掌心前向的夹角（度）。任一方向退化时返回 0（视为无信息而不是异常）。</summary>
+        public static float ThumbPalmAngle(Vector3 thumbDirection, Vector3 palmForward)
+        {
+            if (thumbDirection.sqrMagnitude < 1e-8f || palmForward.sqrMagnitude < 1e-8f) return 0f;
+            return Vector3.Angle(thumbDirection, palmForward);
+        }
+
+        /// <summary>拇指方向是否异常（夹角超过阈值）。</summary>
+        public static bool IsThumbOrientationAbnormal(Vector3 thumbDirection, Vector3 palmForward, float maxAngleDegrees)
+            => ThumbPalmAngle(thumbDirection, palmForward) > maxAngleDegrees;
+
+        /// <summary>
+        /// 统计一组手指的姿态异常数量（每根手指调用 <see cref="ValidateFingerPose"/>）。
+        /// 数组长度不一致时以较短者为准，返回异常根数（便于批量单测与视觉抽查标记）。
+        /// </summary>
+        public static int CountFingerPoseIssues(Vector3[] fingerRoots, Vector3[] fingerTips,
+            Vector3 expectedDirection, float maxAngleDegrees)
+        {
+            if (fingerRoots == null || fingerTips == null) return 0;
+            int count = Mathf.Min(fingerRoots.Length, fingerTips.Length);
+            int issues = 0;
+            for (int i = 0; i < count; i++)
+            {
+                if (ValidateFingerPose(fingerRoots[i], fingerTips[i], expectedDirection, maxAngleDegrees) != null)
+                    issues++;
+            }
+            return issues;
+        }
     }
 }

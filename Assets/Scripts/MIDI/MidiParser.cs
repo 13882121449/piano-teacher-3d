@@ -15,6 +15,8 @@ namespace PianoTeacher3D.MIDI
             new TempoChange(0f, TempoChange.DefaultMpq)
         };
 
+        private static readonly string[] NoWarnings = new string[0];
+
         public bool Success { get; }
         public string Error { get; }
         public List<MidiNoteEvent> Notes { get; }
@@ -34,9 +36,22 @@ namespace PianoTeacher3D.MIDI
         /// </summary>
         public int DanglingNoteCount { get; }
 
+        /// <summary>
+        /// MIDI 文件格式：0 = 单轨、1 = 多轨同步、2 = 多轨独立序列（方案 6.4 / 11.1）。
+        /// 解析失败时也为 0，调用方应先判断 <see cref="Success"/>。
+        /// </summary>
+        public int MidiFormat { get; }
+
+        /// <summary>
+        /// 人类可读的中文兼容性提示（永不为 null，无提示时为空列表）。
+        /// 例如 Format 2 的顺序串接策略、极端 tempo 回落（方案 6.4）。
+        /// </summary>
+        public IReadOnlyList<string> Warnings { get; }
+
         public MidiParseResult(bool success, string error, List<MidiNoteEvent> notes,
             float totalDuration, ushort division, int trackCount,
-            IReadOnlyList<TempoChange> tempoChanges = null, int danglingNoteCount = 0)
+            IReadOnlyList<TempoChange> tempoChanges = null, int danglingNoteCount = 0,
+            int midiFormat = 0, IReadOnlyList<string> warnings = null)
         {
             Success = success;
             Error = error;
@@ -46,6 +61,8 @@ namespace PianoTeacher3D.MIDI
             TrackCount = trackCount;
             TempoChanges = tempoChanges ?? DefaultTempo;
             DanglingNoteCount = danglingNoteCount < 0 ? 0 : danglingNoteCount;
+            MidiFormat = midiFormat;
+            Warnings = warnings ?? NoWarnings;
         }
 
         public static MidiParseResult Fail(string error)
@@ -62,6 +79,15 @@ namespace PianoTeacher3D.MIDI
     public static class MidiParser
     {
         private const int DefaultTempo = 500000; // 微秒/四分音符 = 120 BPM
+
+        /// <summary>tempo 合法下界：1 微秒/四分音符（防御 tempo ≤ 0 的异常文件，方案 6.4）。</summary>
+        private const int MinValidTempo = 1;
+
+        /// <summary>
+        /// tempo 合法上界：6 000 000 微秒/四分音符（= 10 BPM）。
+        /// 更大的值意味着「一拍超过 6 秒」，课堂上视为异常并回落 120 BPM（方案 6.4「极端 tempo」防御）。
+        /// </summary>
+        private const int MaxValidTempo = 6_000_000;
 
         /// <summary>解析内存中的 MIDI 字节数据。</summary>
         public static MidiParseResult Parse(byte[] data)
@@ -95,8 +121,13 @@ namespace PianoTeacher3D.MIDI
                     return MidiParseResult.Fail("非法 PPQ 时间基");
 
                 // ---- 逐轨读取，收集事件 ----
+                // 兼容性提示（方案 6.4）：Format 2 串接策略、极端 tempo 回落等
+                var warnings = new List<string>();
+                bool tempoFallbackWarned = false;
+
                 var events = new List<(long tick, bool isOn, int pitch, int velocity, int track, int channel)>();
-                var tempoEvents = new List<(long tick, int tempo)>();
+                var tempoEvents = new List<(long tick, int tempo, int track)>();
+                var trackSpan = new long[trackCount];
                 long maxTick = 0;
 
                 for (int t = 0; t < trackCount; t++)
@@ -140,7 +171,17 @@ namespace PianoTeacher3D.MIDI
                             {
                                 int b0 = r.ReadByte(), b1 = r.ReadByte(), b2 = r.ReadByte();
                                 int tempo = (b0 << 16) | (b1 << 8) | b2;
-                                tempoEvents.Add((tick, tempo));
+                                // 极端 tempo 防御：≤ 0 或过大一律回落 120 BPM（与 TempoChange 回落一致，方案 6.4）
+                                if (tempo < MinValidTempo || tempo > MaxValidTempo)
+                                {
+                                    tempo = DefaultTempo;
+                                    if (!tempoFallbackWarned)
+                                    {
+                                        tempoFallbackWarned = true;
+                                        warnings.Add("检测到异常的速度标记（tempo ≤ 0 或过大），已按 120 BPM 处理，实际节奏可能与原曲不同。");
+                                    }
+                                }
+                                tempoEvents.Add((tick, tempo, t));
                             }
                             else if (metaType == 0x2F)
                             {
@@ -182,7 +223,44 @@ namespace PianoTeacher3D.MIDI
                     }
 
                     r.BaseStream.Position = trackEnd; // 防御性对齐
+                    trackSpan[t] = tick;              // 该轨道的 tick 长度（Format 2 串接用）
                     if (tick > maxTick) maxTick = tick;
+                }
+
+                // ---- Format 2（独立序列）兼容策略：按轨道顺序串接到同一时间轴（方案 6.4 / 11.1）----
+                // 教学场景必须只有一个权威时间轴，因此不并行演奏各 Pattern，而是依次拼接。
+                if (format == 2)
+                {
+                    if (trackCount > 1)
+                    {
+                        var offsetByTrack = new long[trackCount];
+                        long acc = 0;
+                        for (int t = 0; t < trackCount; t++)
+                        {
+                            offsetByTrack[t] = acc;
+                            acc += trackSpan[t];
+                        }
+
+                        for (int i = 0; i < events.Count; i++)
+                        {
+                            long off = offsetByTrack[events[i].track];
+                            if (off == 0) continue;
+                            var e = events[i];
+                            events[i] = (e.tick + off, e.isOn, e.pitch, e.velocity, e.track, e.channel);
+                        }
+                        for (int i = 0; i < tempoEvents.Count; i++)
+                        {
+                            long off = offsetByTrack[tempoEvents[i].track];
+                            if (off == 0) continue;
+                            var te = tempoEvents[i];
+                            tempoEvents[i] = (te.tick + off, te.tempo, te.track);
+                        }
+
+                        if (acc > maxTick) maxTick = acc;
+                    }
+
+                    warnings.Add("该文件是 MIDI Format 2（多个相互独立的序列）。为保证教学只使用一条时间轴，" +
+                                 "已按轨道顺序把它们依次拼接为一条时间轴播放，各序列不再并行。");
                 }
 
                 // ---- Note On/Off 配对（统一事件流 + 栈，off 关闭最近的同键 on）----
@@ -279,7 +357,7 @@ namespace PianoTeacher3D.MIDI
                     tempoChanges.Insert(0, new TempoChange(0f, DefaultTempo));
 
                 return new MidiParseResult(true, null, notes, (float)maxEndSeconds,
-                    division, trackCount, tempoChanges, danglingCount);
+                    division, trackCount, tempoChanges, danglingCount, format, warnings);
             }
             catch (EndOfStreamException)
             {

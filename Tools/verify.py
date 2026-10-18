@@ -5,25 +5,39 @@
 
 用途
 ----
-在命令行完成「编译 → EditMode 测试 → PlayMode 测试 →（可选）视觉基线截图」，
-并输出结果汇总。无需打开 Unity 编辑器。
+在命令行完成「编译 → EditMode 测试 → PlayMode 测试 →（可选）压力 / 长跑 / 性能 / 视觉基线」，
+并输出统一结果汇总与产物清单。无需打开 Unity 编辑器。
 
 依赖
 ----
-1. Python 3.8+（本机已带，无需 pip 安装任何第三方包）
+1. Python 3.8+（本机已带，无需 pip 安装任何第三方包 —— 纯标准库）
 2. Unity Editor 2022.3.22f1c1（本机默认路径 D:\\Unity\\Unity 2022.3.22f1c1\\Editor\\Unity.exe；
    也可通过环境变量 UNITY_PATH 指定）
 
 用法
 ----
-    python Tools/verify.py                # 编译 + EditMode + PlayMode（无 GPU 要求）
-    python Tools/verify.py --visual       # 追加视觉基线截图（需要 GPU，勿加 -nographics）
-    python Tools/verify.py --edit-only    # 只跑 EditMode（最快）
-    python Tools/verify.py --timeout 600  # 单个阶段超时（秒，默认 420）
+    python Tools/verify.py                    # 编译 + EditMode + PlayMode（无 GPU 要求）
+    python Tools/verify.py --visual           # 追加视觉基线截图（需要 GPU，勿加 -nographics）
+    python Tools/verify.py --edit-only        # 只跑 EditMode（最快）
+    python Tools/verify.py --timeout 600      # 单个阶段超时（秒，默认 420）
+
+    python Tools/verify.py --stress           # 追加压力测试（-testCategory Stress）
+    python Tools/verify.py --perf             # 追加性能采样（-testCategory Perf）
+    python Tools/verify.py --soak             # 追加长跑稳定性（-testCategory Soak，默认 10 分钟）
+    python Tools/verify.py --soak --soak-seconds 120
+                                              # 长跑时长改为 120 秒（环境变量 PT3D_SOAK_SECONDS）
+    python Tools/verify.py --compare-visual   # 追加视觉基线比较（-testFilter CompareAgainstBaseline，需 GPU）
+    python Tools/verify.py --all              # = --visual --stress --perf（不含 --soak / --compare-visual）
+
+关于分类与 [Explicit]
+---------------------
+Soak / Perf 用例标注了 [NUnit.Framework.Explicit]，默认「全部测试」不会执行它们；
+Unity Test Framework 的官方约定是：**选中其所属 Category 时即会运行**，
+因此这里统一用 -testCategory 选择（对应方案 11.4 的稳定性与性能采样要求）。
 
 退出码
 ------
-    0 = 全部通过；1 = 有失败；2 = 环境问题（找不到 Unity / 项目）
+    0 = 全部通过（含「如实跳过」的阶段）；1 = 有失败；2 = 环境问题（找不到 Unity / 项目）
 """
 
 import argparse
@@ -53,6 +67,9 @@ UNITY_CANDIDATES = [
 
 OUT_DIR = PROJECT_ROOT / "_verify_out"
 
+# 长跑默认时长（秒）：与 StressAndStabilityTests 内的默认值保持一致（方案 11.4：10 分钟以上）
+SOAK_DEFAULT_SECONDS = 600
+
 
 def find_unity():
     for candidate in UNITY_CANDIDATES:
@@ -61,27 +78,38 @@ def find_unity():
     return None
 
 
-def run_unity(unity, extra_args, log_name, timeout_s, expect_xml: Path = None):
-    """执行一次 Unity 批处理。返回 (状态字符串, 退出码)。
+def run_unity(unity, extra_args, log_name, timeout_s, expect_xml: Path = None,
+              nographics: bool = True, extra_env: dict = None):
+    """执行一次 Unity 批处理。返回 (状态字符串, 日志路径)。
 
     已知行为：Unity 在 -runTests 后有时会卡在退出阶段（不返回），
     此时若结果 XML 已生成，即视为本次运行成功完成。
+
+    nographics=False 用于 --visual / --compare-visual 阶段（需要真实 GPU 渲染）。
+    extra_env 里的键值会叠加到当前进程环境后传给 Unity（例如 PT3D_SOAK_SECONDS）。
     """
     log_path = OUT_DIR / f"{log_name}.log"
     if expect_xml and expect_xml.exists():
         expect_xml.unlink()
 
-    cmd = [str(unity), "-batchmode", "-nographics",
-           "-projectPath", str(PROJECT_ROOT)]
+    cmd = [str(unity), "-batchmode"]
+    if nographics:
+        cmd += ["-nographics"]
+    cmd += ["-projectPath", str(PROJECT_ROOT)]
     cmd += extra_args
     if expect_xml:
         cmd += ["-testResults", str(expect_xml)]
     cmd += ["-logFile", str(log_path)]
 
+    env = None
+    if extra_env:
+        env = dict(os.environ)
+        env.update({k: str(v) for k, v in extra_env.items()})
+
     print(f"\n$ {' '.join(cmd[:6])} ...")
     started = time.time()
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, env=env)
     deadline = started + timeout_s
     status = "timeout"
 
@@ -156,12 +184,75 @@ def print_summary(title, result):
     return ok
 
 
+def report_stage_special(title, result):
+    """补充说明：0 个用例 / 全部跳过时如实报告，而不是当成成功（方案 0 节诚实性要求）。"""
+    if result is None:
+        return
+    if result["total"] == 0:
+        print(f"  ⚠ [{title}] 未匹配到任何用例 —— 请确认该分类下的测试已编译"
+              f"（[Explicit] 用例需按 Category 选择运行）")
+    elif result["passed"] == 0 and result["skipped"] > 0:
+        print(f"  ⚠ [{title}] 本次全部用例已跳过（{result['skipped']} 个），并未真正执行；"
+              f"不代表已通过，请人工确认（例如缺少视觉基线或缺少示例曲目）")
+
+
+def print_artifacts():
+    """产物清单：列出关键产物的存在性与最后修改时间。"""
+    print("\n" + "-" * 68)
+    print("产物清单")
+    print("-" * 68)
+
+    items = []
+    shots = PROJECT_ROOT / "Docs" / "screenshots"
+    if shots.is_dir():
+        items.extend(sorted(shots.glob("*.png")))
+    items.append(PROJECT_ROOT / "Docs" / "perf" / "sampling.md")
+    items.append(PROJECT_ROOT / "Docs" / "perf" / "environments.md")
+
+    any_missing = False
+    for path in items:
+        rel = path.relative_to(PROJECT_ROOT)
+        if path.exists():
+            stat = path.stat()
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+            print(f"  ✓ {rel}  （最后修改 {stamp}，{stat.st_size} 字节）")
+        else:
+            any_missing = True
+            print(f"  ✗ {rel}  （不存在）")
+    if any_missing:
+        print("  提示：缺失的产物需要对应阶段真正执行后才会生成"
+              "（截图见 --visual，采样与矩阵记录见 --stress / --perf / --soak）")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Piano Teacher 3D 一键验证")
-    parser.add_argument("--visual", action="store_true", help="追加视觉基线截图（需要 GPU）")
+    parser.add_argument("--visual", action="store_true",
+                        help="追加视觉基线截图（需要 GPU；该阶段不加 -nographics）")
     parser.add_argument("--edit-only", action="store_true", help="只跑 EditMode")
-    parser.add_argument("--timeout", type=int, default=420, help="单个阶段超时秒数")
+    parser.add_argument("--timeout", type=int, default=420, help="单个阶段超时秒数（默认 420）")
+
+    parser.add_argument("--stress", action="store_true",
+                        help="追加压力与稳定性采样：-testCategory Stress（快速切换 / 资源加载 / 环境矩阵自检）")
+    parser.add_argument("--soak", action="store_true",
+                        help=f"追加长跑稳定性：-testCategory Soak（默认 {SOAK_DEFAULT_SECONDS} 秒，耗时长）")
+    parser.add_argument("--soak-seconds", type=int, default=None, metavar="N",
+                        help=f"长跑时长（秒），通过环境变量 PT3D_SOAK_SECONDS 传给 Unity（默认 {SOAK_DEFAULT_SECONDS}）")
+    parser.add_argument("--perf", action="store_true",
+                        help="追加性能采样：-testCategory Perf（帧时间 p50/p95/p99 与 1%% low FPS）")
+    parser.add_argument("--compare-visual", action="store_true",
+                        help="追加视觉基线比较：-testFilter CompareAgainstBaseline（需要 GPU 与人工确认的基线；"
+                             "无基线时用例会 Ignore，脚本按「已跳过」如实报告）")
+    parser.add_argument("--all", action="store_true",
+                        help="等价于 --visual --stress --perf（不含 --soak 与 --compare-visual）")
     args = parser.parse_args()
+
+    if args.all:
+        args.visual = True
+        args.stress = True
+        args.perf = True
+
+    if args.soak_seconds is None:
+        args.soak_seconds = SOAK_DEFAULT_SECONDS
 
     print("=" * 68)
     print("钢琴 3D 教学 APP — 一键验证")
@@ -212,17 +303,58 @@ def main():
         run_unity(unity, ["-runTests", "-testPlatform", "PlayMode"], "playmode", args.timeout, xml)
         results["PlayMode"] = parse_results(xml)
 
-    # ---- 4. 视觉快照（可选）----
+    # ---- 4. 视觉快照（可选，需要 GPU）----
     if args.visual:
         print("\n" + "-" * 68)
         print("[附加] 视觉基线截图（需要 GPU，不加 -nographics）")
         xml = OUT_DIR / "visual.xml"
         run_unity(unity, ["-runTests", "-testPlatform", "PlayMode",
-                         "-testFilter", "CaptureLessonViews"], "visual", args.timeout * 2, xml)
+                          "-testFilter", "CaptureLessonViews"], "visual", args.timeout * 2, xml,
+                  nographics=False)
         shots = PROJECT_ROOT / "Docs" / "screenshots"
         if shots.is_dir():
             names = sorted(p.name for p in shots.glob("*.png"))
             print(f"  已生成 {len(names)} 张截图: {', '.join(names)}")
+
+    # ---- 5. 压力测试（可选）----
+    if args.stress:
+        print("\n" + "-" * 68)
+        print("[附加] 压力与稳定性采样（快速切换 ≥200 次 / 资源加载采样 / 环境矩阵自检）")
+        xml = OUT_DIR / "stress.xml"
+        run_unity(unity, ["-runTests", "-testPlatform", "PlayMode",
+                          "-testCategory", "Stress"], "stress", args.timeout * 2, xml)
+        results["Stress"] = parse_results(xml)
+
+    # ---- 6. 性能采样（可选）----
+    if args.perf:
+        print("\n" + "-" * 68)
+        print("[附加] 性能采样（帧时间 p50/p95/p99、1% low FPS、GC 分配；写 Docs/perf/sampling.md）")
+        xml = OUT_DIR / "perf.xml"
+        run_unity(unity, ["-runTests", "-testPlatform", "PlayMode",
+                          "-testCategory", "Perf"], "perf", args.timeout * 2, xml)
+        results["Perf"] = parse_results(xml)
+
+    # ---- 7. 长跑稳定性（可选，耗时长）----
+    if args.soak:
+        soak_timeout = max(args.timeout, args.soak_seconds + 240)
+        print("\n" + "-" * 68)
+        print(f"[附加] 长跑稳定性 Soak：{args.soak_seconds} 秒（PT3D_SOAK_SECONDS），"
+              f"阶段超时 {soak_timeout} 秒")
+        xml = OUT_DIR / "soak.xml"
+        run_unity(unity, ["-runTests", "-testPlatform", "PlayMode",
+                          "-testCategory", "Soak"], "soak", soak_timeout, xml,
+                  extra_env={"PT3D_SOAK_SECONDS": args.soak_seconds})
+        results["Soak"] = parse_results(xml)
+
+    # ---- 8. 视觉基线比较（可选，需要 GPU 与人工确认的基线）----
+    if args.compare_visual:
+        print("\n" + "-" * 68)
+        print("[附加] 视觉基线比较（需要 GPU，不加 -nographics；无基线时用例会 Ignore）")
+        xml = OUT_DIR / "comparevisual.xml"
+        run_unity(unity, ["-runTests", "-testPlatform", "PlayMode",
+                          "-testFilter", "CompareAgainstBaseline"], "comparevisual",
+                  args.timeout * 2, xml, nographics=False)
+        results["VisualBaseline"] = parse_results(xml)
 
     # ---- 汇总 ----
     print("\n" + "=" * 68)
@@ -231,6 +363,9 @@ def main():
     all_ok = True
     for title, result in results.items():
         all_ok = print_summary(title, result) and all_ok
+        report_stage_special(title, result)
+
+    print_artifacts()
 
     print("\n" + ("✓ 全部通过" if all_ok else "✗ 存在失败项，详见上方 FAIL 列表"))
     return 0 if all_ok else 1

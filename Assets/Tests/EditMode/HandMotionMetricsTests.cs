@@ -174,5 +174,195 @@ namespace PianoTeacher3D.Tests.EditMode
             StringAssert.Contains("最大帧位移", text);
             StringAssert.Contains("平滑度", text);
         }
+
+        // ==================== 审查 1.2C 扩充指标 ====================
+
+        private static HandMotionSample GroupSample(bool hit, bool black, bool chord, bool fast, bool large)
+        {
+            return new HandMotionSample
+            {
+                LeftWrist = hit ? new Vector3(0f, 1f, 0f) : new Vector3(1f, 1f, 0f),
+                RightWrist = Vector3.zero,
+                LeftTarget = Vector3.zero,
+                RightTarget = Vector3.zero,
+                LeftHasTarget = true,
+                RightHasTarget = false,
+                HitRadius = 0.09f,
+                MovingThreshold = 0.001f,
+                BlackKeyFrame = black,
+                ChordFrame = chord,
+                FastScaleFrame = fast,
+                LargeMotionFrame = large
+            };
+        }
+
+        private static void AddLeftStep(HandMotionAccumulator acc, Vector3 left, float speedAnomalyThreshold)
+        {
+            acc.AddSample(new HandMotionSample
+            {
+                LeftWrist = left,
+                RightWrist = Vector3.zero,
+                LeftHasTarget = false,
+                RightHasTarget = false,
+                MovingThreshold = 0.001f,
+                SpeedAnomalyThreshold = speedAnomalyThreshold
+            });
+        }
+
+        [Test]
+        public void LeftAndRightHitRates_AreReportedSeparately()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(Sample(
+                new Vector3(0f, 1f, 0f), new Vector3(1f, 1f, 0f),   // 左手对准、右手偏离
+                Vector3.zero, Vector3.zero));
+
+            var report = acc.Build();
+            Assert.AreEqual(1f, report.LeftHitRate, 1e-4f, "左手命中");
+            Assert.AreEqual(0f, report.RightHitRate, 1e-4f, "右手未命中");
+            Assert.AreEqual(1, report.LeftTargetSamples);
+            Assert.AreEqual(1, report.RightTargetSamples);
+        }
+
+        [Test]
+        public void FingertipErrors_AreAveragedAndMaxIsTracked()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(new HandMotionSample
+            {
+                LeftWrist = Vector3.zero,
+                RightWrist = Vector3.zero,
+                LeftHasTarget = false,
+                RightHasTarget = false,
+                HasFingertipErrors = true,
+                LeftFingertipError = 0.01f,
+                RightFingertipError = 0.03f,
+                FingertipTolerance = 0.02f
+            });
+
+            var report = acc.Build();
+            Assert.AreEqual(2, report.FingertipSamples);
+            Assert.AreEqual(0.02f, report.FingertipMeanError, 1e-5f);
+            Assert.AreEqual(0.03f, report.FingertipMaxError, 1e-5f);
+            Assert.AreEqual(1, report.FingertipHitSamples, "只有左手落在容差内");
+            Assert.AreEqual(0.5f, report.FingertipHitRate, 1e-4f);
+        }
+
+        [Test]
+        public void FingertipErrors_AreIgnoredWithoutSampleFlag()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(Sample(Vector3.zero, Vector3.zero, Vector3.zero, Vector3.zero));
+
+            var report = acc.Build();
+            Assert.AreEqual(0, report.FingertipSamples,
+                "未标记含指尖样本时不得计入（默认 0 不能被误当成 0 误差）");
+            Assert.AreEqual(0f, report.FingertipMeanError);
+            Assert.AreEqual(1f, report.FingertipHitRate, 1e-4f, "无样本时按 1 计，避免误报");
+        }
+
+        [Test]
+        public void SpeedAnomaly_CountsOnlyWhenThresholdProvided()
+        {
+            var without = new HandMotionAccumulator();
+            AddLeftStep(without, Vector3.zero, 0f);
+            AddLeftStep(without, new Vector3(0.05f, 0f, 0f), 0f);
+            Assert.AreEqual(0, without.Build().SpeedAnomalyCount, "阈值为 0 时不统计");
+
+            var with = new HandMotionAccumulator();
+            AddLeftStep(with, Vector3.zero, 0.02f);                       // 首个对比帧尚无上一帧步长
+            AddLeftStep(with, new Vector3(0.05f, 0f, 0f), 0.02f);         // step = 0.05
+            AddLeftStep(with, new Vector3(0.05f, 0f, 0f), 0.02f);         // step = 0 → |0-0.05| > 0.02
+            Assert.AreEqual(1, with.Build().SpeedAnomalyCount);
+        }
+
+        [Test]
+        public void GroupRates_ExposeSampleCountsAndHits()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(GroupSample(hit: true, black: true, chord: true, fast: true, large: false));
+            acc.AddSample(GroupSample(hit: false, black: true, chord: false, fast: false, large: true));
+
+            var report = acc.Build();
+            Assert.AreEqual(2, report.BlackKeyTargetSamples);
+            Assert.AreEqual(0.5f, report.BlackKeyHitRate, 1e-4f);
+            Assert.AreEqual(1, report.ChordTargetSamples);
+            Assert.AreEqual(1f, report.ChordHitRate, 1e-4f);
+            Assert.AreEqual(1, report.FastScaleTargetSamples);
+            Assert.AreEqual(1f, report.FastScaleHitRate, 1e-4f);
+            Assert.AreEqual(1, report.LargeMotionTargetSamples);
+            Assert.AreEqual(0f, report.LargeMotionHitRate, 1e-4f);
+        }
+
+        [Test]
+        public void GroupRates_WithoutSamples_AreOneAndSamplesAreZero()
+        {
+            var report = new HandMotionAccumulator().Build();
+
+            Assert.AreEqual(1f, report.BlackKeyHitRate, 1e-4f);
+            Assert.AreEqual(0, report.BlackKeyTargetSamples, "无样本时应能显示「样本 0」");
+            Assert.AreEqual(1f, report.ChordHitRate, 1e-4f);
+            Assert.AreEqual(0, report.ChordTargetSamples);
+            Assert.AreEqual(1f, report.FastScaleHitRate, 1e-4f);
+            Assert.AreEqual(0, report.FastScaleTargetSamples);
+            Assert.AreEqual(1f, report.LargeMotionHitRate, 1e-4f);
+            Assert.AreEqual(0, report.LargeMotionTargetSamples);
+        }
+
+        [Test]
+        public void VisualCheckFlags_AreCountedPerFrame()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(new HandMotionSample
+            {
+                LeftWrist = Vector3.zero,
+                RightWrist = Vector3.zero,
+                LeftHasTarget = false,
+                RightHasTarget = false,
+                HandsCrossed = true,
+                ThumbOrientationIssue = true,
+                PalmPenetration = true,
+                Hovering = true
+            });
+
+            var report = acc.Build();
+            Assert.AreEqual(1, report.CrossedHandFrames);
+            Assert.AreEqual(1, report.ThumbOrientationIssues);
+            Assert.AreEqual(1, report.PalmPenetrationFrames);
+            Assert.AreEqual(1, report.HoveringFrames);
+        }
+
+        [Test]
+        public void ExtendedReportString_KeepsLegacyTextAndAddsNewDimensions()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(Sample(Vector3.zero, Vector3.zero, Vector3.zero, Vector3.zero));
+
+            string text = acc.Build().ToLogString();
+
+            StringAssert.Contains("命中率", text);       // 向后兼容：既有字段仍在
+            StringAssert.Contains("最大帧位移", text);
+            StringAssert.Contains("平滑度", text);
+            StringAssert.Contains("指尖误差", text);     // 新增维度
+            StringAssert.Contains("分组", text);
+            StringAssert.Contains("抽查", text);
+            StringAssert.Contains("样本 0", text);       // 无分组样本时明确标注，而不是伪造 100%
+        }
+
+        [Test]
+        public void Reset_ClearsExtendedStatistics()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(GroupSample(hit: true, black: true, chord: true, fast: true, large: true));
+
+            acc.Reset();
+            var report = acc.Build();
+
+            Assert.AreEqual(0, report.BlackKeyTargetSamples);
+            Assert.AreEqual(0, report.CrossedHandFrames);
+            Assert.AreEqual(0, report.FingertipSamples);
+            Assert.AreEqual(0, report.SpeedAnomalyCount);
+            Assert.AreEqual(1f, report.BlackKeyHitRate, 1e-4f);
+        }
     }
 }
