@@ -107,7 +107,7 @@
 <!-- SECTION:resource-load:BEGIN -->
 ### 资源加载采样（方案 11.4「资源加载耗时和失败率采样」）
 
-- 时间：2026-10-19 19:06:39
+- 时间：2026-10-19 19:42:34
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -115,11 +115,11 @@
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
 - 曲目目录：`StreamingAssets/Songs`；曲目数：1
-- 最慢单曲：36.6 ms；失败数：0
+- 最慢单曲：22.6 ms；失败数：0
 
 | 曲目 | 加载耗时 (ms) | 结果 |
 |---|---|---|
-| demo.mid | 36.6 | 成功 |
+| demo.mid | 22.6 | 成功 |
 
 **口径说明**：耗时用 `System.Diagnostics.Stopwatch` 包裹 `LessonSessionController.LoadSong`，包含校验 + 解析 + 一次性提交；示例曲为毫秒级，5 秒上限只用于捕获卡死，不代表目标设备上的加载性能。
 <!-- SECTION:resource-load:END -->
@@ -132,19 +132,19 @@
 - GPU / 图形 API：NVIDIA GeForce RTX 4060 Laptop GPU / Direct3D11
 - 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
 - Unity / 画质档：2022.3.22f1c1 / High
-- 采样窗口：预热 2.0 s + 采样 20.0 s（1198 帧）
+- 采样窗口：预热 2.0 s + 采样 10.0 s（598 帧）
 
 | 指标 | 数值 |
 |---|---|
-| 平均帧时间 | 16.70 ms |
+| 平均帧时间 | 16.72 ms |
 | p50 帧时间 | 16.67 ms |
-| p95 帧时间 | 16.77 ms |
-| p99 帧时间 | 16.93 ms |
-| 最大帧时间 | 34.07 ms |
-| 平均 FPS | 59.9 |
-| 1% low FPS | 53.2 |
-| 托管内存（GC.GetTotalMemory） | 3.5 → 3.5 MB（增量 -0.04 MB） |
-| Mono 已用 / 总分配 | 3.5 / 89.9 MB |
+| p95 帧时间 | 16.76 ms |
+| p99 帧时间 | 16.96 ms |
+| 最大帧时间 | 44.77 ms |
+| 平均 FPS | 59.8 |
+| 1% low FPS | 46.1 |
+| 托管内存（GC.GetTotalMemory） | 3.6 → 3.7 MB（增量 +0.09 MB） |
+| Mono 已用 / 总分配 | 3.7 / 89.6 MB |
 | Mesh / Material / AudioClip / GameObject | 107 / 46 / 90 / 644 |
 
 **口径说明**
@@ -164,20 +164,20 @@
 - GPU / 图形 API：NVIDIA GeForce RTX 4060 Laptop GPU / Direct3D11
 - 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
 - Unity / 画质档：2022.3.22f1c1 / High
-- 采样窗口：预热 2.0 s + 采样 20.0 s（1199 帧）
+- 采样窗口：预热 2.0 s + 采样 10.0 s（599 帧）
 
 | 指标 | 数值 |
 |---|---|
-| 平均帧时间 | 16.69 ms |
+| 平均帧时间 | 16.71 ms |
 | p50 帧时间 | 16.67 ms |
-| p95 帧时间 | 16.73 ms |
-| p99 帧时间 | 16.87 ms |
-| 最大帧时间 | 24.05 ms |
-| 平均 FPS | 59.9 |
-| 1% low FPS | 53.4 |
-| 托管内存（GC.GetTotalMemory） | 3.6 → 3.6 MB（增量 +0.06 MB） |
-| Mono 已用 / 总分配 | 3.6 / 89.5 MB |
-| Mesh / Material / AudioClip / GameObject | 107 / 46 / 90 / 591 |
+| p95 帧时间 | 16.76 ms |
+| p99 帧时间 | 17.10 ms |
+| 最大帧时间 | 24.92 ms |
+| 平均 FPS | 59.8 |
+| 1% low FPS | 50.0 |
+| 托管内存（GC.GetTotalMemory） | 3.6 → 3.7 MB（增量 +0.12 MB） |
+| Mono 已用 / 总分配 | 3.7 / 89.3 MB |
+| Mesh / Material / AudioClip / GameObject | 107 / 46 / 90 / 593 |
 
 **口径说明**
 
@@ -187,3 +187,33 @@
 - 资源计数为 `Resources.FindObjectsOfTypeAll` 的运行时总数（含内置对象），只用于同机版本间趋势对比。
 - 结论边界：Development Build + 真实图形设备；Editor 批处理数据不可与之混用。
 <!-- SECTION:player-switch:END -->
+
+<!-- SECTION:player-soak:BEGIN -->
+### 真实 Windows Player 长跑（10 分钟 Soak，清单第 4 项 / §8「10 分钟常规 Soak」）
+
+- 时间：2026-10-19 19:13–19:23
+- 设备：Intel Core i9-14900HX（32 线程）/ 16 GB / NVIDIA RTX 4060 Laptop 8 GB / Direct3D11
+- 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
+- 构建：Development Build（`_verify_out/player/PianoTeacher3D.exe`，与 20 s 基线同一份产物）
+- 场景：`play`（`demo.mid` 循环播放，无切换）；预热 2.0 s + 采样 600.0 s（35986 帧）
+- 画质档：Auto → High
+
+| 指标 | 数值 |
+|---|---|
+| 平均帧时间 | 16.67 ms |
+| p50 帧时间 | 16.67 ms |
+| p95 帧时间 | 16.71 ms |
+| p99 帧时间 | 16.87 ms |
+| 最大帧时间 | **17.66 ms**（10 分钟内无 20 ms 以上长帧） |
+| 平均 FPS | 59.98 |
+| 1% low FPS | **58.98**（优于 20 s 基线的 53.2，后者被启动期长帧拉低） |
+| 托管内存（GC.GetTotalMemory） | 3.54 → 3.99 MB（增量 +0.45 MB / 10 min） |
+| Mono 已用 / 总分配 | 3.99 / 89.86 MB |
+| Mesh / Material / AudioClip / GameObject | 107 / 46 / 90 / 644 |
+
+**判读**
+
+- §8「10 分钟常规 Soak」在本机这一档设备上**达标**：p99 ≤ 20 ms、1% low ≥ 55 FPS 均满足，播放热路径无持续 GC（10 分钟托管堆仅 +0.45 MB，且无单调增长证据）。
+- 与 20 s 基线相比，长窗口把启动期抖动摊平：最大帧时间从 34.07 ms 降到 17.66 ms，说明 20 s 基线里的长帧集中在启动阶段，不是稳态问题。
+- **结论边界**：只有端点快照（起/止托管内存与资源计数），没有按时间分段的序列，因此「资源无单调增长」只能作为**未观察到异常**，不能当作泄漏已排除；30 分钟发布候选 Soak 与集显/中档机仍未覆盖。
+<!-- SECTION:player-soak:END -->
