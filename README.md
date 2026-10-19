@@ -11,7 +11,7 @@
 | 程序集 | `PianoTeacher3D`（运行时代码）、`PianoTeacher3D.EditModeTests`、`PianoTeacher3D.PlayModeTests` |
 | 第三方资源 | **无**：钢琴 / 人物 / 材质 / 音频 / 曲目 / 字体全部程序化生成或使用引擎内置资源 |
 | 代码规模 | `Assets/Scripts` **48 个脚本 / 17,302 行**；`Assets/Tests` **33 个测试文件 / 10,215 行** |
-| 已验证状态 | 编译 **0 错误 0 警告**；EditMode **285/285**；PlayMode **82 通过 + 5 跳过 + 0 失败**；Stress 3/3、Perf 4/4、Soak 1/1 |
+| 已验证状态 | 编译 **0 错误 0 警告**；EditMode **301/301**；PlayMode **90 通过 + 5 跳过 + 0 失败**；Stress 3/3、Perf 4/4、Soak 1/1 |
 
 > 数字来源：2026-10-16 本机实测（`python Tools/verify.py --stress --perf --soak --soak-seconds 90`）。
 > 口径与逐条验收见 [`Docs/completion-review.md`](Docs/completion-review.md)、[`Docs/how-to-run.md`](Docs/how-to-run.md)。
@@ -50,7 +50,7 @@ MIDI 文件 → 解析为音符事件 → 统一时间轴驱动
 | 维度 | 现状 |
 |---|---|
 | 功能完整度 | 播放 / 视角 / 角色 / 分手 / 循环 / 节拍器 / 高亮 / 曲目导入 / 偏好持久化 / 错误恢复 均已可用 |
-| 测试 | EditMode 285 条纯逻辑用例；PlayMode 87 项（含 9 个视角可用性场景、压力与视觉快照） |
+| 测试 | EditMode 301 条纯逻辑用例（含手部网格几何 18 条）；PlayMode 95 项（含 9 个视角可用性场景、手部三关节姿态 7 条、压力与视觉快照） |
 | 性能（批处理采样） | 锁 60 FPS：纯播放 p99 **17 ms**、1% low **58.4 FPS**、GC **0.01 MB**；90 s 长跑内存 **+0.4%** |
 | 视觉基线 | **20 张**截图（6 张旧基线 + V01–V14），清单由测试自动生成 |
 | 未实现 | AI 动作生成、照片生成 3D 人物、MP3/WAV 转谱、移动端 / Web（均为计划项） |
@@ -218,8 +218,8 @@ piano-teacher-3d/
 │   ├── StreamingAssets/
 │   │   └── Songs/demo.mid              # 内置示例曲（只读）
 │   └── Tests/
-│       ├── EditMode/                   # 18 个测试文件 + asmdef（只跑 Editor）
-│       └── PlayMode/                   # 15 个测试文件 + asmdef（场景级）
+│       ├── EditMode/                   # 19 个测试文件 + asmdef（只跑 Editor）
+│       └── PlayMode/                   # 16 个测试文件 + asmdef（场景级）
 ├── Docs/                               # 架构、动画、UI、错误码、验收、截图、性能
 ├── Tools/
 │   ├── verify.py                       # 一键验证
@@ -282,15 +282,16 @@ piano-teacher-3d/
 
 | 文件 | 职责 |
 |---|---|
-| `AvatarManager.cs` | 3 个预设角色的构建与切换；`IHandRig` 手部引用、Humanoid 骨架校验、手部可见性 |
-| `AvatarRigBuilder.cs` | 程序化 Humanoid 骨架（30 节点）+ `BuildHumanAvatar` 生成合法 `Avatar`；骨骼局部位置表 |
-| `AvatarDefinition.cs` | 纯数据角色定义、`AvatarBodyMetrics` 人体标尺（以 24 mm 键宽为参照）、校验逻辑 |
-| `HandIKController.cs` | 手腕 IK（换位抬升 / 自适应速度 / 单帧位移硬约束 / 姿态钳制）、指尖目标、手掌几何反馈、指标采样 |
-| `FingerPoseController.cs` | 手指姿态：按分配结果弯指、朝目标键对准、和弦张开角、低置信度标注 |
+| `AvatarManager.cs` | 3 个预设角色的构建与切换；`IHandRig` 手部引用、`IFingerJointRig` 三关节、Humanoid 骨架校验、手部可见性、运行时网格生命周期 |
+| `AvatarRigBuilder.cs` | 程序化 Humanoid 骨架（躯干 20 节点 + 每指 MCP/PIP/DIP 三节点）+ `BuildHumanAvatar` 生成合法 `Avatar`；骨骼局部位置表 |
+| `AvatarDefinition.cs` | 纯数据角色定义、`AvatarBodyMetrics` 人体标尺（以 24 mm 键宽为参照）、`HandMetrics` 每角色手部比例、校验逻辑 |
+| `HandMeshFactory.cs` | **程序化手部网格工厂**：掌部连续截面放样（超椭圆 + 大鱼际/小鱼际）、手指逐段渐缩、半球指尖、指甲薄片；纯函数、可单测 |
+| `HandIKController.cs` | 手腕 IK（换位抬升 / 自适应速度 / 单帧位移硬约束 / 姿态钳制）、受限手腕俯仰滚转、指尖目标、手掌几何反馈、指标采样 |
+| `FingerPoseController.cs` | 手指姿态：MCP/PIP/DIP 关节级受限指尖 IK、Approach/Press/Hold/Rest 四阶段、关节限位计数、低置信度标注 |
 | `FingerAssignmentService.cs` | **双手共用的「手指 ↔ 音高」分配**；`IFingertipTargetSource` 接口；同帧幂等 |
 | `IFingeringProvider.cs` / `HeuristicFingeringProvider.cs` | 可替换指法提供器接口 + 规则化启发式实现（音域 / 邻近 / 黑键 / 跨度 / 和弦 / 拇指穿越） |
-| `HandPoseValidator.cs` | 姿态边界、越界钳制、双手交叉判定、指尖误差（纯静态） |
-| `HandMotionMetrics.cs` | 动作指标累计与报告：命中率、分项、指尖误差、速度异常、分组命中率、视觉抽查计数 |
+| `HandPoseValidator.cs` | 姿态边界、越界钳制、双手交叉判定、指尖误差、关节角限位、键面法向距离（纯静态） |
+| `HandMotionMetrics.cs` | 动作指标累计与报告：命中率、被分配指尖误差、键面距离、换位峰值、P50/P95/P99 分组、关节限位与穿模计数 |
 
 ### 4.6 `Assets/Scripts/Camera` — 取景
 
@@ -543,14 +544,23 @@ export UNITY_PATH="D:/Unity/Unity 2022.3.22f1c1/Editor/Unity.exe"   # Git Bash
 | `EnableFingertipMetrics` / `FingertipErrorTolerance` | `true` / 0.035 m | 指尖误差统计与命中容差 |
 | `FingertipTargetForward` / `FingertipReachEstimate` | 0.80 / 0.085 m | 按压区沿键长比例与指尖长度估计 |
 | `HoverHeight` | 0.045 m | 高于键面多少算「离键悬空」 |
+| `EnableWristOrientation` / `DefaultWristPitch` | `true` / 8° | 手腕受限俯仰（角色可用 `HandMetrics.WristPitch` 覆盖） |
+| `MaxWristRollDegrees` / `WristOrientationSpeed` | 6° / 7 | 键盘两端的手腕滚转上限与跟随速度 |
+| `FingertipPenetrationTolerance` | 0.004 m | 指尖压入键面的判穿模容差 |
+| `TransitionStepThreshold` | 0.010 m | 判定「换位过渡帧」的手腕单帧位移阈值 |
 
 #### 手指姿态 `FingerPoseController`
 
 | 参数 | 默认值 | 作用 |
 |---|---|---|
-| `PressAngle` / `RestAngle` | 32° / 18° | 按下 / 自然弯曲角度 |
-| `SlerpSpeed` | 15 | 姿态插值速度 |
-| `SpreadAngle` | 4° | 和弦手型张开角 |
+| `PressAngle` / `RestAngle` | 32° / 18° | **兜底**按下 / 自然弯曲角度（手部无三关节时使用） |
+| `SlerpSpeed` | 15 | 指根对准的插值速度 |
+| `SpreadAngle` | 4° | 兜底和弦手型张开角 |
+| `RestCurlDegrees` | 26° | 静止时的自然弯曲总量（三关节路径） |
+| `ApproachCurlScale` / `HoldSettleDegrees` | 0.62 / 2.5° | 接近阶段的手型比例 / 保持阶段的额外下压 |
+| `MaxMcpDegrees` / `MaxPipDegrees` / `MaxDipDegrees` | 82° / 95° / 62° | 各关节角度上限（超限钳制并计数） |
+| `JointSlerpSpeed` / `HoldSettleSeconds` | 20 / 0.12 s | 关节插值速度 / Press→Hold 的分界 |
+| `McpWeight` / `PipWeight` / `DipWeight` | 0.46 / 0.34 / 0.20 | **静止姿态**的弯曲分配权重（落键姿态由 CCD 求解） |
 | `MelodyHistoryLength` | 8 | 指法提供器使用的旋律历史长度 |
 
 #### 钢琴几何 `PianoKeyMap`
@@ -857,9 +867,10 @@ LoadSong(path)
 | 限制 | 说明 | 状态 |
 |---|---|---|
 | 音频是波形合成 | 基频 + 2/3/4 次谐波 + 指数衰减，零采样依赖的**降级模式**，不是真实钢琴采样 | 已支持（非最终音色） |
-| 人物 / 钢琴是程序化网格 | 手部已到三段指节 + 拇指对掌，但不是外部高质量模型；躯干侧影仍偏几何化 | 已支持（非最终模型） |
-| 手指只有根节点 1 个自由度 | 手指按目标键整体对准 + 根部弯曲，缺少中 / 末节独立弯曲与手腕姿态控制，近景手指关节起伏不足 | 部分实现 |
-| 指尖贴键精度 | 静态收敛 3–32 mm（均值约 15 mm），播放期均值 38–41 mm；换位过渡帧仍有 260–280 mm 的**单帧**峰值 | 部分实现 |
+| 人物 / 钢琴是程序化网格 | 手部已到单块放样网格 + 三关节（MCP/PIP/DIP）+ 拇指对掌，但不是外部高质量模型；躯干侧影仍偏几何化 | 已支持（非最终模型） |
+| 手指为三关节 + 铰链 IK | 每指 MCP/PIP/DIP 独立旋转，指尖由 CCD 送到键面；**无蒙皮权重**，极限弯曲时指节背面可能有轻微折痕 | 已实现 |
+| 短指 / 大跨度够不到 | 小指（63 mm）与拇指（69 mm）在跨度 &gt; 95 mm 的组合下仍会差 25–35 mm；已计入 `JointLimitHits` 与 `FingertipSurfaceDistance` | 已记录（物理限制） |
+| 指尖贴键精度 | 静态和弦中指 **7.4 mm**、拇指 24.8 mm、小指 34.5 mm（被分配指尖口径）；播放期与换位峰值需按 `Docs/hand-alignment.md` 的新口径重采基线 | 已改进（基线待重采） |
 | 手部特写俯角被几何约束为 60° | 相机必须位于头部之前，否则头会挡住双手；代价是特写偏俯视 | 已支持（受限） |
 | 接触阴影是近似 | 主光软阴影 + 贴地极淡渐变薄片；**没有**真实 SSAO / 后处理（内置管线 + 零第三方包） | 已支持（近似） |
 | 「环境遮蔽 AO」不是后处理 | `QualityProfile.EnableAmbientOcclusion` 只表达观感，由贴地薄片近似 | 实验性 |
@@ -894,9 +905,11 @@ LoadSong(path)
 
 | 文档 | 内容 |
 |---|---|
+| [`Docs/项目说明.md`](Docs/项目说明.md) | **完整项目说明**（定位 / 目录 / 流程 / 依赖 / 环境 / 配置 / 命令 / 接口 / 限制，含目录） |
 | [`Docs/how-to-run.md`](Docs/how-to-run.md) | 运行与验证详细指南（环境 / CLI 全选项 / 产物 / 基线更新 / FAQ） |
 | [`Docs/architecture.md`](Docs/architecture.md) | 架构、模块职责与边界、状态机 / 时序 / 事件连线、配置与内容分离 |
 | [`Docs/animation-pipeline.md`](Docs/animation-pipeline.md) | 动画管线、手部几何、指尖/手腕分离、指标口径、指法提供器 |
+| [`Docs/hand-mesh-design.md`](Docs/hand-mesh-design.md) | **手部网格与关节契约**：局部坐标、`HandMetrics` 比例表、放样规则、三关节映射、铰链 IK、验收用例 |
 | [`Docs/hand-alignment.md`](Docs/hand-alignment.md) | **手部指标口径**：五个指标的精确定义、已知口径缺陷、分组与阶段目标 |
 | [`Docs/hand-correspondence-and-display-modes.md`](Docs/hand-correspondence-and-display-modes.md) | 左手/右手 · 手指↔琴键 · 展示/教学：现象、根因、改动与验证 |
 | [`Docs/ui-design-system.md`](Docs/ui-design-system.md) | 设计令牌、按钮七态、层级、焦点与快捷键、响应式断点、对比度 |

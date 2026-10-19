@@ -40,7 +40,8 @@
 
 **影响**：93.6% 是「跟随达成率」，不能与「指尖对键精度」相提并论；文档里若把两者并列会误导。
 
-**建议**：新增 `WristToKeyError`，目标点用 `KeyTouchPoint.Press` 对应到手腕平面后的坐标，并单独统计。
+**现状（2026-10-18）**：已新增 `WristTargetError`（均值 / P50 / P95 / P99 / 峰值），可以直接看到手腕跟随误差的分布；
+`HitRate` 保留原语义作为对照。真正衡量对键的是新增的 `AssignedFingertipError`。
 
 ### 2.2 `FingertipMeanError` 取「最近指尖」，不是「被分配指尖」
 
@@ -50,8 +51,8 @@
 **与测试口径不一致**：`HandFingerCorrespondenceTests` 断言的是「**被分配**的手指」到该键按压点的距离
 （静态收敛 < 40 mm），两者不是同一个量。
 
-**建议**：新增 `AssignedFingertipError`，取值来自 `FingerAssignmentService.GetFinger(left, pitch)`，
-与视觉一致性测试使用同一口径；原「最近指尖」保留为 `NearestFingertipError` 作对照。
+**现状（2026-10-18）**：已新增 `AssignedFingertipError`，取值来自 `FingerAssignmentService.GetFinger(left, pitch)`，
+与视觉一致性测试使用同一口径；原「最近指尖」保留为 `FingertipMeanError` 作对照。
 
 ### 2.3 `MaxStepDistance` 是手腕位移，不能解释指尖峰值
 
@@ -61,6 +62,10 @@
 **建议**：把 `FingertipMaxError` 明确标注为「指尖对键误差峰值」，并补一个 `TransitionPeakError`：
 在检测到目标跳变（`SeekJumpThreshold = 0.45 m`）后的 N 帧窗口内单独统计。
 
+**现状（2026-10-18）**：已实现 `TransitionFingertipError`，过渡帧判据为
+「目标单帧跳变 ≥ `LargeMotionDistance`（0.10 m）**或** 手腕单帧位移 ≥ `TransitionStepThreshold`（0.010 m）」。
+历史文档中的 260–280 mm 应按此口径重新采集，不能与稳态均值混用。
+
 ### 2.4 统计频率与「音符级」不对齐
 
 所有指标都是**帧级**（每帧最多贡献 1 个手腕样本 / 每手 1 个指尖样本），而教学关心的是「每个音符是否按对」。
@@ -68,16 +73,44 @@
 
 ---
 
-## 3. 建议新增的指标（当前未实现，标「计划中」）
+## 3. 分项指标（本轮已实现，2026-10-18 更新）
 
-| 指标 | 定义 | 用途 | 状态 |
+> 改造前本节是「计划中」清单；现已全部落到 `HandMotionReport`，字段与口径如下。
+> 旧字段（`HitRate` / `FingertipMeanError` / `MaxStepDistance`）语义**保持不变**，用于和历史数据对照。
+
+| 指标 | 代码字段 | 定义（精确） | 与旧口径的区别 |
 |---|---|---|---|
-| `WristToKeyError` | 手腕位置到「目标键对应手腕点」的距离（不做平滑） | 衡量真实对键，替代 `HitRate` 的误导 | 计划中 |
-| `AssignedFingertipError` | **被分配**手指的指尖到该键按压点 3D 距离 | 与视觉一致性断言同口径 | 计划中 |
-| `KeyTopDistance` | 指尖到键面的**法向**距离（只用 Y 分量） | 判断「悬空」而非「位置偏移」 | 计划中（现用 `Hovering` 布尔近似） |
-| `TransitionPeakError` | 目标跳变后 N 帧窗口内的指尖误差峰值 | 分离「换位过渡」与「稳态」 | 计划中 |
-| `JointLimitHits` | 关节角度限位触发次数（按指/关节分类） | 定位「够不到」是分配问题还是可达性问题 | 计划中（需先有多关节骨骼，见附录 A.4） |
-| `P50 / P95 / P99` | 上述误差的分位数（按分组） | 避免均值掩盖尾部 | 计划中 |
+| **手腕目标误差** | `WristTargetError`（`MetricStats`） | 每帧「手腕世界坐标 ↔ `LeftTarget/RightTarget`」的水平 XZ 距离，输出均值 / P50 / P95 / P99 / 峰值 | 旧代码只用它做命中判定、不落盘；现在可看到分散程度 |
+| **被分配指尖误差** | `AssignedFingertipError`（`MetricStats`） | 对每个按下音，取 `FingerAssignmentService.GetFinger(...)` 指定的那根手指，算指尖到键面按压点的 3D 距离 | **取代**「最近指尖」的乐观下界（旧 `FingertipMeanError` 保留对照） |
+| **指尖键面距离** | `FingertipSurfaceDistance`（`MetricStats`） | 被分配指尖的 `y − 键面 y`：正值悬空、负值压入键面 | 旧实现只有 `Hovering` 布尔（阈值 45 mm） |
+| **换位过渡峰值** | `TransitionFingertipError`（`MetricStats`） | 仅统计「过渡帧」的被分配指尖误差：目标单帧跳变 ≥ 0.10 m，或手腕单帧位移 ≥ `TransitionStepThreshold`（0.010 m） | **替换**历史文档里混在总峰值中的「260–280 mm」口径 |
+| **关节限位次数** | `JointLimitHits`（int） | `FingerPoseController.JointLimitClampCount` 的逐帧增量（经 `IHandJointIssueSource` 上报） | 需要三关节骨骼才存在 |
+| **指尖压键帧数** | `FingerPenetrationFrames`（int） | 被分配指尖低于键面超过 `FingertipPenetrationTolerance`（4 mm）的帧数 | 比 `PalmPenetrationFrames`（只看掌心）更贴近实际穿模 |
+| **分组分位** | `GroupFingertipError[4]` | 单音 / 和弦 / 快速音阶 / 跨手四组的 P50 / P95 / P99 / 峰值（按优先级一帧只归一组） | 旧分组只有命中率，没有误差分布 |
+
+实现位置：
+
+| 逻辑 | 文件 | 方法 |
+|---|---|---|
+| 样本字段 | `Assets/Scripts/Avatar/HandMotionMetrics.cs` | `HandMotionSample` 的 `HasAssignedFingertipErrors` / `Left(Right)AssignedFingertipError` / `Left(Right)SurfaceDistance` / `TransitionFrame` / `JointLimitHits` / `FingerPenetration` |
+| 分位统计 | 同上 | `MetricAccumulator`（最多 20000 样本，超出后抽样替换，`Build` 时排序一次） |
+| 采样 | `Assets/Scripts/Avatar/HandIKController.cs` | `SampleMetrics` → `AssignedFingertipError(...)`、`TransitionStepThreshold` 判定、`PoseIssueSource` 增量 |
+| 分组 | 同上 | `HandMetricGroup`（`SingleNote` / `Chord` / `FastScale` / `LargeMotion`） |
+
+> `MetricStats.Describe()` 在样本为 0 时输出「样本 0」，不会把空分组显示成 100%。
+
+---
+
+## 4. 本轮的手部几何与姿态改动（影响指标解读）
+
+| 改动 | 文件 | 对指标的影响 |
+|---|---|---|
+| 掌部改为单块连续放样网格 | `HandMeshFactory.BuildPalm` | 指尖位置由关节链决定，不再受椭球拼接误差影响；DrawCall 减少 |
+| 手指改为 MCP/PIP/DIP 三关节 | `AvatarRigBuilder` / `AvatarManager` / `FingerPoseController` | 指尖可以弯曲后仍然落键，「最近指尖」与「被分配指尖」两个口径的差距应当缩小 |
+| 受限指尖 IK（解总弯曲 + 抬高指根） | `FingerPoseController.UpdateFingerJoints` | 静态收敛误差应显著低于改造前的 38–41 mm；峰值出现在换位瞬间，用 `TransitionFingertipError` 单独看 |
+| 手腕俯仰 / 滚转 | `HandIKController.ApplyWristOrientation` | 掌心朝键面后，指尖目标更接近键面法向；单帧位移上限未变（仍 35 mm） |
+
+> 新的验收数值必须在同一台机器、同一曲目、同一采样窗口下重测；**不要**把旧口径的 38–41 mm 与新口径直接对比。
 
 ---
 
@@ -124,13 +157,14 @@
 
 ## 7. 阶段目标（工程门槛，非行业标准）
 
-| 指标 | 当前记录（旧口径） | 第一阶段目标 | 说明 |
+| 指标 | 改造前记录（旧口径） | 第一阶段目标 | 说明 |
 |---|---:|---:|---|
-| 播放期平均指尖误差 | 38–41 mm（最近指尖口径） | ≤ 25 mm（**改用被分配指尖口径后重测**） | 换口径会变大，需先建新基线 |
-| 换位过渡峰值 | 260–280 mm（指尖） | ≤ 100 mm（`TransitionPeakError`） | 需先区分目标跳变与指尖偏离 |
-| 手腕命中率 | 93.6% | 保持 ≥ 93%（跟随达成率） | 不能替代对键精度 |
-| 单帧手腕位移 | ≤ 35 mm | 保持 ≤ 35 mm | 不放宽 `MaxStepPerFrame` |
-| 姿态穿模告警 | 0 | 0 | 需配合近景人工审核 |
+| 播放期平均指尖误差 | 38–41 mm（最近指尖口径） | ≤ 25 mm（改用 `AssignedFingertipError` 后重测） | 新口径更严格，需先建新基线 |
+| 换位过渡峰值 | 260–280 mm（指尖） | ≤ 100 mm（`TransitionFingertipError`） | 已可从报告中单独读取 |
+| 手腕目标命中率 | 93.6% | 保持 ≥ 93%（跟随达成率） | 不能替代对键精度 |
+| 单帧手腕位移 | ≤ 35 mm | 保持 ≤ 35 mm | 未放宽 `MaxStepPerFrame` |
+| 关节限位 | 无此指标 | 记录但不增长 | `JointLimitHits` 用于定位可达性问题 |
+| 指尖压键 / 掌心穿模 | 0 | 0 | `FingerPenetrationFrames` + `PalmPenetrationFrames` |
 
 ---
 
@@ -142,11 +176,14 @@ cd "D:\WorkBuddy Project\钢琴3D教学\piano-teacher-3d"
 # 动作指标与对应关系（EditMode + PlayMode 子集）
 "D:/Unity/Unity 2022.3.22f1c1/Editor/Unity.exe" -batchmode -nographics \
   -projectPath "%CD%" -runTests -testPlatform PlayMode \
-  -testFilter "HandMotionTests|HandFingerCorrespondenceTests" \
+  -testFilter "HandMotionTests|HandFingerCorrespondenceTests|HandJointPoseTests" \
   -testResults "_verify_out/hand-align.xml" -logFile "_verify_out/hand-align.log"
 
 # 指标行来自 HandMotionReport.ToLogString()，日志中搜索 "[MOTION]"
 ```
 
-> **下一步（按评估文档执行顺序）**：先实现 `AssignedFingertipError` 与 `WristToKeyError` 两个字段并重建基线，
-> 再讨论动作优化；否则新旧数据不可比。
+## 9. 下一步
+
+1. 用同一台机器、同一曲目（`demo.mid` + 后续标注曲目）重采新口径基线，写入 `Docs/perf/hand-alignment.md`；
+2. 标注曲目集（第 6 节）仍待建立——这是把「数值达标」变成「场景达标」的前提；
+3. 分组统计已就绪，可在标注集齐备后直接产出「单音 / 和弦 / 快速音阶 / 跨手」四组 P95。

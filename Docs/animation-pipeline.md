@@ -82,28 +82,44 @@ LessonTimeline 推进 CurrentTime（唯一时间源）
 - **输出**（`FingeringPlan`）：`FingerByPitch`（每音一个手指编号，0 = 拇指 … 4 = 小指，-1 = 未分配）、`Confidence`（0..1）、`IsEstimated`、中文 `Reason`。
 - **规则集**（`HeuristicFingeringProvider`）：① 音域就近（锚点 = 中间指）；② 相邻音落相邻/同指（单调映射保证）；③ 跨度大向外展开；④ 黑键避免短指（拇指/食指）；⑤ 最近旋律跨度 ≥ 1 个八度用拇指穿越；⑥ 重复音沿用同指；⑦ 和弦用固定模板（thumb-middle-little 等）保证手型一致；⑧ 左右手分界校验（落在对手侧降置信度并标注）。
 - **教学诚实性**：`Confidence < LowConfidenceThreshold`（0.55）时 `IsEstimated = true`，UI 应标注「**估算指法**」而不是确定编号（方案 2.3）。
-- **保留语义**：按下角 `PressAngle` / 静止角 `RestAngle` / 张开角 `SpreadAngle` 表现不变；弯曲通过旋转 `IHandRig.Fingers[f]` 根节点实现，**不移动手腕**，不破坏单帧位移硬约束与防穿模钳制。
+- **保留语义**：按下角 `PressAngle` / 静止角 `RestAngle` / 张开角 `SpreadAngle` 仍是**无三关节手部**时的兜底姿态；
+  弯曲通过旋转 `IHandRig.Fingers[f]` 根节点实现，**不移动手腕**，不破坏单帧位移硬约束与防穿模钳制。
 - **性能**：指法只在「按键集合发生变化」时重新求解（`OnNoteOn/OnNoteOff/ReleaseAll` 置脏标记），`Update` 路径无 LINQ / 无字符串拼接 / 无每帧 `new`。
+
+### 2.5.1 关节级姿态（附录 A.4，2026-10-18）
+
+手部实现 `IFingerJointRig` 时，`FingerPoseController` 走**三关节受限 IK**（详见 `Docs/hand-mesh-design.md` 第 6 节）：
+
+| 项 | 取值 | 说明 |
+|---|---|---|
+| 关节分工 | MCP / PIP / DIP 各自独立 | 平面内 CCD，远端先弯、近端后弯 |
+| 求解 | 8 次迭代 | 平面坐标（+X = 目标方向，+Y = 掌侧下垂），目标 (d, 0) |
+| 限位 | 82° / 95° / 62° | 关节角 ≥ 0（不允许反关节），超限钳制并计入 `JointLimitClampCount` |
+| 指根朝向 | `LookRotation(dir, −perp)` | 再左乘链节点的解剖偏航的逆，拇指 57° 不被覆盖 |
+| 阶段 | `Approach` / `Press` / `Hold` / `Rest` | 由 Note On/Off + `HoldSettleSeconds`（0.12 s）判定，不另建计时器 |
+
+> 没有三关节的手部（或自定义资产）自动退回 2.5 的单关节路径，行为与改造前一致。
 
 ---
 
-## 3. 本轮手部几何升级（方案 5.1 / 5.2 短期 + 审查 1.2A）
+## 3. 本轮手部几何升级（方案 5.1 / 5.2 短期 + 审查 1.2A + 附录 A.3）
 
-手部由「一块扁平长方体 + 单段胶囊手指」升级为带关节结构的连续轮廓（`AvatarManager.BuildHand`）。
+手部由「球体/胶囊拼接」升级为**单块连续截面放样网格 + 三关节骨骼**（`HandMeshFactory` + `AvatarManager.BuildHand`）。
 **所有手部尺寸以真实白键宽 `WhiteKeyWidth = 0.024 m`（24 mm）为标尺**，而不是凭屏幕比例调手（审查 1.2A）：
 
-| 部位 | 几何处理 | 关键常量（`AvatarBodyMetrics`，单位米） |
+| 部位 | 几何处理 | 关键参数（`HandMetrics`，单位米） |
 |---|---|---|
-| **掌部** | 掌根 → 掌背（`PalmCore`）→ 掌指关节（`KnuckleRidge`）**三段过渡体块**，平滑椭球、重叠而非拼接；另加大鱼际（`Thenar`）、小鱼际（`Hypothenar`）形成体积感 | `PalmWidth = 0.076`（≈ 3.2 个白键宽）、`PalmThickness = 0.030`、`PalmLength = 0.058`、`WristRadius = 0.026` |
-| **虎口** | 拇指与食指之间的楔形填充 `Webbing`，配合拇指链 57° 朝向形成可见虎口空间 | — |
-| **指节** | 每指**三段**（近端 / 中段 / 末端）+ 圆指尖（`Tip`）；段间轻微重叠消除断缝；末端带圆球指尖（非平切圆柱） | `FingerSegmentRatios = { 0.42, 0.33, 0.25 }`（近端最长、末端最短） |
-| **五指差异** | 长度按真实手型区分：中指最长、小指最短、食指/无名指不等长；粗细不等 | `FingerLengths = { 0.068, 0.082, 0.090, 0.084, 0.064 }`；`FingerRadii = { 0.0115, 0.0096, 0.0099, 0.0091, 0.0080 }` |
-| **拇指对掌** | 拇指链相对四指偏航约 57°（落在 45°–60° 区间），与四指形成虎口夹角 | `ThumbSpreadDegrees = 57`；`FingerChainYaw = { 57, 6, 1, -5, -12 }` |
-| **掌指关节位置** | 每指根部局部位置（拇指靠近腕部、偏向外侧） | `KnucklePositions`（见源码） |
-| **高质量档额外细节** | `AvatarMeshDetail.High` 增加极轻微指甲标记（`Nail`）；`Low` 省略指尖球与部分过渡体块 | `AvatarQualityConfig.MeshDetail` |
+| **掌部** | **单块放样网格**：沿掌长的超椭圆截面（圆角矩形），宽度剖面 0.74 → 1.00 → 0.94、厚度剖面 0.86 → 1.00 → 0.80；拇指侧半宽 ×1.06、小指侧 ×0.94；大鱼际/小鱼际作为**轮廓隆起**叠在掌侧 | `PalmWidth = 0.076`（≈ 3.2 个白键宽）、`PalmThickness = 0.030`、`PalmLength = 0.058`、`WristRadius = 0.026` |
+| **指节** | 每指三段网格，半径按 `0.88^段号` 渐缩、段内再渐缩；起始 18% 渐入 + 关节处 +5.5% 隆起；起点回退 7% 段长与上一段重叠；末节带**半球形指尖** | `FingerSegmentRatios = { 0.42, 0.33, 0.25 }` |
+| **五指差异** | 中指最长、小指最短、食指/无名指不等长；粗细不等；卡通角色掌更宽、指更短 | `FingerLengths = { 0.068, 0.082, 0.090, 0.084, 0.064 }`；`FingerRadii = { 0.0115, 0.0096, 0.0099, 0.0091, 0.0080 }` |
+| **拇指对掌** | 拇指链相对四指偏航 57°（45°–60° 区间），与四指形成虎口；掌部网格的拇指侧半宽再 ×1.06 形成大鱼际轮廓 | `ThumbAbduction = 57°`；`FingerChainYaw = { 57, 6, 1, -5, -12 }` |
+| **掌指关节位置** | 拇指靠近腕部、偏向外侧（`KnucklePositions`）；掌部网格从腕后 0.55×腕半径一直包到掌指关节外 2% | 见源码 |
+| **关节链** | 每指 MCP → PIP → DIP，关节间距 = 段长 × 0.96；Humanoid 骨架同步扩展为三节点（`LeftIndexProximal/Intermediate/Distal`） | `AvatarRigBuilder.JointsPerFinger = 3` |
+| **精度档** | `High` 增加指甲薄片与更多截面环（14 / 12 / 7）；`Low` 减少环数（8 / 6 / 3）且不做圆指尖 | `AvatarQualityConfig.MeshDetail` |
 
-> 语义不变：`IHandRig.Fingers` 仍是「每指一个**根** Transform」，由姿态控制器旋转该根节点；
-> 三段结构挂在根的 `Chain` 子节点下，解剖朝向（拇指对掌方向、四指扇形）烘在 `Chain` 上，**不被姿态控制器覆盖**。
+> 语义不变：`IHandRig.Fingers` 仍是「每指一个**根** Transform」，由姿态控制器旋转该根节点对准目标键；
+> 三关节挂在根的 `Chain` 子节点下，解剖朝向（拇指对掌方向、四指扇形）烘在 `Chain` 上，**不被姿态控制器覆盖**。
+> 网格与关节分离：改手掌形状不会改变骨骼语义、键位标尺与 IK 目标（见 `Docs/hand-mesh-design.md`）。
 
 人物其余部分（轮本轮）：头部由纯球体升级为椭球 + 下颌 + 耳 + 鼻 + 眼 + 眉；躯干用不同宽度的平滑过渡体块（髋/腰/胸/肩带）；
 服装（衣领 / 袖口 / 下摆 / 腰带）作为独立可见层；发型为「大轮廓 + 少量发束」（不做大量细长圆柱，避免噪点与穿插）。

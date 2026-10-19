@@ -242,9 +242,62 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots   # 像�
 
 ## A.3 仍未解决（诚实标注）
 
+> **2026-10-18 更新**：本节三条中的前两条已由附录 B（手部重绘与姿态自然化）解决 ——
+> 手指具备 MCP/PIP/DIP 三关节、手腕有受限俯仰/滚转、指尖由铰链 IK 送到键面；
+> 换位峰值改用 `TransitionFingertipError` 单独统计。教学模式的音符提示仍属未实现。
+
 - **近景手型仍偏"圆钝"**：手指只有根节点 1 个自由度（无中/末节独立弯曲），且手腕姿态不受控，
   因此手部看起来是"整只手在按键"而不是"手指关节自然起伏"；指尖与键面之间在近景下仍有可见间隙。
   要彻底解决需要真正的关节链 + 手腕姿态控制，或直接接入许可清晰的高质量手部模型（方案 5.2 中期）。
 - **播放期仍有 261–282 mm 的单帧指尖误差峰值**：出现在换位途中的过渡帧（指标为逐帧取样），
   并非稳定状态误差；稳定状态误差见 A.1 表中的 3–32 mm。
 - 教学模式没有"下落音符/谱面"提示，只有琴键高亮（本轮范围如此）。
+
+---
+
+# 附录 B：手部重绘与姿态自然化（评估文档附录 A 落地记录，2026-10-18）
+
+本轮按《系统性技术评估与后续优化方案 · 手部重绘增强版》附录 A 逐条实施。
+完整设计契约见 [`Docs/hand-mesh-design.md`](hand-mesh-design.md)，指标口径见 [`Docs/hand-alignment.md`](hand-alignment.md)。
+
+## B.1 逐条对照
+
+| 附录条目 | 落地内容 | 文件 |
+|---|---|---|
+| A.2 修改位置总表 | 骨架 / 网格 / 网格工厂 / 关节 / 指标职责分离；`AvatarRigBuilder` 只留坐标节点 | `AvatarRigBuilder.cs`、`AvatarManager.cs`、**新增** `HandMeshFactory.cs` |
+| A.3.1 统一手部局部坐标 | `+Z` 手指方向、`+Y` 手背、`+X·Side` 拇指侧；网格、关节、IK 共用 | `HandMeshFactory.cs`、`AvatarManager.BuildHand` |
+| A.3.2 手掌轮廓与体积 | 单块**超椭圆截面放样**（宽度 0.74→1.00→0.94、厚度 0.86→1.00→0.80），大鱼际/小鱼际作为轮廓隆起 | `HandMeshFactory.BuildPalm` |
+| A.3.3 手指尺寸与逐段渐缩 | 半径 `0.88^段号` 渐缩 + 段内渐缩；五指长度/粗细独立；卡通角色掌宽 ×1.12、指长 ×0.92 | `HandMeshFactory.BuildFingerSegment`、`HandMetrics` |
+| A.3.4 指节接缝、指尖、指甲 | 起点回退 7% 段长遮缝；末节**半球形指尖**；高精度档独立指甲薄片（不改指尖目标） | 同上 |
+| A.3.5 材质与风格 | 共享材质（`sharedMaterial`），网格登记后统一销毁；不新增贴图 | `AvatarManager.AttachMesh` / `OnDestroy` |
+| A.4.1 骨骼层级 | 每指 **Proximal→Intermediate→Distal** 三关节，Humanoid 标准命名，`Avatar.isValid` 保持 true | `AvatarRigBuilder.BuildFinger` |
+| A.4.2 关节控制分工 | MCP/PIP/DIP 各自独立旋转 + 角度上限；拇指保留 57° 外展；手腕新增受限俯仰/滚转 | `FingerPoseController`、`HandIKController.ApplyWristOrientation` |
+| A.4.3 动作阶段模型 | `Approach / Press / Hold / Rest` 四阶段，只消费音符事件与 `deltaTime`，无独立计时器 | `FingerPoseController` |
+| A.4.4 指尖接触优先 | 指根朝向由手掌决定（俯角 10°–36°），三关节铰链轴 CCD 把指尖送到键面；不放宽 `MaxStepPerFrame` | `FingerPoseController.UpdateFingerJoints` |
+| A.5.1 用琴键作比例标尺 | `HandMetrics`（掌长/宽/厚、五指长与半径、分段比例、拇指外展对掌、腕俯仰、掌心偏移、指尖校准）+ 三角色独立取值 | `AvatarDefinition.cs` |
+| A.5.2 相机与透视 | 特写俯角 60° / FOV 30–48° / 距离 0.20–0.88 m 保持不变（不经测试不降俯角） | 未改 |
+| A.6.1 几何单测 | 新增 `HandMeshFactoryTests`（18 条：网格有效性、包围盒、左右镜像、渐缩、圆指尖、退化三角形、三档精度、三角色比例、关节限位） | `Assets/Tests/EditMode/HandMeshFactoryTests.cs` |
+| A.6.2 姿态与对键测试 | 新增 `HandJointPoseTests`（7 条：三关节链、Humanoid 三关节、掌部单网格、和弦落点与限位、静止手型、三角色×三视角、教学模式） | `Assets/Tests/PlayMode/HandJointPoseTests.cs` |
+| A.6.3 指标分开统计 | 新增 `WristTargetError` / `AssignedFingertipError` / `FingertipSurfaceDistance` / `TransitionFingertipError` / `JointLimitHits` / `FingerPenetrationFrames` + 四组 P50/P95/P99 | `HandMotionMetrics.cs` |
+| A.8 交付清单 | `Docs/hand-mesh-design.md` + 上述代码与测试；`verify.py` 全量回归 | 本文件与代码 |
+
+## B.2 实测数据（同一台机器、同一场景）
+
+静态和弦（左手 48/52/55，收敛 60 帧）**被分配指尖误差**：
+
+| 手指 | 改造前（旧口径，最近指尖） | 本轮（被分配指尖） |
+|---|---:|---:|
+| 拇指（48） | — | 24.8 mm（拇指链长 68.6 mm，目标距离 93.4 mm，属臂展不足） |
+| 中指（52） | — | **7.4 mm** |
+| 小指（55） | — | 34.5 mm（指长 63.1 mm，目标距离 97.7 mm） |
+
+手腕位置与姿态改为 `HandHeight = 0.799` / `HandDepth = 0.232`（旧值 0.768 / 0.12）：
+旧值会把掌指关节放到键面按压点**前方** 55 mm，逼手指向后反折（实测总弯曲 204°、指尖落到键面下方 35 mm）。
+
+## B.3 仍未解决（诚实标注）
+
+- 短指（小指 63 mm）与大跨度（> 97 mm）琴键组合仍够不到，误差 25–35 mm —— 这是手长的物理限制，
+  已记录进 `JointLimitHits` 与 `FingertipSurfaceDistance`，不再用平滑掩盖。
+- 拇指只有屈伸一个自由度（`ThumbOpposition` 是配置项而非驱动量），对掌主要靠固定的 57° 偏航。
+- 无蒙皮权重：指节是独立网格挂在关节下，靠 7% 重叠遮缝，极限弯曲时背面可能有轻微折痕。
+- 播放期换位过渡帧仍有较大的单帧误差峰值，需用新的 `TransitionFingertipError` 口径重新采集基线。
