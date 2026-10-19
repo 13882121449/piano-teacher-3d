@@ -175,6 +175,59 @@ namespace PianoTeacher3D.Tests.EditMode
             StringAssert.Contains("平滑度", text);
         }
 
+        // ==================== §7-3 指标口径（逐帧位移分布与术语别名） ====================
+
+        [Test]
+        public void PerFrameDisplacement_ReportsMeanAndP95_ForBothHands()
+        {
+            var acc = new HandMotionAccumulator();
+
+            // 10 帧：左手每帧移动 0.010 m，右手每帧移动 0.030 m → 20 个样本
+            var left = Vector3.zero;
+            var right = Vector3.zero;
+            acc.AddSample(Sample(left, right, Vector3.zero, Vector3.zero, false, false));
+            for (int i = 0; i < 10; i++)
+            {
+                left += new Vector3(0.010f, 0f, 0f);
+                right += new Vector3(0f, 0f, 0.030f);
+                acc.AddSample(Sample(left, right, Vector3.zero, Vector3.zero, false, false));
+            }
+
+            var report = acc.Build();
+
+            Assert.AreEqual(20, report.PerFrameDisplacement.Samples, "每手每帧各一个样本");
+            Assert.AreEqual(0.020f, report.PerFrameDisplacement.Mean, 1e-4f, "均值应为两手位移的平均");
+            Assert.AreEqual(0.030f, report.PerFrameDisplacement.Max, 1e-4f);
+            Assert.AreEqual(0.030f, report.PerFrameDisplacement.P95, 1e-4f,
+                "P95 应落在较大的那组（右手 0.030 m）");
+        }
+
+        [Test]
+        public void MetricAliases_ShareTheSameUnderlyingStats()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(new HandMotionSample
+            {
+                HasAssignedFingertipErrors = true,
+                LeftAssignedFingertipError = 0.02f,
+                RightAssignedFingertipError = 0.04f,
+                HasSurfaceDistances = true,
+                LeftSurfaceDistance = 0.010f,
+                RightSurfaceDistance = -0.002f,
+                TransitionFrame = true
+            });
+
+            var report = acc.Build();
+
+            Assert.AreSame(report.AssignedFingertipError, report.FingertipTargetError,
+                "FingertipTargetError 必须与 AssignedFingertipError 是同一份统计（同一口径）");
+            Assert.AreSame(report.FingertipSurfaceDistance, report.KeyTopDistance,
+                "KeyTopDistance 必须与 FingertipSurfaceDistance 是同一份统计");
+            Assert.AreEqual(report.TransitionFingertipError.Max, report.TransitionPeakError, 1e-6f,
+                "TransitionPeakError 必须是过渡帧误差的峰值");
+            Assert.AreEqual(0.04f, report.TransitionPeakError, 1e-4f);
+        }
+
         // ==================== 审查 1.2C 扩充指标 ====================
 
         private static HandMotionSample GroupSample(bool hit, bool black, bool chord, bool fast, bool large)

@@ -31,7 +31,7 @@
 <!-- SECTION:local-check:BEGIN -->
 ### 本机自检（由 Environment_Matrix_Checklist 自动写入）
 
-- 时间：2026-10-19 13:23:29
+- 时间：2026-10-19 19:05:18
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -49,3 +49,13 @@
 
 > 本表只记录事实：**任何未覆盖的项都保持「待测」，不得写成已通过**（方案 0 节 / 审查 0.1）；覆盖状态来自本次运行环境，不代表其他机器。
 <!-- SECTION:local-check:END -->
+
+<!-- SECTION:player-runtime:BEGIN -->
+### 真实 Player 运行环境（本地自检）
+
+- 采样时间：2026-10-19 19:02:21
+- Player：PianoTeacher3D.exe（Development Build，1280×720 窗口）
+- 场景：PianoLesson + StreamingAssets/Songs/demo.mid
+- 数据文件：`_verify_out/player_<scenario>.json`
+- 说明：本机为开发机（独显），不代表低配/集显设备；三类设备矩阵仍需分别采集。
+<!-- SECTION:player-runtime:END -->

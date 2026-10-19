@@ -78,7 +78,7 @@ namespace PianoTeacher3D.Avatar
         /// <summary>近端 / 中段 / 末端的长度占比（三段之和为 1）。</summary>
         public static readonly float[] FingerSegmentRatios = { 0.42f, 0.33f, 0.25f };
 
-        /// <summary>掌指关节（手指根节点）局部位置，未镜像（side = +1 的左/右手基准，右手按 x 取反）。</summary>
+        /// <summary>掌指关节（手指根节点）局部位置，未镜像（+X = 拇指侧基准；另一侧按 x 取反得到）。</summary>
         /// <remarks>z 与 <see cref="PalmLength"/> 同步（≈ 0.98×掌长），改掌长必须一起改，否则指根会落在掌外或掌内。</remarks>
         public static readonly Vector3[] KnucklePositions =
         {

@@ -88,10 +88,14 @@ namespace PianoTeacher3D.Core
         /// <summary>
         /// 导入事务：校验 → 复制到用户目录 → 生成元数据 → 写入最近曲目 → 落盘。
         /// 任一步失败都返回可恢复错误（不抛异常、不产生半初始化状态，方案 6.2 / 6.4）。
+        /// <para>
+        /// <paramref name="prevalidated"/> 供「后台已校验/解析过」的调用方复用结果（优化方案 §7-8），
+        /// 避免同一文件在主线程上再解析一遍；为空时按原逻辑自行校验。
+        /// </para>
         /// </summary>
-        public ImportResult Import(string path)
+        public ImportResult Import(string path, ImportCheck? prevalidated = null)
         {
-            var check = MidiFileValidator.Validate(path);
+            var check = prevalidated ?? MidiFileValidator.Validate(path);
             if (!check.Ok)
                 return new ImportResult { Ok = false, Meta = null, Check = check };
 

@@ -44,3 +44,6 @@ _verify_out/
 InitTestScene*.unity*
 # 历史遗留的嵌套空 Unity 工程（仅 SampleScene，不参与本项目构建）
 /Piano/
+
+# Python 缓存
+__pycache__/

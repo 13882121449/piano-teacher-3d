@@ -82,6 +82,11 @@ namespace PianoTeacher3D.Core
         private bool _audioDegraded;       // 音频不可用（静音继续），只上报一次
         private bool _suppressPrefsWrite;  // 应用偏好时不回写（避免无意义落盘）
 
+        // ---- 可取消分阶段加载（优化方案 §7-8）----
+        private SongLoadJob _loadJob;      // 进行中的后台作业（null = 没有）
+        private bool _loadJobIsImport;     // 作业结果是否要走「复制进用户曲库」分支
+        private SongLoadStage _lastLoadStage = SongLoadStage.Idle;
+
         // ---- 显示模式（展示 / 教学）----
         private DisplayMode _displayMode = DisplayMode.Showcase;
         private bool _hasHighlightToRestore;
@@ -102,6 +107,15 @@ namespace PianoTeacher3D.Core
 
         /// <summary>是否正在加载/解析曲目。</summary>
         public bool IsLoading => _state == LessonState.Loading;
+
+        /// <summary>
+        /// 当前加载阶段（优化方案 §7-8）。没有后台作业时为 <see cref="SongLoadStage.Idle"/>。
+        /// UI 据此显示「读取文件 / 校验并解析 / 分析曲目」，<b>不显示虚构百分比</b>。
+        /// </summary>
+        public SongLoadStage LoadStage => _loadJob != null ? _loadJob.Stage : SongLoadStage.Idle;
+
+        /// <summary>加载阶段文案（空字符串表示当前没有进行中的加载）。</summary>
+        public string LoadStageLabel => _loadJob != null ? SongLoadJob.StageLabel(_loadJob.Stage) : string.Empty;
 
         /// <summary>是否已有可用曲目。</summary>
         public bool HasSong => _currentSong != null && _currentSong.Success;
@@ -191,6 +205,9 @@ namespace PianoTeacher3D.Core
         public event Action<int> OnMetronomeBeat;                 // 参数：小节内拍序号（0 = 强拍）
         public event Action<SongAnalysis> OnAnalysisReady;
 
+        /// <summary>加载阶段变化（Queued → Reading → Validating → Analyzing → Ready/Failed/Cancelled）。</summary>
+        public event Action<SongLoadStage> OnLoadStageChanged;
+
         /// <summary>显示模式（展示 / 教学）。</summary>
         public DisplayMode DisplayMode => _displayMode;
 
@@ -239,6 +256,13 @@ namespace PianoTeacher3D.Core
 
         private void Update()
         {
+            // 后台曲目作业：主线程只轮询状态并在完成时提交（Unity 对象一律留在主线程创建）
+            if (_loadJob != null)
+            {
+                if (_loadJob.Stage != _lastLoadStage) NotifyLoadStage(_loadJob.Stage);
+                if (_loadJob.IsDone) CompleteLoadJob();
+            }
+
             if (_timeline == null || _scheduler == null) return;
 
             float current = _timeline.CurrentTime;
@@ -566,6 +590,111 @@ namespace PianoTeacher3D.Core
             CommitSong(check.Parse, path, meta);
         }
 
+        /// <summary>
+        /// 在后台读取 / 校验 / 解析 / 分析指定曲目，完成后在主线程一次性提交（优化方案 §7-8）。
+        /// <para>
+        /// <b>线程边界</b>：后台只跑纯 C#（<see cref="MidiFileValidator"/> / <see cref="MidiParser"/> /
+        /// <see cref="SongAnalyzer"/>），场景对象、UI、曲库索引写入全部由 <see cref="CompleteLoadJob"/> 在主线程完成。
+        /// </para>
+        /// <para>
+        /// <b>失败/取消</b>：都不触碰当前曲目与播放状态；只有成功才替换，因此不会出现「标题换成新曲、音符还是旧曲」。
+        /// </para>
+        /// </summary>
+        public void LoadSongAsync(string path)
+        {
+            BeginLoadJob(path, asImport: false);
+        }
+
+        /// <summary>启动后台作业（<paramref name="asImport"/> = 完成后还要复制进用户曲库）。</summary>
+        private void BeginLoadJob(string path, bool asImport)
+        {
+            if (_loading || _loadJob != null)
+            {
+                Report(ErrorReporter.Busy(asImport ? "导入曲目" : "加载曲目"));
+                return;
+            }
+
+            var job = new SongLoadJob(path ?? "");
+            _loadJob = job;
+            _loadJobIsImport = asImport;
+            _lastLoadStage = SongLoadStage.Queued;
+            SetLoading(true);
+            NotifyLoadStage(job.Stage);
+            job.Start();
+        }
+
+        /// <summary>主线程收尾：读取后台结果 → 提交 / 上报失败 / 回滚取消。</summary>
+        private void CompleteLoadJob()
+        {
+            var job = _loadJob;
+            if (job == null) return;
+            _loadJob = null;
+
+            bool cancelled = _cancelRequested || job.Stage == SongLoadStage.Cancelled;
+            _cancelRequested = false;
+
+            try
+            {
+                if (cancelled)
+                {
+                    NotifyLoadStage(SongLoadStage.Cancelled);
+                    RestoreIdleState();          // 旧曲与旧播放状态原样保留
+                    _reporter?.Clear();
+                    return;
+                }
+
+                if (job.Stage != SongLoadStage.Ready || job.Check.Parse == null)
+                {
+                    NotifyLoadStage(SongLoadStage.Failed);
+                    FailLoad(BuildJobError(job));
+                    return;
+                }
+
+                // ---- 导入模式：复制进用户曲库（已校验，不再重复解析）----
+                if (_loadJobIsImport)
+                {
+                    var import = _library.Import(job.SourcePath, job.Check);
+                    if (!import.Ok || import.Meta == null || import.Check.Parse == null)
+                    {
+                        NotifyLoadStage(SongLoadStage.Failed);
+                        FailLoad(import.Check.ToError());
+                        return;
+                    }
+
+                    _prefs.LastSongId = import.Meta.Id;
+                    NotifyLoadStage(SongLoadStage.Ready);
+                    CommitSong(import.Check.Parse, import.Meta.SourcePath, import.Meta, job.Analysis);
+                    return;
+                }
+
+                // ---- 直接打开：只做元数据与提交 ----
+                var meta = BuildMetadata(job.SourcePath, job.Check.Parse);
+                NotifyLoadStage(SongLoadStage.Ready);
+                CommitSong(job.Check.Parse, job.SourcePath, meta, job.Analysis);
+            }
+            finally
+            {
+                job.Dispose();                    // 释放取消令牌与作业引用（不留下临时资源）
+                SetLoading(false);
+            }
+        }
+
+        /// <summary>把后台作业的失败转成结构化错误（异常路径不能伪装成「文件格式错误」）。</summary>
+        private static AppError BuildJobError(SongLoadJob job)
+        {
+            if (!string.IsNullOrEmpty(job.Check.UserMessage)) return job.Check.ToError();
+
+            return AppError.Recoverable(ErrorCode.Unknown,
+                "读取曲目时出现意外错误，当前曲目未受影响。请重试一次；若仍然失败，请换一个 MIDI 文件。",
+                RecoveryAction.Retry, null, $"loadJob={job.FailureDetail}");
+        }
+
+        private void NotifyLoadStage(SongLoadStage stage)
+        {
+            _lastLoadStage = stage;
+            OnLoadStageChanged?.Invoke(stage);
+        }
+
         /// <summary>通过最近曲目记录打开曲目（文件被移动/删除时给出可操作提示，不崩溃）。</summary>
         public bool TryOpenRecentSong(string idOrPath)
         {
@@ -603,10 +732,10 @@ namespace PianoTeacher3D.Core
             PianoTeacher3D.UI.FileBrowserUI.Show(start, ImportMidiFromPath, () => _reporter?.Clear());
         }
 
-        /// <summary>导入指定路径的 MIDI（校验 → 复制到用户目录 → 记录最近曲目 → 加载）。</summary>
+        /// <summary>导入指定路径的 MIDI（后台校验/解析/分析 → 主线程复制进曲库并加载）。</summary>
         public void ImportMidiFromPath(string path)
         {
-            if (_loading)
+            if (_loading || _loadJob != null)
             {
                 Report(ErrorReporter.Busy("导入曲目"));
                 return;
@@ -620,27 +749,26 @@ namespace PianoTeacher3D.Core
                 return;
             }
 
-            var import = _library.Import(path);
-            if (!import.Ok || import.Meta == null || import.Check.Parse == null)
-            {
-                FailLoad(import.Check.ToError());
-                return;
-            }
-
-            _prefs.LastSongId = import.Meta.Id;
-            CommitSong(import.Check.Parse, import.Meta.SourcePath, import.Meta);
+            BeginLoadJob(path, asImport: true);
         }
 
         /// <summary>
-        /// 取消当前加载（方案 6.4「显示加载进度、可取消状态」）。
+        /// 取消当前加载（方案 6.4「显示加载进度、可取消状态」/ 优化方案 §7-8）。
         /// <para>
-        /// 当前 MIDI 解析是<b>同步</b>过程（示例曲毫秒级），因此取消只在「加载事务尚未提交」时生效：
-        /// 若 UI 在加载态点了取消，本方法会把会话拉回明确状态；否则它是防御性空操作。
-        /// 若将来引入异步 / 后台解析，只需让解析任务检查 <c>_cancelRequested</c> 即可，接口无需变化。
+        /// 后台作业取消后，结果被丢弃，<b>旧曲与旧播放状态保持不变</b>；作业已结束时立即收尾，
+        /// 因此 UI 不会停在 Loading。同步加载（<see cref="LoadSong"/>）路径沿用原有语义。
         /// </para>
         /// </summary>
         public void CancelLoading()
         {
+            if (_loadJob != null)
+            {
+                _cancelRequested = true;
+                _loadJob.Cancel();
+                if (_loadJob.IsDone) CompleteLoadJob();   // 已完成的作业立即按取消收尾
+                return;
+            }
+
             if (!_loading && _state != LessonState.Loading) return;
 
             _cancelRequested = true;                // 提交前的临界区会读到它
@@ -653,7 +781,8 @@ namespace PianoTeacher3D.Core
         }
 
         /// <summary>第 3–5 步：一次性提交新曲目并清理旧曲状态。</summary>
-        private void CommitSong(MidiParseResult result, string path, SongMetadata meta)
+        private void CommitSong(MidiParseResult result, string path, SongMetadata meta,
+            SongAnalysis precomputedAnalysis = null)
         {
             SetLoading(true);
             try
@@ -687,7 +816,9 @@ namespace PianoTeacher3D.Core
                 _scheduler.Load(PianoNoteFilter.FilterByHand(result.Notes, _practiceHand));
 
                 _metronome?.Load(result.TempoChanges, result.TotalDurationSeconds);
-                _analysis = SongAnalyzer.Analyze(result.Notes, result.TempoChanges, result.TotalDurationSeconds);
+                // 后台已分析过就复用，避免在主线程再算一遍（优化方案 §7-8「重活不留在主线程」）
+                _analysis = precomputedAnalysis ?? SongAnalyzer.Analyze(
+                    result.Notes, result.TempoChanges, result.TotalDurationSeconds);
                 _handIK?.ResetMetrics();        // 换曲后重新开始动作质量测量
 
                 ResetPlayback();

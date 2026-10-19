@@ -193,7 +193,14 @@ namespace PianoTeacher3D.Tests.PlayMode
                 }
                 else
                 {
-                    Assert.Less(tipError, reach, $"音高 {pitch} 不可达时，指尖也应停在最接近的位置");
+                    // 不可达时的理论残差 ≈ distance − reach（手指伸直指向目标）。
+                    // 上界取「理论残差 + 10 mm 迭代余量」：既能捕获「手指朝错方向 / 根本没伸直」的回归，
+                    // 也不会因为手指短就误判 —— 旧断言把 reach 直接当上界，隐含要求 distance < 2×reach，
+                    // 换成符合解剖学的手性后短指（拇指）落到高音侧就会必然触发。
+                    float theoretical = Mathf.Max(reach, distance - reach);
+                    Assert.Less(tipError, theoretical + 0.010f,
+                        $"音高 {pitch} 不可达时，指尖也应停在最接近的位置（残差 {tipError * 1000f:F1} mm，" +
+                        $"理论 {theoretical * 1000f:F1} mm）");
                 }
 
                 Assert.Less(tipError, 0.045f, string.Format(

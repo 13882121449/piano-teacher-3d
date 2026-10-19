@@ -194,13 +194,17 @@ namespace PianoTeacher3D.Avatar
         private static Transform BuildFinger(Transform hand, string side, int index, float scale, bool left,
             Transform[] joints)
         {
-            // 【左右约定】左手（left=true）位于局部 −X（整体旋转 180° 后 = 世界 +X = 角色真正的左手侧）。
-            float mirror = left ? -1f : 1f;
-            float lateral = (index - 2) * 0.014f * scale * mirror;
+            // 【左右约定】位置与手性分开：
+            // ① 位置：左手在局部 −X（整体旋转 180° 后 = 世界 +X = 角色真正的左手侧）；
+            // ② 手性：拇指朝身体中线 —— 左手（在 −X 侧）内侧 = +X，右手（在 +X 侧）内侧 = −X。
+            // 改造前把同一个 mirror 同时用于「横向顺序」和「拇指偏航」，结果拇指根在内侧、拇指链却朝外侧折，
+            // 与可见手部的镜像错误叠加，整体表现为左右手反置（优化方案 §7-5）。
+            float inward = left ? 1f : -1f;
+            float lateral = (2 - index) * 0.014f * scale * inward;
             float palmLength = AvatarBodyMetrics.PalmLength * scale;
 
             string fingerName = FingerNames[index];
-            float yaw = AvatarBodyMetrics.FingerChainYaw[index] * mirror;
+            float yaw = AvatarBodyMetrics.FingerChainYaw[index] * inward;
 
             float total = AvatarBodyMetrics.FingerLengths[index] * scale;
             float[] ratios = AvatarBodyMetrics.FingerSegmentRatios;

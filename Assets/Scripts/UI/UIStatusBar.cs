@@ -172,16 +172,24 @@ namespace PianoTeacher3D.UI
             if (_midArea != null) UITheme.StretchX(_midArea, 216f, 288f, 8f, 28f);
         }
 
-        /// <summary>加载条开关（方案 6.2 Loading 状态：可取消、防重复点击）。</summary>
-        public void SetLoading(bool loading, string songName)
+        /// <summary>
+        /// 加载条开关（方案 6.2 Loading 状态：可取消、防重复点击）。
+        /// <paramref name="stageLabel"/> 显示当前阶段（优化方案 §7-8：只报阶段，不编造百分比）。
+        /// </summary>
+        public void SetLoading(bool loading, string songName, string stageLabel = null)
         {
             if (_loadingStrip == null) return;
             if (loading)
             {
                 if (_loadingText != null)
+                {
+                    string stage = string.IsNullOrEmpty(stageLabel)
+                        ? "正在解析 MIDI 曲目"
+                        : stageLabel.TrimEnd('…');
                     _loadingText.text = string.IsNullOrEmpty(songName)
-                        ? "正在解析 MIDI 曲目…"
-                        : $"正在解析《{UITheme.Truncate(songName, 18)}》…";
+                        ? stage + "…"
+                        : $"{stage}《{UITheme.Truncate(songName, 18)}》…";
+                }
             }
             if (_loadingStrip.gameObject.activeSelf != loading) _loadingStrip.gameObject.SetActive(loading);
             if (loading) DismissError();

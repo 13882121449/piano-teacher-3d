@@ -13,7 +13,7 @@ namespace PianoTeacher3D.Avatar
     /// </para>
     /// <para>
     /// <b>规则集</b>（命中后写入中文 <see cref="FingeringPlan.Reason"/>，供诊断面板显示）：
-    /// ① 音域就近：以中间手指为锚点、按半音跨度换算手指；
+    /// ① 音域就近：以中间手指为锚点、按半音跨度换算手指；**左手镜像**（左手拇指在高音侧）；
     /// ② 相邻音：旋律相邻音落在相邻/同一手指（由单调映射保证）；
     /// ③ 跨度大：远离锚点时向外展开手指；
     /// ④ 黑键可达：黑键避免短指（拇指/食指），改用较长手指；
@@ -123,7 +123,11 @@ namespace PianoTeacher3D.Avatar
             else
             {
                 // ① 音域就近（单调映射：锚点 → 中间手指；离锚点越远手指越向外）
-                float raw = 2f + (pitch - anchor) / SemitonesPerFinger;
+                // 【左右手约定】编号是**解剖学语义**（0 = 拇指 … 4 = 小指），不是「从低音数第几根」：
+                // 右手拇指在低音侧 → 音高升高时手指编号增大；
+                // 左手拇指在高音侧 → 音高升高时编号减小（否则左手会用右手的指法，等于左右手反置）。
+                float direction = ctx.LeftHand ? -1f : 1f;
+                float raw = 2f + direction * (pitch - anchor) / SemitonesPerFinger;
                 int rounded = RoundHalfUp(raw);
                 int ideal = Mathf.Clamp(rounded, 0, 4);
                 bool clamped = ideal != rounded;
@@ -182,7 +186,12 @@ namespace PianoTeacher3D.Avatar
             int span = pitches[n - 1] - pitches[0];
 
             int[] template = TemplateFor(n, span);
-            for (int i = 0; i < n; i++) fingers[i] = template[i];
+            for (int i = 0; i < n; i++)
+            {
+                // 模板按「从低音到高音」排列；右手低音=拇指，左手低音=小指，故左手镜像编号。
+                // 不做这步镜像时，左手会用右手的指法（弹出来像「左右手反置」，优化方案 §7-5）。
+                fingers[i] = ctx.LeftHand ? 4 - template[i] : template[i];
+            }
 
             float confidence = 0.90f;
 

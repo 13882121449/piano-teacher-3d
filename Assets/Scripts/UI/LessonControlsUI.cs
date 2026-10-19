@@ -133,6 +133,7 @@ namespace PianoTeacher3D.UI
             _session.OnError += OnErrorFallback;
             _session.OnAppError += OnAppError;
             _session.OnLessonStateChanged += OnLessonStateChanged;
+            _session.OnLoadStageChanged += OnLoadStageChanged;
             _session.OnSongLoaded += OnSongLoaded;
             _session.OnPlaybackStateChanged += OnPlaybackStateChanged;
             _session.OnProgressChanged += OnProgressChanged;
@@ -162,6 +163,7 @@ namespace PianoTeacher3D.UI
             _session.OnError -= OnErrorFallback;
             _session.OnAppError -= OnAppError;
             _session.OnLessonStateChanged -= OnLessonStateChanged;
+            _session.OnLoadStageChanged -= OnLoadStageChanged;
             _session.OnSongLoaded -= OnSongLoaded;
             _session.OnPlaybackStateChanged -= OnPlaybackStateChanged;
             _session.OnProgressChanged -= OnProgressChanged;
@@ -258,7 +260,16 @@ namespace PianoTeacher3D.UI
         {
             RefreshSongAndState();
             RefreshInteractable();
-            if (_status != null) _status.SetLoading(state == LessonState.Loading, _session.CurrentSongName);
+            if (_status != null)
+                _status.SetLoading(state == LessonState.Loading, _session.CurrentSongName,
+                    state == LessonState.Loading ? _session.LoadStageLabel : null);
+        }
+
+        /// <summary>加载阶段变化：只更新加载条文案（阶段由会话层决定，UI 不推断进度）。</summary>
+        private void OnLoadStageChanged(SongLoadStage stage)
+        {
+            if (_status == null || _session.State != LessonState.Loading) return;
+            _status.SetLoading(true, _session.CurrentSongName, SongLoadJob.StageLabel(stage));
         }
 
         private void OnSongLoaded()
@@ -937,7 +948,7 @@ namespace PianoTeacher3D.UI
                     return;
                 }
                 System.Array.Sort(files);
-                _session.LoadSong(files[0]);
+                _session.LoadSongAsync(files[0]);   // 走可取消的分阶段加载（优化方案 §7-8）
             }
             catch (System.Exception ex)
             {

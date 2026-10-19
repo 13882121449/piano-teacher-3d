@@ -83,6 +83,90 @@ namespace PianoTeacher3D.Tests.PlayMode
             yield return null;
         }
 
+        /// <summary>
+        /// 解剖学手性回归（优化方案 §7-5 / P0-02 补充第 1、4 条）：
+        /// 拇指必须落在<b>掌部内侧</b>（朝演奏者身体中线），小指在外侧；拇指指向也必须朝内。
+        /// <para>
+        /// 位置正确 ≠ 手性正确：改造前两只手虽然分别落在低音侧/高音侧（位置对），
+        /// 但手部网格与拇指链是按相反的镜像生成的 —— 左手看起来像右手（拇指长在小指一侧），
+        /// 这正是「左右手反置」的真实根因。该缺陷不会被「哪只手弹哪个键」的测试发现。
+        /// </para>
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Hands_ThumbFacesBodyMidline_OnBothHands()
+        {
+            var skeleton = _avatar.CurrentSkeleton;
+            Assert.IsNotNull(skeleton, "需要 Humanoid 骨架才能校验骨骼层面的手性");
+
+            AssertThumbIsMedial("左手", _avatar.LeftHand, skeleton.LeftFingers[0], skeleton.LeftHand);
+            AssertThumbIsMedial("右手", _avatar.RightHand, skeleton.RightFingers[0], skeleton.RightHand);
+
+            yield return null;
+        }
+
+        /// <summary>
+        /// 校验一只手的解剖学朝向：
+        /// ① 拇指根比小指根更靠近身体中线（|x| 更小）；
+        /// ② 拇指链的前向带有朝中线的分量（不朝身体外侧张开）。
+        /// 可见手部与 Humanoid 骨架都要满足，二者不能各自使用不同的镜像约定。
+        /// </summary>
+        private void AssertThumbIsMedial(string label, IHandRig hand, Transform skeletonThumb, Transform skeletonWrist)
+        {
+            Assert.IsNotNull(hand, label + "缺少手部 Rig");
+            Assert.IsNotNull(skeletonThumb, label + "骨架缺少拇指骨");
+            Assert.IsNotNull(skeletonWrist, label + "骨架缺少腕骨");
+
+            Vector3 wrist = hand.Wrist.position;
+            Transform thumb = hand.Fingers[0];
+            Transform little = hand.Fingers[4];
+            Assert.IsNotNull(thumb);
+            Assert.IsNotNull(little);
+
+            // 身体中线在世界 X = 0（角色根节点位于场景原点附近）；「内侧」= 朝这个平面
+            float inwardSign = wrist.x >= 0f ? -1f : 1f;
+            var inward = new Vector3(inwardSign, 0f, 0f);
+
+            float thumbInward = (thumb.position - wrist).x * inwardSign;
+            float littleInward = (little.position - wrist).x * inwardSign;
+
+            Assert.Greater(thumbInward, littleInward, string.Format(
+                "{0}：拇指根应比小指根更靠近身体中线（拇指 {1:+0.000;-0.000} m，小指 {2:+0.000;-0.000} m）" +
+                " ⇒ 手部网格镜像方向反了，看起来会像另一只手", label, thumbInward, littleInward));
+
+            // 拇指链（Fingers[0] 的第一个子节点 = 解剖朝向节点）的前向必须带朝中线的分量
+            Transform chain = thumb.childCount > 0 ? thumb.GetChild(0) : thumb;
+            float directionDot = Vector3.Dot(chain.forward, inward);
+            Assert.Greater(directionDot, 0.3f, string.Format(
+                "{0}：拇指指向应朝身体中线（与内侧轴的点积 {1:F2}，正常约 0.5–0.9）" +
+                " ⇒ 拇指朝身体外侧张开，是左右手手性反置的直接证据", label, directionDot));
+
+            // 骨架侧：拇指根同样应比小指根更靠近中线
+            var skeletonLittle = skeletonThumb.parent != null
+                ? skeletonThumb.parent.Find(skeletonThumb.name.Replace("ThumbProximal", "LittleProximal"))
+                : null;
+            if (skeletonLittle != null)
+            {
+                float skelThumbInward = (skeletonThumb.position - skeletonWrist.position).x * inwardSign;
+                float skelLittleInward = (skeletonLittle.position - skeletonWrist.position).x * inwardSign;
+                Assert.Greater(skelThumbInward, skelLittleInward, string.Format(
+                    "{0}骨架：拇指近节应比小指近节更靠近身体中线（{1:+0.000;-0.000} vs {2:+0.000;-0.000}）",
+                    label, skelThumbInward, skelLittleInward));
+            }
+
+            // 骨架拇指链的朝向：近节 → 中节 的方向同样必须朝身体中线（否则拇指会折向掌心）
+            if (skeletonThumb.childCount > 0)
+            {
+                Vector3 skelThumbDirection = skeletonThumb.GetChild(0).position - skeletonThumb.position;
+                if (skelThumbDirection.sqrMagnitude > 1e-8f)
+                {
+                    float skelDot = Vector3.Dot(skelThumbDirection.normalized, inward);
+                    Assert.Greater(skelDot, 0.3f, string.Format(
+                        "{0}骨架：拇指链方向应朝身体中线（与内侧轴的点积 {1:F2}）⇒ 拇指链偏航符号与手性不一致",
+                        label, skelDot));
+                }
+            }
+        }
+
         [UnityTest]
         public IEnumerator Hands_LowNotesArePlayedByLeftHand()
         {

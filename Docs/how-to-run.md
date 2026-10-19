@@ -299,7 +299,7 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots --json _v
 ## 11. 测试跳过项与发布门禁（2026-10-19 核对）
 
 对应优化方案 §7 清单第 2 项「整理测试跳过项并定义发布门禁」。
-本轮 `python Tools/verify.py` 实测：**EditMode 309/309 通过；PlayMode 90 通过、5 跳过、0 失败**（`_verify_out/playmode.xml`）。
+本轮 `python Tools/verify.py` 实测：**EditMode 314/314 通过；PlayMode 95 通过、5 跳过、0 失败**（`_verify_out/playmode.xml`）。
 跳过的 5 项**全部是环境/显式配置跳过，不是失败**，逐项说明如下：
 
 | 跳过用例 | 跳过原因 | 补跑路径 |
@@ -319,4 +319,15 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots --json _v
 | 夜间 / 候选发布 | 定时或发版前 | `--visual --compare-visual --stress --perf` + Windows Player 冒烟 + 10 分钟 Soak | 截图差异需人工审阅后才能更新基线；Player 冒烟覆盖主菜单、加载 `demo.mid`、播放/暂停/恢复、切视角/角色、退出清理 |
 | 发布候选 | 发版前 | 30 分钟 Soak + 干净检出构建 | 资源数量无单调增长；错误降级路径可用 |
 
-> 边界说明：上表是**流程约定**，仓库当前没有 CI workflow 去自动执行它；`--perf` / `--soak` / `--visual` 跑的是 Editor 内的玩家循环，仍**不能**替代真实 Windows Player 的帧时间与内存结论（见优化方案 P0-01）。
+> 边界说明：`--perf` / `--soak` / `--visual` 跑的是 **Editor** 内的玩家循环，**不能**替代真实 Windows Player 的帧时间与内存结论。
+> 后者用 `python Tools/verify.py --player` 单独采集（见 11.2）；两层数据分开记录在 `Docs/perf/sampling.md` 的不同小节。
+
+### 11.2 门禁命令（2026-10-19 新增）
+
+| 目的 | 命令 | 说明 |
+|---|---|---|
+| 静态检查（无需 Unity） | `python Tools/static_checks.py` | 纯 C# 模块不得引用 UnityEngine、UI 不得直连调度器/时间轴、禁止空 catch；并扫描 TMPro / Timeline / Animation Rigging 的引用数（信息性，不自动删包） |
+| 真实 Player 基线 | `python Tools/verify.py --player [--player-seconds 20]` | Development Build（仅 `PianoLesson` 场景）→ 独立进程采样 `play` / `switch` 两个场景 → 写入 `Docs/perf/sampling.md` 的 `player-*` 小节与 `Docs/perf/environments.md` |
+| CI | `.github/workflows/verify.yml` | `static` job 跑在 GitHub 托管 runner（无需 Unity）；`unity` job 需要注册 `[self-hosted, windows, unity]` 标签的机器 |
+
+> `--player` 需要**图形设备**：在无 GPU/无桌面的环境会构建失败或采不到数据，脚本会如实报告而不会用 Editor 数据顶替。

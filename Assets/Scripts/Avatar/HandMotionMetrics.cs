@@ -311,6 +311,12 @@ namespace PianoTeacher3D.Avatar
         /// <summary>换位过渡帧的指尖误差（用于解释历史记录中的「换位峰值」）。</summary>
         public MetricStats TransitionFingertipError { get; internal set; } = new MetricStats();
 
+        /// <summary>
+        /// 手腕单帧位移分布（米/帧）：每手每帧一个样本，与 <see cref="MaxStepDistance"/> 同源，
+        /// 但给出均值 / P95 而不是只有峰值（优化方案 §7-3 的「逐帧位移」口径）。
+        /// </summary>
+        public MetricStats PerFrameDisplacement { get; internal set; } = new MetricStats();
+
         /// <summary>按场景分组的指尖误差（单音 / 和弦 / 快速音阶 / 跨手）。</summary>
         public MetricStats[] GroupFingertipError { get; internal set; } =
         {
@@ -322,6 +328,19 @@ namespace PianoTeacher3D.Avatar
 
         /// <summary>指尖压入键面的帧数。</summary>
         public int FingerPenetrationFrames { get; internal set; }
+
+        // ==================== 与优化方案 §7-3 术语对齐的只读别名 ====================
+        // 计算完全复用上面的字段（同一份数据、同一套采样），只把「文档里的指标名」暴露出来，
+        // 避免文档、日志与代码各叫一个名字。口径定义见 Docs/animation-pipeline.md §6.4。
+
+        /// <summary>指尖目标误差（米）：被分配手指的指尖到该键按压点的 3D 距离，等价于 <see cref="AssignedFingertipError"/>。</summary>
+        public MetricStats FingertipTargetError => AssignedFingertipError;
+
+        /// <summary>键面距离（米，有符号）：指尖沿 Y 到键面的法向距离，正值悬空、负值压键，等价于 <see cref="FingertipSurfaceDistance"/>。</summary>
+        public MetricStats KeyTopDistance => FingertipSurfaceDistance;
+
+        /// <summary>换位过渡峰值误差（米）：<see cref="TransitionFingertipError"/> 的最大值。</summary>
+        public float TransitionPeakError => TransitionFingertipError.Max;
 
         /// <summary>诊断日志：保留既有字段与顺序，本轮仅在末尾追加新维度。</summary>
         public string ToLogString()
@@ -336,8 +355,9 @@ namespace PianoTeacher3D.Avatar
                    $"｜抽查 交叉 {CrossedHandFrames} 拇指 {ThumbOrientationIssues} 穿模 {PalmPenetrationFrames} 悬空 {HoveringFrames}" +
                    $" · 速度异常 {SpeedAnomalyCount}" +
                    $"｜口径 手腕误差 {WristTargetError.Describe()}" +
-                   $" · 被分配指尖 {AssignedFingertipError.Describe()}" +
-                   $" · 键面距离 {FingertipSurfaceDistance.Describe()}" +
+                   $" · 指尖目标误差 {FingertipTargetError.Describe()}" +
+                   $" · 键面距离 {KeyTopDistance.Describe()}" +
+                   $" · 逐帧位移 {PerFrameDisplacement.Describe()}" +
                    $" · 换位峰值 {TransitionFingertipError.Describe()}" +
                    $" · 关节限位 {JointLimitHits} 指尖压键 {FingerPenetrationFrames}";
         }
@@ -394,6 +414,7 @@ namespace PianoTeacher3D.Avatar
         private readonly MetricAccumulator _assignedError = new MetricAccumulator();
         private readonly MetricAccumulator _surfaceDistance = new MetricAccumulator();
         private readonly MetricAccumulator _transitionError = new MetricAccumulator();
+        private readonly MetricAccumulator _stepDistance = new MetricAccumulator();
         private readonly MetricAccumulator[] _groupError =
         {
             new MetricAccumulator(), new MetricAccumulator(), new MetricAccumulator(), new MetricAccumulator()
@@ -421,6 +442,10 @@ namespace PianoTeacher3D.Avatar
 
                 _leftPath += dl;
                 _rightPath += dr;
+
+                // 逐帧位移分布（每手每帧一个样本），与 MaxStepDistance 同源
+                _stepDistance.Add(dl);
+                _stepDistance.Add(dr);
 
                 if (dl > s.MovingThreshold && dr > s.MovingThreshold) _bothMovingSamples++;
 
@@ -583,6 +608,7 @@ namespace PianoTeacher3D.Avatar
                 AssignedFingertipError = _assignedError.Build(),
                 FingertipSurfaceDistance = _surfaceDistance.Build(),
                 TransitionFingertipError = _transitionError.Build(),
+                PerFrameDisplacement = _stepDistance.Build(),
                 JointLimitHits = _jointLimitHits,
                 FingerPenetrationFrames = _fingerPenetrationFrames
             };
@@ -649,6 +675,7 @@ namespace PianoTeacher3D.Avatar
             _assignedError.Clear();
             _surfaceDistance.Clear();
             _transitionError.Clear();
+            _stepDistance.Clear();
             for (int i = 0; i < _groupError.Length; i++) _groupError[i].Clear();
             _jointLimitHits = 0;
             _fingerPenetrationFrames = 0;

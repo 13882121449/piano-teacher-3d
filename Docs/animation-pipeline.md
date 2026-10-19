@@ -189,7 +189,7 @@ LessonTimeline 推进 CurrentTime（唯一时间源）
 | **左右手分项命中率** | `LeftHitRate` / `RightHitRate` | 分别对 `LeftHasTarget` / `RightHasTarget` 的目标帧统计；**该手无目标帧时按 1 计**（与总命中率口径一致），同时暴露 `LeftTargetSamples` / `RightTargetSamples`（UI 可显示「样本 0」而非伪造 100%） |
 | **指尖到目标键面误差** | `FingertipMeanError` / `FingertipMaxError` | 每手每帧对每个按下音高，取「离它的最近指尖到该键按压点」的 3D 距离（`FingertipWorld` 优先用 `IFingertipRig.GetFingertip`，否则按指根 + 前向 + `FingertipReachEstimate` 估计）；每手每帧最多计 1 个样本 |
 | **指尖命中率** | `FingertipHitRate` | 误差 ≤ `FingertipErrorTolerance`（0.035 m）的样本占比；无样本为 1 |
-| **最大单帧位移** | `MaxStepDistance` | 手腕单帧位移的最大值（米），用于发现瞬移 |
+| **最大单帧位移** | `MaxStepDistance` | 手腕单帧位移的最大值（米），用于发现瞬移；分布（均值 / P95）见 `PerFrameDisplacement`（§6.4） |
 | **平滑度** | `Smoothness` | 净位移 / 路径长度（1 = 完全直线），左右手分别计算后取平均 |
 | **双手协调** | `CoordinationRatio` | 左右手**同时移动**（单帧位移 > `MovingThreshold`）的采样占比 |
 | **速度变化异常** | `SpeedAnomalyCount` | 连续帧位移变化超过 `SpeedAnomalyStepDelta`（0.020 m）的次数（加速度突变 / 顿挫） |
@@ -218,6 +218,59 @@ LessonTimeline 推进 CurrentTime（唯一时间源）
 - **近景人工抽查项**：手指交叉、拇指方向错误、手掌穿模、离键悬空 —— 对应 `HandMotionReport` 的四个抽查计数 + 人工看图。
 - **异常姿态日志**：`HandIKController.PoseIssues`（最近 8 条异常姿态描述）与 `PoseIssueCount`。
 
+### 6.4 指标口径（单位 / 采样窗口 / 均值与 P95）— 优化方案 §7-3
+
+> 目的：历史记录里出现过「15 mm / 38–41 mm / 260–280 mm」三个数量级不同的数字，它们分别属于**不同的指标**。
+> 本节把每个指标的单位、采样对象、窗口与统计方式写死；`HandMotionReport` 的字段名与本节一一对应，
+> 报告里同时给出**均值**与**P95**，不再只报一个聚合值。
+
+**通用约定**
+
+| 项 | 约定 |
+|---|---|
+| 长度单位 | 米（m）；日志与本文按 mm 显示（×1000，保留 1 位小数） |
+| 角度单位 | 度（°） |
+| 采样频率 | 每个渲染帧 1 次（`HandIKController.Update` → `SampleMetrics`），**不是固定 60 Hz**；跨设备比较必须固定分辨率/画质/帧率上限，并记录在 `Docs/perf/environments.md` |
+| 采样窗口 | 从 `ResetMetrics()`（换曲 / 换角色 / 切显示模式 / 面板重置）到 `BuildMotionReport()` 之间的连续播放区间；窗口内每帧都计入 `Samples`，但**各分项指标只统计自己有有效样本的帧**（例如该手没有目标时不计手腕误差） |
+| 均值 | 有效样本的算术平均（`MetricAccumulator._sum / _total`，覆盖窗口内全部样本） |
+| P95 / P99 | 对最多 20000 个保留样本排序后取最近秩（`RoundToInt(p × (n−1))`）。超出 20000 后按 `_total % Capacity` 抽样替换，**均值仍按全部样本计算，分位数按保留样本计算**（长曲目下两者样本集可能不同，报告需注明） |
+| 分组 | 一帧只归一组，优先级：和弦 → 快速音阶 → 跨手 → 单音（`SelectGroup`），避免同一帧被重复计入四组 |
+
+**五项核心指标**
+
+| 指标（文档名） | 代码字段 | 采样对象 | 计算式 | 单位 / 方向 |
+|---|---|---|---|---|
+| 腕部误差 `WristTargetError` | `WristTargetError` | 该手有目标的帧 | 手腕世界位置与「手腕目标位置」的 **XZ 水平距离**（不含 Y，因为换位抬升会临时抬高手腕） | m，越小越好；衡量跟随延迟，**不等于对键精度** |
+| 指尖误差 `FingertipTargetError` | `FingertipTargetError`（= `AssignedFingertipError`） | 每个被分配的指尖 | 该指 `Tip` 节点世界坐标 → 该音高键面按压点的 **3D 欧氏距离** | m，越小越好；与视觉一致性测试同口径，**不是**「最近指尖」的乐观下界 |
+| 键面距离 `KeyTopDistance` | `KeyTopDistance`（= `FingertipSurfaceDistance`） | 同上 | `指尖世界 y − 该键键面 y`；白键键面 = 键根 y + `WhiteHeight`，黑键 = 键根 y + `BlackHeight` | m，**正值悬空 / 负值压键**；低于 −`FingertipPenetrationTolerance`（0.004）计为穿模帧 |
+| 逐帧位移 `PerFrameDisplacement` | `PerFrameDisplacement` | 每手每帧（需上一帧） | 手腕世界位置与上一帧的 3D 距离 | m/帧；**未除 `deltaTime`**，绝对值随帧率变化，只用于同机同设置对比与「瞬移」判定 |
+| 过渡峰值 `TransitionPeakError` | `TransitionPeakError`（= `TransitionFingertipError.Max`） | 换位过渡帧 | 过渡帧内「指尖误差」的最大值；过渡帧判定 = 目标位移 ≥ `LargeMotionDistance`（0.10 m）或手腕单帧位移 ≥ `TransitionStepThreshold`（0.010 m） | m，越小越好；历史记录的 260–280 mm 属于该口径 |
+
+**报告输出**：`HandMotionReport.ToLogString()` 一次打印上述五项 + 关节限位/穿模计数 + 四个分组命中率，
+格式为 `均值 X mm · P50 · P95 · P99 · 峰值（样本数）`。样本为 0 时打印「样本 0」，**不伪造 100%**。
+
+**所需标注曲目集（尚未内置，必须补齐后才能作为验收依据）**
+
+自动数值只能说明「手指是否靠近目标键」，不能替代遮挡/指尖方向/自然度的人工复核；而要让数值可比较，
+必须先固定一组带标注的曲目。需要覆盖的 7 类场景与标注要求：
+
+| # | 场景 | 覆盖目的 | 标注内容 |
+|---|---|---|---|
+| 1 | 单音级进（C 大调音阶，上下行） | 基准误差、指法单调性 | 每个音的起始时间、目标键、期望手/指 |
+| 2 | 跨八度跳进 | 换位过渡峰值 | 同上 + 允许的过渡时间窗 |
+| 3 | 黑白键混合 | 黑键独立键面高度 | 同上 + 键型 |
+| 4 | 三音 / 四音和弦 | 和弦成形、同手多指分配 | 同上（和弦内每个音单独标注） |
+| 5 | 左右手交叉 | 交叉手不被误判为「手反了」 | 同上 + 显式 `HandSide` 覆盖 |
+| 6 | 快速重复音（同音 16 分音符） | 重复音稳定性、声部抢占 | 同上 + 重复次数 |
+| 7 | 低音域 / 高音域（A0–C3、C6–C8） | 键盘两端可达性 | 同上 |
+
+约定：每类 8–16 小节、固定 tempo 与力度；文件放在 `Assets/StreamingAssets/Songs/annotation/`，
+同名 `.json` 记录 `pitch / startTime / duration / expectedHand / expectedFinger / toleranceMm`；
+报告必须同时记录曲目 ID、commit、Unity 版本与机器（见 `Docs/perf/environments.md`）。
+
+> **当前状态（如实标注）**：该标注集**尚未进入仓库**，因此本轮及此前的指尖误差数字（38–41 mm 等）
+> 来自 `demo.mid` 的播放采样，**不能**当作优化方案 §8 的验收结论，只能作为同机同曲的前后对比基线。
+
 ---
 
 ## 7. 缺陷修复记录（承接上一轮，仍未回退）
@@ -230,6 +283,8 @@ LessonTimeline 推进 CurrentTime（唯一时间源）
 | B4 | 高亮每帧对全部预提示键重写 `MaterialPropertyBlock` | `PianoKeyHighlighter.RefreshUpcoming` | 先用暂存集合构建并与旧集合 `SetEquals`，相同则直接返回（零 GPU 操作） |
 | B5 | 未关闭的 Note On 被静默丢弃 | `MidiParser` | 以全曲最大 tick 收尾补全 + `DanglingNoteCount` 上报 |
 | B6 | 全景纯侧视遮挡键盘低音端 | `CameraModeController` | 改为前侧 3/4 角度（`OverviewYaw = 34°`）；详见 [`Docs/architecture.md`](architecture.md) 与视觉回归文档 |
+| B7 | **双手手性反置**：左手拇指长在小指一侧（看起来像右手），骨架拇指链朝身体外侧折 | `AvatarManager.BuildHand`、`AvatarRigBuilder.BuildFinger` | 位置与手性拆成两个符号：`positionSign`（左手在局部 −X）+ `inward`（拇指朝身体中线，左手 +1 / 右手 −1）。网格、掌指关节顺序、拇指偏航统一用 `inward`。复现测试 `Hands_ThumbFacesBodyMidline_OnBothHands`（修复前左手拇指 −30 mm / 小指 +23 mm） |
+| B8 | **左手套用右手指法**：`HeuristicFingeringProvider` 对左右手用同一套「音高越高 → 编号越大」映射 | `HeuristicFingeringProvider` | 语义编号 0=拇指…4=小指；左手镜像（`direction = -1`，和弦模板 `4 - template[i]`）。表现：左手低音用拇指 → 修正为小指，C3-E3-G3 由 1-3-5 改为 5-3-1 |
 
 ### 7.1 B3 的实测结论（重要，避免后续重复踩坑）
 

@@ -23,6 +23,9 @@
 
     python Tools/verify.py --stress           # 追加压力测试（-testCategory Stress）
     python Tools/verify.py --perf             # 追加性能采样（-testCategory Perf）
+    python Tools/verify.py --player           # 追加真实 Windows Player 基线（Development Build；需要图形设备）
+    python Tools/verify.py --player --player-seconds 30
+                                              # 每个场景采样 30 秒
     python Tools/verify.py --soak             # 追加长跑稳定性（-testCategory Soak，默认 10 分钟）
     python Tools/verify.py --soak --soak-seconds 120
                                               # 长跑时长改为 120 秒（环境变量 PT3D_SOAK_SECONDS）
@@ -196,8 +199,200 @@ def report_stage_special(title, result):
               f"不代表已通过，请人工确认（例如缺少视觉基线或缺少示例曲目）")
 
 
+# ==================== 真实 Windows Player 基线（P0-01 / §7-1 / §7-4） ====================
+
+PLAYER_DIR = OUT_DIR / "player"
+PLAYER_EXE = PLAYER_DIR / "PianoTeacher3D.exe"
+PLAYER_BUILD_METHOD = "PianoTeacher3D.EditorTools.PlayerBaselineBuild.Build"
+
+
+def build_player(unity, timeout_s):
+    """构建 Development Build（只含 PianoLesson 场景）。返回 (成功?, 说明)。"""
+    if PLAYER_EXE.exists():
+        try:
+            PLAYER_EXE.unlink()
+        except OSError:
+            pass
+
+    log_path = OUT_DIR / "player_build.log"
+    cmd = [str(unity), "-batchmode", "-quit", "-projectPath", str(PROJECT_ROOT),
+           "-executeMethod", PLAYER_BUILD_METHOD, "-logFile", str(log_path)]
+
+    env = dict(os.environ)
+    env["PT3D_PLAYER_OUT"] = str(PLAYER_EXE)
+
+    print(f"\n$ Unity -executeMethod {PLAYER_BUILD_METHOD} ...")
+    started = time.time()
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, env=env)
+    status = "timeout"
+    try:
+        proc.wait(timeout=timeout_s * 3)
+        status = "completed" if proc.returncode == 0 else f"exit={proc.returncode}"
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    print(f"  用时 {time.time() - started:0.1f}s → {status}")
+
+    if not PLAYER_EXE.exists():
+        detail = ""
+        if log_path.exists():
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            for line in text.splitlines():
+                if "error CS" in line or "[PT3D][Build]" in line:
+                    detail += "    " + line.strip() + "\n"
+        return False, f"未生成可执行文件（{status}）\n{detail}".rstrip()
+
+    return True, "构建成功"
+
+
+def run_player(exe, seconds, scenario, timeout_s):
+    """运行 Player 采样并返回解析后的 JSON（失败返回 None + 原因）。"""
+    out_json = OUT_DIR / f"player_{scenario}.json"
+    if out_json.exists():
+        try:
+            out_json.unlink()
+        except OSError:
+            pass
+
+    log_path = OUT_DIR / f"player_{scenario}.log"
+    cmd = [str(exe),
+           "-pt3dPerf", str(seconds),
+           "-pt3dPerfScenario", scenario,
+           "-pt3dPerfOut", str(out_json),
+           "-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0",
+           "-logFile", str(log_path)]
+
+    print(f"\n$ {exe.name} -pt3dPerf {seconds} -pt3dPerfScenario {scenario} ...")
+    started = time.time()
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    try:
+        proc.wait(timeout=timeout_s)
+        status = "completed" if proc.returncode == 0 else f"exit={proc.returncode}"
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        status = "timeout"
+    print(f"  用时 {time.time() - started:0.1f}s → {status}")
+
+    if not out_json.exists():
+        return None, f"Player 未输出采样结果（{status}），详见 {log_path.name}"
+
+    try:
+        import json
+        return json.loads(out_json.read_text(encoding="utf-8")), None
+    except (OSError, ValueError) as exc:
+        return None, f"采样结果无法解析：{exc.__class__.__name__}"
+
+
+def upsert_section(path: Path, section_id: str, body: str, preamble: str = "") -> bool:
+    """与 Unity 侧 PerfReportWriter 相同的分节写入：只替换自己的小节。"""
+    begin = f"<!-- SECTION:{section_id}:BEGIN -->"
+    end = f"<!-- SECTION:{section_id}:END -->"
+    block = f"{begin}\n{body.strip()}\n{end}"
+
+    try:
+        existing = path.read_text(encoding="utf-8") if path.exists() else preamble
+    except OSError:
+        return False
+
+    b = existing.find(begin)
+    e = existing.find(end)
+    if b >= 0 and e > b:
+        updated = existing[:b] + block + existing[e + len(end):]
+    else:
+        updated = existing.rstrip() + "\n\n" + block + "\n"
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(updated, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def player_section_markdown(data, scenario):
+    lines = [
+        f"### 真实 Windows Player 基线（scenario = {scenario}）",
+        "",
+        f"- 机器：{data.get('processor', '?')}（{data.get('processorCount', 0)} 线程 / "
+        f"{data.get('systemMemoryMb', 0)} MB）",
+        f"- 系统：{data.get('operatingSystem', '?')}",
+        f"- GPU / 图形 API：{data.get('graphicsDevice', '?')} / {data.get('graphicsApi', '?')}",
+        f"- 分辨率 / VSync / targetFrameRate：{data.get('screenWidth')}×{data.get('screenHeight')}"
+        f" / {data.get('vSyncCount')} / {data.get('targetFrameRate')}",
+        f"- Unity / 画质档：{data.get('unityVersion', '?')} / {data.get('qualityTier', '?')}",
+        f"- 采样窗口：预热 {data.get('warmupSeconds')} s + 采样 {data.get('sampleSeconds')} s"
+        f"（{data.get('frameCount')} 帧）",
+        "",
+        "| 指标 | 数值 |",
+        "|---|---|",
+        f"| 平均帧时间 | {data.get('meanMs', 0):.2f} ms |",
+        f"| p50 帧时间 | {data.get('p50Ms', 0):.2f} ms |",
+        f"| p95 帧时间 | {data.get('p95Ms', 0):.2f} ms |",
+        f"| p99 帧时间 | {data.get('p99Ms', 0):.2f} ms |",
+        f"| 最大帧时间 | {data.get('maxMs', 0):.2f} ms |",
+        f"| 平均 FPS | {data.get('avgFps', 0):.1f} |",
+        f"| 1% low FPS | {data.get('low1Fps', 0):.1f} |",
+        f"| 托管内存（GC.GetTotalMemory） | {data.get('gcManagedMbStart', 0):.1f} → "
+        f"{data.get('gcManagedMbEnd', 0):.1f} MB（增量 {data.get('gcAllocMb', 0):+.2f} MB） |",
+        f"| Mono 已用 / 总分配 | {data.get('monoUsedMb', 0):.1f} / {data.get('totalAllocatedMb', 0):.1f} MB |",
+        f"| Mesh / Material / AudioClip / GameObject | {data.get('meshCount', 0)} / "
+        f"{data.get('materialCount', 0)} / {data.get('audioClipCount', 0)} / {data.get('gameObjectCount', 0)} |",
+        "",
+        "**口径说明**",
+        "",
+        "- 本表来自 **Development Build 的独立 Player**（真实图形设备），不是 Editor 批处理数据。",
+        "- 帧时间取 `Time.unscaledDeltaTime`，逐帧采样；p50/p95/p99 取排序后的最近秩。",
+        "- 1% low FPS = 最慢 1% 帧的平均帧时间的倒数。",
+        "- 资源计数为 `Resources.FindObjectsOfTypeAll` 的运行时总数（含内置对象），只用于同机版本间趋势对比。",
+        f"- 结论边界：{data.get('note', '')}",
+    ]
+    return "\n".join(lines)
+
+
+def run_player_stage(unity, seconds, scenarios, timeout_s):
+    """构建 + 采样 + 归档。返回 (是否可用, 摘要行列表)。"""
+    ok, message = build_player(unity, timeout_s)
+    if not ok:
+        print(f"  ✗ Player 构建失败：{message}")
+        return False, [f"Player 构建失败：{message}"]
+
+    print(f"  ✓ {message} → {PLAYER_EXE}")
+
+    summary = []
+    any_data = False
+    for scenario in scenarios:
+        data, err = run_player(PLAYER_EXE, seconds, scenario, seconds + 180)
+        if data is None:
+            print(f"  ⚠ scenario={scenario} 未取得数据：{err}")
+            summary.append(f"{scenario}: 未取得数据（{err}）")
+            continue
+
+        any_data = True
+        print(f"  ✓ scenario={scenario}：p95 {data.get('p95Ms', 0):.2f} ms、"
+              f"p99 {data.get('p99Ms', 0):.2f} ms、1% low {data.get('low1Fps', 0):.1f} FPS、"
+              f"GC 增量 {data.get('gcAllocMb', 0):+.2f} MB")
+        upsert_section(PROJECT_ROOT / "Docs" / "perf" / "sampling.md",
+                       f"player-{scenario}",
+                       player_section_markdown(data, scenario))
+        summary.append(f"{scenario}: p95 {data.get('p95Ms', 0):.2f} ms / "
+                       f"p99 {data.get('p99Ms', 0):.2f} ms / 1% low {data.get('low1Fps', 0):.1f} FPS")
+
+    if any_data:
+        env_body = "\n".join([
+            "### 真实 Player 运行环境（本地自检）",
+            "",
+            f"- 采样时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"- Player：{PLAYER_EXE.name}（Development Build，1280×720 窗口）",
+            "- 场景：PianoLesson + StreamingAssets/Songs/demo.mid",
+            "- 数据文件：`_verify_out/player_<scenario>.json`",
+            "- 说明：本机为开发机（独显），不代表低配/集显设备；三类设备矩阵仍需分别采集。",
+        ])
+        upsert_section(PROJECT_ROOT / "Docs" / "perf" / "environments.md",
+                       "player-runtime", env_body)
+
+    return any_data, summary
+
+
 def print_artifacts():
-    """产物清单：列出关键产物的存在性与最后修改时间。"""
     print("\n" + "-" * 68)
     print("产物清单")
     print("-" * 68)
@@ -239,6 +434,11 @@ def main():
                         help=f"长跑时长（秒），通过环境变量 PT3D_SOAK_SECONDS 传给 Unity（默认 {SOAK_DEFAULT_SECONDS}）")
     parser.add_argument("--perf", action="store_true",
                         help="追加性能采样：-testCategory Perf（帧时间 p50/p95/p99 与 1%% low FPS）")
+    parser.add_argument("--player", action="store_true",
+                        help="追加真实 Windows Player 基线：Development Build + 帧时间/GC/内存采样"
+                             "（需要图形设备；构建与运行都在本机完成）")
+    parser.add_argument("--player-seconds", type=float, default=20.0, metavar="N",
+                        help="每个 Player 场景的采样秒数（默认 20）")
     parser.add_argument("--compare-visual", action="store_true",
                         help="追加视觉基线比较：-testFilter CompareAgainstBaseline（需要 GPU 与人工确认的基线；"
                              "无基线时用例会 Ignore，脚本按「已跳过」如实报告）")
@@ -334,7 +534,15 @@ def main():
                           "-testCategory", "Perf"], "perf", args.timeout * 2, xml)
         results["Perf"] = parse_results(xml)
 
-    # ---- 7. 长跑稳定性（可选，耗时长）----
+    # ---- 7. 真实 Windows Player 基线（可选，需要图形设备）----
+    player_summary = None
+    if args.player:
+        print("\n" + "-" * 68)
+        print("[附加] 真实 Windows Player 基线（Development Build，不含 -nographics）")
+        _, player_summary = run_player_stage(
+            unity, args.player_seconds, ["play", "switch"], args.timeout)
+
+    # ---- 8. 长跑稳定性（可选，耗时长）----
     if args.soak:
         soak_timeout = max(args.timeout, args.soak_seconds + 240)
         print("\n" + "-" * 68)
@@ -364,6 +572,13 @@ def main():
     for title, result in results.items():
         all_ok = print_summary(title, result) and all_ok
         report_stage_special(title, result)
+
+    if player_summary is not None:
+        print("[Player] 真实 Windows Player 基线：")
+        if not player_summary:
+            print("    未采集到任何数据（见上方构建/运行日志）")
+        for line in player_summary:
+            print(f"    - {line}")
 
     print_artifacts()
 

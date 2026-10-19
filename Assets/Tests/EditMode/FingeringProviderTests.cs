@@ -72,8 +72,8 @@ namespace PianoTeacher3D.Tests.EditMode
         [Test]
         public void BlackKey_AvoidsShortFinger()
         {
-            // A#2（pitch 46）在左手锚点左侧：就近映射会落到食指，规则应改到更长的中指
-            var plan = Assign(true, Pitches(46));
+            // 左手 D#3（pitch 51，黑键，锚点上方 3 半音）：左手镜像后落在食指（短指），规则应改到更长的中指
+            var plan = Assign(true, Pitches(51));
 
             Assert.AreEqual(2, plan.FingerByPitch[0], "黑键应避免短指（拇指/食指），改用较长手指");
             StringAssert.Contains("黑键", plan.Reason);
@@ -82,9 +82,9 @@ namespace PianoTeacher3D.Tests.EditMode
         [Test]
         public void WhiteKey_IsNotShiftedByBlackKeyRule()
         {
-            var plan = Assign(true, Pitches(45)); // A2（白键）
+            var plan = Assign(true, Pitches(45)); // A2（白键，锚点下方 3 半音 → 左手无名指）
 
-            Assert.AreEqual(1, plan.FingerByPitch[0], "白键不应触发黑键改指规则");
+            Assert.AreEqual(3, plan.FingerByPitch[0], "白键不应触发黑键改指规则，按左手镜像音域映射");
             Assert.IsFalse(plan.Reason != null && plan.Reason.Contains("黑键"));
         }
 
@@ -244,12 +244,24 @@ namespace PianoTeacher3D.Tests.EditMode
         }
 
         [Test]
-        public void LeftHand_LowRegister_UsesThumb()
+        public void LeftHand_LowRegister_UsesLittleFinger()
         {
-            var plan = Assign(true, Pitches(43)); // G2（白键，低音区）
+            var plan = Assign(true, Pitches(43)); // G2（白键，低音区，低于左手锚点 C3）
 
-            Assert.AreEqual(0, plan.FingerByPitch[0], "左手低音区应使用拇指");
+            // 左手低位由小指负责（拇指在高音侧）：这与右手「低音用拇指」正好相反。
+            // 改造前该断言期望 0（拇指），等于把右手指法套在左手上 —— 正是「左右手反置」的指法侧根因。
+            Assert.AreEqual(4, plan.FingerByPitch[0], "左手低音区应使用小指");
             Assert.IsFalse(plan.IsEstimated);
+        }
+
+        [Test]
+        public void LeftHand_Chord_UsesMirroredTemplate()
+        {
+            // 左手 C3-E3-G3：从小指到拇指（5-3-1），而不是右手的 1-3-5
+            var plan = Assign(true, Pitches(48, 52, 55));
+
+            CollectionAssert.AreEqual(new[] { 4, 2, 0 }, plan.FingerByPitch,
+                "左手和弦应从低音的小指排到高音的拇指");
         }
 
         [Test]

@@ -16,7 +16,13 @@ namespace PianoTeacher3D.Avatar
     /// </summary>
     public sealed class HandMeshDefinition
     {
-        /// <summary>手性：+1 = 右手（局部 +X 为拇指侧），−1 = 左手（镜像）。</summary>
+        /// <summary>
+        /// 内侧符号：<c>+1</c> = 局部 +X 一侧是拇指侧，<c>−1</c> = 局部 −X 一侧是拇指侧。
+        /// <para>
+        /// 注意它<b>不是</b>「左右手」的直接标记：角色面向局部 +Z 时左手在局部 −X，其内侧为 +X（Side = +1）；
+        /// 右手在局部 +X，其内侧为 −X（Side = −1）。传入「朝身体中线的方向」才能保证两只手的拇指都朝内。
+        /// </para>
+        /// </summary>
         public float Side = 1f;
 
         /// <summary>腕横纹 → 掌指关节的掌长（米，已含体型缩放）。</summary>
@@ -80,7 +86,7 @@ namespace PianoTeacher3D.Avatar
         /// </summary>
         /// <param name="metrics">角色手部比例（未乘体型系数）。</param>
         /// <param name="bodyScale">体型缩放（1 ≈ 1.45 m 坐姿基准）。</param>
-        /// <param name="side">+1 = 右手，−1 = 左手。</param>
+        /// <param name="side">内侧符号：+1 = 拇指在局部 +X 侧；−1 = 拇指在局部 −X 侧（见 <see cref="HandMeshDefinition.Side"/>）。</param>
         /// <param name="detail">网格精度档。</param>
         public static HandMeshDefinition FromMetrics(HandMetrics metrics, float bodyScale, float side,
             AvatarMeshDetail detail)

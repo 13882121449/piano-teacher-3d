@@ -370,14 +370,15 @@ namespace PianoTeacher3D.Avatar
             BuildNeckHead(root.transform, def, s, headR, skinMat, darkMat, hairMat);
             var shoulders = BuildShoulders(root.transform, s, clothMat);
 
-            var lArm = BuildArm(root.transform, "LeftArm", +1f, s, skinMat, clothMat, trimMat);
-            var rArm = BuildArm(root.transform, "RightArm", -1f, s, skinMat, clothMat, trimMat);
+            var lArm = BuildArm(root.transform, "LeftArm", leftHand: true, s, skinMat, clothMat, trimMat);
+            var rArm = BuildArm(root.transform, "RightArm", leftHand: false, s, skinMat, clothMat, trimMat);
 
-            // 【左右约定】左手 side = −1（局部 −X → 旋转后世界 +X = 角色真正的左手侧 = 低音侧），
-            // 右手 side = +1。side 同时决定手部网格的镜像（拇指侧、大鱼际/小鱼际、手指扇形），
-            // 因此这里换符号既摆正了位置，也摆正了手型的左右（拇指朝向身体内侧）。
-            var lHand = BuildHand(root.transform, "LeftHand", skinMat, nailMat, s, -1f, def);
-            var rHand = BuildHand(root.transform, "RightHand", skinMat, nailMat, s, +1f, def);
+            // 【左右约定】位置与手性（chirality）是两件事，必须分开给：
+            // ① 位置：左手在局部 −X（整体绕 Y 旋转 180° 后面向 −Z，局部 −X → 世界 +X = 角色真正的左手侧 = 低音侧）；
+            // ② 手性：拇指朝身体中线 —— 左手在局部 −X 侧，内侧 = +X；右手在 +X 侧，内侧 = −X。
+            // 改造前用同一个 side 同时决定位置与网格镜像，导致两只手的手型互换（左手长着右手的拇指侧）。
+            var lHand = BuildHand(root.transform, "LeftHand", skinMat, nailMat, s, leftHand: true, def);
+            var rHand = BuildHand(root.transform, "RightHand", skinMat, nailMat, s, leftHand: false, def);
 
             rig.Root = root;
             rig.LeftShoulder = shoulders.L;
@@ -402,12 +403,23 @@ namespace PianoTeacher3D.Avatar
         /// <see cref="IHandRig.Fingers"/> 仍是「每指一个根节点」（由姿态控制器对准目标键），
         /// 三关节挂在根的 <c>Chain</c> 子节点下；拇指对掌方向烘在链节点上（约 57°），虎口可见。
         /// </para>
+        /// <para>
+        /// <b>手性</b>：<paramref name="leftHand"/> 只表示解剖学侧别。腕部位置由它推出（左手局部 −X），
+        /// 网格镜像与手指扇形则由「内侧方向」推出（左手内侧 = 局部 +X，右手内侧 = 局部 −X），
+        /// 因此两只手的拇指都朝身体中线，不会出现「左手长得像右手」。
+        /// </para>
         /// </summary>
         private IHandRig BuildHand(Transform parent, string name, Material skinMat, Material nailMat,
-            float s, float side, AvatarDefinition def)
+            float s, bool leftHand, AvatarDefinition def)
         {
+            // 位置符号：角色面向局部 +Z（整体再旋转 180°），左手在局部 −X。
+            float positionSign = leftHand ? -1f : 1f;
+
+            // 内侧符号：局部 +X 指向身体中线的方向（左手在 −X 侧 → 内侧为 +X）。
+            float inward = leftHand ? 1f : -1f;
+
             var quality = def != null ? def.Quality : null;
-            var meshDef = HandMeshDefinition.FromMetrics(def != null ? def.Hand : null, s, side,
+            var meshDef = HandMeshDefinition.FromMetrics(def != null ? def.Hand : null, s, inward,
                 quality != null ? quality.MeshDetail : AvatarMeshDetail.Medium);
 
             float palmL = meshDef.PalmLength;
@@ -417,7 +429,7 @@ namespace PianoTeacher3D.Avatar
 
             var wrist = new GameObject(name).transform;
             wrist.SetParent(parent, false);
-            wrist.localPosition = new Vector3(side * 0.20f * s, 0.90f * s, 0.10f * s);
+            wrist.localPosition = new Vector3(positionSign * 0.20f * s, 0.90f * s, 0.10f * s);
 
             // 腕部连接：一个比掌根略小的过渡体，把「手臂（圆形）→ 手掌（扁形）」的截面差摊平。
             // 尺寸必须小于掌根截面，否则会在腕部形成一圈可见的凸环（附录 A.3.2 第 6 条）。
@@ -443,7 +455,7 @@ namespace PianoTeacher3D.Avatar
                 fingerRoot.SetParent(wrist, false);
 
                 var knuckle = AvatarBodyMetrics.KnucklePositions[f];
-                fingerRoot.localPosition = new Vector3(knuckle.x * side, knuckle.y * s, knuckle.z * s);
+                fingerRoot.localPosition = new Vector3(knuckle.x * inward, knuckle.y * s, knuckle.z * s);
 
                 // 手指根保持单位旋转：朝目标键的对准由 FingerPoseController 旋转本节点（语义与旧版一致）；
                 // 解剖朝向（拇指外展/对掌、四指扇形）放在链节点上，避免被姿态控制器覆盖。
@@ -454,7 +466,7 @@ namespace PianoTeacher3D.Avatar
                     : AvatarBodyMetrics.FingerChainYaw[f];
                 var chain = new GameObject("Chain").transform;
                 chain.SetParent(fingerRoot, false);
-                chain.localRotation = Quaternion.Euler(0f, side * yaw, 0f);
+                chain.localRotation = Quaternion.Euler(0f, inward * yaw, 0f);
 
                 BuildFingerChain(chain, f, meshDef, skinMat, nailMat, out joints[f], out fingertips[f], out reach[f]);
                 fingers.Add(fingerRoot);
@@ -824,11 +836,11 @@ namespace PianoTeacher3D.Avatar
         /// 叠加「袖口 + 袖筒」两个沿臂轴对齐的服装子体块 —— 它们只沿臂轴被等比拉伸，
         /// 因此袖子长度始终与手臂长度成比例，不会失真。
         /// </summary>
-        private static Transform BuildArm(Transform root, string name, float side, float s,
+        private static Transform BuildArm(Transform root, string name, bool leftHand, float s,
             Material skinMat, Material clothMat, Material trimMat)
         {
             var arm = CreatePart(PrimitiveType.Capsule, root, name,
-                new Vector3(-side * 0.20f * s, 0.90f * s, 0.10f * s),
+                new Vector3((leftHand ? -1f : 1f) * 0.20f * s, 0.90f * s, 0.10f * s),
                 new Vector3(AvatarBodyMetrics.ArmRadius * s, 0.28f * s, AvatarBodyMetrics.ArmRadius * s), skinMat);
 
             // 袖筒（覆盖上臂到肘部，服装独立可见层）：局部尺寸经父级 x/y 缩放换算后≈ 33 mm 半径
