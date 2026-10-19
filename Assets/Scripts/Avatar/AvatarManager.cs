@@ -31,6 +31,24 @@ namespace PianoTeacher3D.Avatar
         Transform GetFingertip(int fingerIndex);
     }
 
+    /// <summary>
+    /// 可选扩展接口：暴露每指的 <b>MCP / PIP / DIP 三关节</b>与静止指长（评估文档附录 A.4.1 / A.4.4）。
+    /// <para>
+    /// <c>FingerPoseController</c> 据此做关节级姿态解算与受限指尖 IK；
+    /// 实现方缺席时自动退回「只旋转指根」的旧行为（向后兼容，不影响既有测试）。
+    /// </para>
+    /// </summary>
+    public interface IFingerJointRig : IFingertipRig
+    {
+        /// <summary>
+        /// 取某指的三个关节（0 = 指根 MCP，1 = 中节 PIP，2 = 末节 DIP）。不支持时返回 false。
+        /// </summary>
+        bool TryGetJoints(int fingerIndex, out Transform proximal, out Transform intermediate, out Transform distal);
+
+        /// <summary>该指关节原点到指尖接触点的静止长度（米）。</summary>
+        float GetFingerLength(int fingerIndex);
+    }
+
     /// <summary>预设角色外观参数（兼容保留：新代码请使用 <see cref="AvatarDefinition"/>）。</summary>
     [System.Serializable]
     public class AvatarPreset
@@ -82,6 +100,9 @@ namespace PianoTeacher3D.Avatar
         /// <summary>手部与手臂网格当前是否可见（教学模式会隐藏；切角色后需重新套用）。</summary>
         private bool _limbsVisible = true;
         private string _lastRigValidationMessage;
+
+        /// <summary>运行时生成的网格（手部放样网格），场景销毁时统一释放，避免原生对象泄漏。</summary>
+        private readonly List<Mesh> _runtimeMeshes = new List<Mesh>();
 
         /// <summary>全部角色定义（只读；索引与 <see cref="SwitchAvatar"/> 一致）。</summary>
         public IReadOnlyList<AvatarDefinition> Definitions => _definitions;
@@ -141,24 +162,32 @@ namespace PianoTeacher3D.Avatar
                 id: "realistic_female", name: "写实女性", height: 1.38f, headScale: 0.94f,
                 skin: new Color(0.97f, 0.86f, 0.78f), cloth: new Color(0.62f, 0.27f, 0.33f),
                 hair: new Color(0.145f, 0.110f, 0.090f), hairStyle: 0, cartoon: false,
-                handHeightOffset: 0.000f, handDepthOffset: 0.000f));
+                handHeightOffset: 0.000f, handDepthOffset: 0.000f,
+                palmWidthScale: 0.97f, palmThicknessScale: 0.96f,
+                fingerLengthScale: 1.00f, fingerRadiusScale: 0.95f, wristPitch: 8f));
 
             _definitions.Add(MakeDefinition(
                 id: "realistic_male", name: "写实男性", height: 1.52f, headScale: 1.00f,
                 skin: new Color(0.86f, 0.73f, 0.62f), cloth: new Color(0.20f, 0.29f, 0.45f),
                 hair: new Color(0.120f, 0.095f, 0.080f), hairStyle: 1, cartoon: false,
-                handHeightOffset: 0.002f, handDepthOffset: -0.004f));
+                handHeightOffset: 0.002f, handDepthOffset: -0.004f,
+                palmWidthScale: 1.06f, palmThicknessScale: 1.05f,
+                fingerLengthScale: 1.04f, fingerRadiusScale: 1.06f, wristPitch: 8f));
 
             _definitions.Add(MakeDefinition(
                 id: "cartoon", name: "卡通角色", height: 1.26f, headScale: 1.42f,
                 skin: new Color(1f, 0.92f, 0.82f), cloth: new Color(0.24f, 0.62f, 0.45f),
                 hair: new Color(0.22f, 0.58f, 0.92f), hairStyle: 2, cartoon: true,
-                handHeightOffset: -0.002f, handDepthOffset: 0.004f));
+                handHeightOffset: -0.002f, handDepthOffset: 0.004f,
+                palmWidthScale: 1.12f, palmThicknessScale: 1.16f,
+                fingerLengthScale: 0.92f, fingerRadiusScale: 1.14f, wristPitch: 11f));
         }
 
         private static AvatarDefinition MakeDefinition(string id, string name, float height, float headScale,
             Color skin, Color cloth, Color hair, int hairStyle, bool cartoon,
-            float handHeightOffset, float handDepthOffset)
+            float handHeightOffset, float handDepthOffset,
+            float palmWidthScale, float palmThicknessScale,
+            float fingerLengthScale, float fingerRadiusScale, float wristPitch)
         {
             var def = new AvatarDefinition
             {
@@ -178,6 +207,8 @@ namespace PianoTeacher3D.Avatar
             };
             def.Quality.FingerSegments = 3;
             def.Quality.MeshDetail = AvatarMeshDetail.Medium;
+            def.ApplyHandStyle(palmWidthScale, palmThicknessScale,
+                fingerLengthScale, fingerRadiusScale, wristPitch);
             return def;
         }
 
@@ -345,8 +376,8 @@ namespace PianoTeacher3D.Avatar
             // 【左右约定】左手 side = −1（局部 −X → 旋转后世界 +X = 角色真正的左手侧 = 低音侧），
             // 右手 side = +1。side 同时决定手部网格的镜像（拇指侧、大鱼际/小鱼际、手指扇形），
             // 因此这里换符号既摆正了位置，也摆正了手型的左右（拇指朝向身体内侧）。
-            var lHand = BuildHand(root.transform, "LeftHand", skinMat, nailMat, s, -1f, def.Quality);
-            var rHand = BuildHand(root.transform, "RightHand", skinMat, nailMat, s, +1f, def.Quality);
+            var lHand = BuildHand(root.transform, "LeftHand", skinMat, nailMat, s, -1f, def);
+            var rHand = BuildHand(root.transform, "RightHand", skinMat, nailMat, s, +1f, def);
 
             rig.Root = root;
             rig.LeftShoulder = shoulders.L;
@@ -358,66 +389,53 @@ namespace PianoTeacher3D.Avatar
             return rig;
         }
 
-        // ==================== 手部（方案 5.1 第 1 项 / 审查 1.2A） ====================
+        // ==================== 手部（附录 A.3 几何重绘 / 方案 5.1 第 1 项） ====================
 
         /// <summary>
-        /// 构建单手：手腕 → 掌部（掌根/掌背/虎口连续轮廓）→ 5 指（每指 3 段 + 圆指尖）。
+        /// 构建单手：腕部连接 → 掌部（单块连续截面放样）→ 5 指 × 3 关节（MCP/PIP/DIP）。
         /// <para>
-        /// 返回的手部 <see cref="IHandRig.Fingers"/> 仍为「每指一个根节点」（由姿态控制器旋转），
-        /// 三段结构挂在根的 <c>Chain</c> 子节点下；拇指的对掌方向烘在链节点上（约 57°），
-        /// 因此不会被姿态控制器覆盖，虎口可见（审查 1.2A）。
+        /// <b>几何与关节分离</b>（附录 A.2）：网格由 <see cref="HandMeshFactory"/> 生成
+        /// （连续截面、逐段渐缩、圆指尖、可选指甲），关节层级由本方法建立，
+        /// 因此后续调整手掌/手指形状不会改变骨骼语义、键位标尺与 IK 目标。
+        /// </para>
+        /// <para>
+        /// <see cref="IHandRig.Fingers"/> 仍是「每指一个根节点」（由姿态控制器对准目标键），
+        /// 三关节挂在根的 <c>Chain</c> 子节点下；拇指对掌方向烘在链节点上（约 57°），虎口可见。
         /// </para>
         /// </summary>
-        private static IHandRig BuildHand(Transform parent, string name, Material skinMat, Material nailMat,
-            float s, float side, AvatarQualityConfig quality)
+        private IHandRig BuildHand(Transform parent, string name, Material skinMat, Material nailMat,
+            float s, float side, AvatarDefinition def)
         {
-            bool low = quality != null && quality.MeshDetail == AvatarMeshDetail.Low;
-            bool high = quality != null && quality.MeshDetail == AvatarMeshDetail.High;
-            int segCount = Mathf.Clamp(quality != null ? quality.FingerSegments : 3, 1, 3);
+            var quality = def != null ? def.Quality : null;
+            var meshDef = HandMeshDefinition.FromMetrics(def != null ? def.Hand : null, s, side,
+                quality != null ? quality.MeshDetail : AvatarMeshDetail.Medium);
 
-            float palmW = AvatarBodyMetrics.PalmWidth * s;
-            float palmT = AvatarBodyMetrics.PalmThickness * s;
-            float palmL = AvatarBodyMetrics.PalmLength * s;
-            float wristR = AvatarBodyMetrics.WristRadius * s;
+            float palmL = meshDef.PalmLength;
+            float palmW = meshDef.PalmWidth;
+            float palmT = meshDef.PalmThickness;
+            float wristR = meshDef.WristRadius;
 
             var wrist = new GameObject(name).transform;
             wrist.SetParent(parent, false);
             wrist.localPosition = new Vector3(side * 0.20f * s, 0.90f * s, 0.10f * s);
 
-            // 腕部连接（与手臂胶囊重叠，遮住接缝）
-            CreatePart(PrimitiveType.Sphere, wrist, "Wrist", new Vector3(0f, 0f, -wristR * 0.40f),
-                new Vector3(palmW * 0.70f, palmT * 1.15f, wristR * 1.55f), skinMat);
+            // 腕部连接：一个比掌根略小的过渡体，把「手臂（圆形）→ 手掌（扁形）」的截面差摊平。
+            // 尺寸必须小于掌根截面，否则会在腕部形成一圈可见的凸环（附录 A.3.2 第 6 条）。
+            CreatePart(PrimitiveType.Sphere, wrist, "Wrist", new Vector3(0f, 0f, -wristR * 0.55f),
+                new Vector3(palmW * 0.62f, palmT * 0.85f, wristR * 1.65f), skinMat);
 
-            // 掌根 → 掌背 → 掌指关节：3 段过渡体块，全部为平滑法线椭球并用重叠而非拼接（避免断层与尖接缝）
-            CreatePart(PrimitiveType.Sphere, wrist, "PalmRoot", new Vector3(0f, 0f, palmL * 0.12f),
-                new Vector3(palmW * 0.86f, palmT * 0.95f, palmL * 0.62f), skinMat);
+            // 掌部：单块连续放样网格（腕部收窄 → 掌心变宽 → 掌指关节略收，含大鱼际/小鱼际隆起）
+            AttachMesh(wrist, "PalmMesh", HandMeshFactory.BuildPalm(meshDef), skinMat);
 
-            var palm = CreatePart(PrimitiveType.Sphere, wrist, "PalmCore", new Vector3(0f, 0f, palmL * 0.55f),
-                new Vector3(palmW, palmT, palmL * 0.98f), skinMat);
-
-            CreatePart(PrimitiveType.Sphere, wrist, "KnuckleRidge", new Vector3(0f, palmT * 0.10f, palmL * 1.02f),
-                new Vector3(palmW * 0.94f, palmT * 0.78f, palmL * 0.42f), skinMat);
-
-            // 大鱼际（拇指根隆起）与小鱼际：让掌部有体积感而不是一块扁平长方体
-            CreatePart(PrimitiveType.Sphere, wrist, "Thenar",
-                new Vector3(side * palmW * 0.30f, -palmT * 0.22f, palmL * 0.42f),
-                new Vector3(palmW * 0.42f, palmT * 0.88f, palmL * 0.64f), skinMat);
-
-            CreatePart(PrimitiveType.Sphere, wrist, "Hypothenar",
-                new Vector3(side * -palmW * 0.36f, -palmT * 0.18f, palmL * 0.46f),
-                new Vector3(palmW * 0.30f, palmT * 0.72f, palmL * 0.58f), skinMat);
-
-            if (!low)
-            {
-                // 虎口：拇指与食指之间的楔形填充，配合拇指链的 57° 朝向形成可见的虎口空间
-                var web = CreatePart(PrimitiveType.Capsule, wrist, "Webbing",
-                    new Vector3(side * palmW * 0.32f, palmT * 0.04f, palmL * 0.70f),
-                    new Vector3(palmW * 0.20f, palmL * 0.24f, palmW * 0.16f), skinMat);
-                web.localRotation = Quaternion.Euler(90f, side * 26f, 0f);
-            }
+            // Palm 节点保留在掌心处（拇指朝向抽查与掌心穿模判定都以它为基准）
+            var palm = new GameObject("Palm").transform;
+            palm.SetParent(wrist, false);
+            palm.localPosition = new Vector3(0f, 0f, palmL * 0.55f);
 
             var fingers = new List<Transform>(5);
             var fingertips = new Transform[5];
+            var joints = new Transform[5][];
+            var reach = new float[5];
 
             for (int f = 0; f < 5; f++)
             {
@@ -427,87 +445,137 @@ namespace PianoTeacher3D.Avatar
                 var knuckle = AvatarBodyMetrics.KnucklePositions[f];
                 fingerRoot.localPosition = new Vector3(knuckle.x * side, knuckle.y * s, knuckle.z * s);
 
-                // 手指根保持单位旋转：弯曲/展开由 FingerPoseController 旋转本节点（语义与旧版一致）。
-                // 解剖朝向（拇指对掌方向、四指扇形）放在链节点上，避免被姿态控制器覆盖。
+                // 手指根保持单位旋转：朝目标键的对准由 FingerPoseController 旋转本节点（语义与旧版一致）；
+                // 解剖朝向（拇指外展/对掌、四指扇形）放在链节点上，避免被姿态控制器覆盖。
                 fingerRoot.localRotation = Quaternion.identity;
 
+                float yaw = f == 0
+                    ? (def != null ? def.Hand.ThumbAbduction : AvatarBodyMetrics.ThumbSpreadDegrees)
+                    : AvatarBodyMetrics.FingerChainYaw[f];
                 var chain = new GameObject("Chain").transform;
                 chain.SetParent(fingerRoot, false);
-                chain.localRotation = Quaternion.Euler(0f, side * AvatarBodyMetrics.FingerChainYaw[f], 0f);
+                chain.localRotation = Quaternion.Euler(0f, side * yaw, 0f);
 
-                BuildFingerSegments(chain, f, s, skinMat, nailMat, high, segCount, out fingertips[f]);
+                BuildFingerChain(chain, f, meshDef, skinMat, nailMat, out joints[f], out fingertips[f], out reach[f]);
                 fingers.Add(fingerRoot);
             }
 
-            return new HandRig(wrist, palm, fingers, fingertips);
+            return new HandRig(wrist, palm, fingers, fingertips, joints, reach);
         }
 
-        /// <summary>构建一根手指的指节链（近端 / 中段 / 末端，默认 3 段）+ 圆指尖，输出指尖 Transform。</summary>
-        private static void BuildFingerSegments(Transform chain, int fingerIndex, float s,
-            Material skin, Material nail, bool high, int segCount, out Transform tip)
+        /// <summary>
+        /// 在指链节点下构建 MCP → PIP → DIP 三关节，并把每段网格挂到对应关节上。
+        /// 关节间距取段长的 96%（与网格 7% 的重叠区配合，弯曲时不露缝）。
+        /// </summary>
+        private void BuildFingerChain(Transform chain, int fingerIndex, HandMeshDefinition meshDef,
+            Material skin, Material nail, out Transform[] joints, out Transform tip, out float reach)
         {
-            float total = AvatarBodyMetrics.FingerLengths[fingerIndex] * s;
-            float r0 = AvatarBodyMetrics.FingerRadii[fingerIndex] * s;
+            joints = new Transform[HandMeshFactory.SegmentCount];
 
             Transform node = chain;
-            for (int seg = 0; seg < segCount; seg++)
+            float offset = 0f;
+            for (int seg = 0; seg < HandMeshFactory.SegmentCount; seg++)
             {
-                float len = total * SegmentRatio(segCount, seg);
-                float r = r0 * (1f - 0.14f * seg);   // 长度与粗细逐段递减
+                var joint = new GameObject($"Joint{seg}").transform;
+                joint.SetParent(node, false);
+                joint.localPosition = new Vector3(0f, 0f, offset);
+                joints[seg] = joint;
 
-                // 胶囊默认沿 Y：绕 X 转 90° 使其沿 Z（手指伸出方向），两端半球 → 指节圆润无平切
-                CreatePart(PrimitiveType.Capsule, node, $"Seg{seg}",
-                    new Vector3(0f, 0f, len * 0.5f),
-                    new Vector3(r * 2f, len * 0.5f + r * 0.30f, r * 2f), skin,
-                    Quaternion.Euler(90f, 0f, 0f));
+                AttachMesh(joint, $"Seg{seg}",
+                    HandMeshFactory.BuildFingerSegment(meshDef, fingerIndex, seg), skin);
 
-                var next = new GameObject($"Node{seg}").transform;
-                next.SetParent(node, false);
-                next.localPosition = new Vector3(0f, 0f, len * 0.84f);  // 轻微重叠，消除指节断缝
-                node = next;
+                if (meshDef.IncludeNails && seg == HandMeshFactory.SegmentCount - 1)
+                    AttachMesh(joint, "Nail", HandMeshFactory.BuildNail(meshDef, fingerIndex), nail);
+
+                node = joint;
+                offset = meshDef.SegmentLength(fingerIndex, seg) * 0.96f;
             }
 
-            float tipR = r0 * 0.72f;
-            tip = CreatePart(PrimitiveType.Sphere, node, "Tip",
-                new Vector3(0f, 0f, tipR * 0.40f), Vector3.one * (tipR * 1.9f), skin);
+            // 指尖接触点：末节网格的半球顶端略往回取，作为「指腹落键」的参考点
+            float tipRadius = meshDef.SegmentRadius(fingerIndex, 2) * 0.88f;
+            float tipOffset = meshDef.SegmentLength(fingerIndex, 2) + tipRadius * 0.82f;
 
-            if (high && nail != null)
-            {
-                // 高精度档：极轻微的指甲标记（近景可辨，不堆叠细节）
-                CreatePart(PrimitiveType.Sphere, node, "Nail",
-                    new Vector3(0f, tipR * 0.82f, tipR * 0.55f),
-                    new Vector3(tipR * 1.15f, tipR * 0.34f, tipR * 1.05f), nail);
-            }
+            tip = new GameObject("Tip").transform;
+            tip.SetParent(joints[2], false);
+            tip.localPosition = new Vector3(0f, 0f, tipOffset);
+
+            reach = meshDef.SegmentLength(fingerIndex, 0) * 0.96f
+                  + meshDef.SegmentLength(fingerIndex, 1) * 0.96f
+                  + tipOffset;
         }
 
-        /// <summary>指节长度占比：3 段用真实比例（近端最长、末端最短），2 段按 6:4 划分。</summary>
-        private static float SegmentRatio(int segCount, int seg)
+        /// <summary>挂载运行时网格（统一登记，场景卸载时释放，避免原生网格泄漏）。</summary>
+        private Transform AttachMesh(Transform parent, string name, Mesh mesh, Material mat)
         {
-            if (segCount <= 1) return 1f;
-            if (segCount == 3) return AvatarBodyMetrics.FingerSegmentRatios[seg];
-            return seg == 0 ? 0.6f : 0.4f;
+            var go = new GameObject(name);
+            var t = go.transform;
+            t.SetParent(parent, false);
+            if (mesh == null) return t;
+
+            _runtimeMeshes.Add(mesh);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = go.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = mat;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            renderer.receiveShadows = true;
+            return t;
         }
 
-        private sealed class HandRig : IHandRig, IFingertipRig
+        private void OnDestroy()
+        {
+            for (int i = 0; i < _runtimeMeshes.Count; i++)
+            {
+                if (_runtimeMeshes[i] != null) Object.Destroy(_runtimeMeshes[i]);
+            }
+            _runtimeMeshes.Clear();
+        }
+
+        private sealed class HandRig : IHandRig, IFingerJointRig
         {
             public Transform Wrist { get; }
             public Transform Palm { get; }
             public IReadOnlyList<Transform> Fingers { get; }
 
             private readonly Transform[] _fingertips;
+            private readonly Transform[][] _joints;
+            private readonly float[] _lengths;
 
-            public HandRig(Transform wrist, Transform palm, IReadOnlyList<Transform> fingers, Transform[] fingertips)
+            public HandRig(Transform wrist, Transform palm, IReadOnlyList<Transform> fingers,
+                Transform[] fingertips, Transform[][] joints, float[] lengths)
             {
                 Wrist = wrist;
                 Palm = palm;
                 Fingers = fingers;
                 _fingertips = fingertips;
+                _joints = joints;
+                _lengths = lengths;
             }
 
             public Transform GetFingertip(int fingerIndex)
             {
                 if (_fingertips == null || fingerIndex < 0 || fingerIndex >= _fingertips.Length) return null;
                 return _fingertips[fingerIndex];
+            }
+
+            public bool TryGetJoints(int fingerIndex,
+                out Transform proximal, out Transform intermediate, out Transform distal)
+            {
+                proximal = intermediate = distal = null;
+                if (_joints == null || fingerIndex < 0 || fingerIndex >= _joints.Length) return false;
+
+                var chain = _joints[fingerIndex];
+                if (chain == null || chain.Length < 3) return false;
+
+                proximal = chain[0];
+                intermediate = chain[1];
+                distal = chain[2];
+                return proximal != null && intermediate != null && distal != null;
+            }
+
+            public float GetFingerLength(int fingerIndex)
+            {
+                if (_lengths == null || fingerIndex < 0 || fingerIndex >= _lengths.Length) return 0f;
+                return _lengths[fingerIndex];
             }
         }
 

@@ -38,6 +38,31 @@ namespace PianoTeacher3D.Avatar
     }
 
     /// <summary>
+    /// 三关节（MCP / PIP / DIP）的角度上限（度），由角色/关节配置提供。
+    /// 评估文档附录 A.4.2：角度上下限必须写成配置并由校验器检查，不能散落在多个脚本里。
+    /// </summary>
+    public struct FingerJointLimits
+    {
+        public float MaxMcp;
+        public float MaxPip;
+        public float MaxDip;
+
+        /// <summary>允许的反向（过伸）角度：超过该负值视为异常（末节不得弯到反方向）。</summary>
+        public float MaxHyperExtension;
+
+        public FingerJointLimits(float maxMcp, float maxPip, float maxDip, float maxHyperExtension = 2f)
+        {
+            MaxMcp = maxMcp;
+            MaxPip = maxPip;
+            MaxDip = maxDip;
+            MaxHyperExtension = maxHyperExtension;
+        }
+
+        /// <summary>默认限位（与 <c>FingerPoseController</c> 的默认参数一致）。</summary>
+        public static FingerJointLimits Default => new FingerJointLimits(82f, 95f, 62f);
+    }
+
+    /// <summary>
     /// 手部异常姿态检查（对应方案阶段五验收「异常姿态检查，避免动作失控或穿模」）。
     /// <para>
     /// 纯静态、不依赖场景与 Transform，输入世界坐标 + 允许范围，便于单元测试；
@@ -168,6 +193,58 @@ namespace PianoTeacher3D.Avatar
                     issues++;
             }
             return issues;
+        }
+
+        // ==================== 关节级校验（附录 A.4.2 / A.6.3） ====================
+
+        /// <summary>
+        /// 校验 MCP / PIP / DIP 三个关节角是否落在允许范围内。
+        /// 返回 null 表示正常；否则返回人类可读的问题描述（与 <see cref="Validate"/> 的返回约定一致）。
+        /// </summary>
+        public static string ValidateJointAngles(float mcp, float pip, float dip, in FingerJointLimits limits)
+        {
+            if (mcp < -limits.MaxHyperExtension || pip < -limits.MaxHyperExtension || dip < -limits.MaxHyperExtension)
+                return $"关节过伸（MCP {mcp:0.#}° / PIP {pip:0.#}° / DIP {dip:0.#}°）";
+
+            if (mcp > limits.MaxMcp + 0.5f)
+                return $"MCP 超出上限（{mcp:0.#}° > {limits.MaxMcp:0.#}°）";
+            if (pip > limits.MaxPip + 0.5f)
+                return $"PIP 超出上限（{pip:0.#}° > {limits.MaxPip:0.#}°）";
+            if (dip > limits.MaxDip + 0.5f)
+                return $"DIP 超出上限（{dip:0.#}° > {limits.MaxDip:0.#}°）";
+
+            return null;
+        }
+
+        /// <summary>统计一组关节角中触发限位的关节数量（0..3）。</summary>
+        public static int CountJointLimitHits(float mcp, float pip, float dip, in FingerJointLimits limits)
+        {
+            int hits = 0;
+            if (mcp < -limits.MaxHyperExtension || mcp > limits.MaxMcp + 0.5f) hits++;
+            if (pip < -limits.MaxHyperExtension || pip > limits.MaxPip + 0.5f) hits++;
+            if (dip < -limits.MaxHyperExtension || dip > limits.MaxDip + 0.5f) hits++;
+            return hits;
+        }
+
+        /// <summary>指尖到键面的法向距离（米）：正值高于键面，负值压入键面。</summary>
+        public static float SignedDistanceToSurface(float fingertipY, float surfaceY) => fingertipY - surfaceY;
+
+        /// <summary>指尖是否压入键面超过容差（穿模）。</summary>
+        public static bool IsBelowSurface(float fingertipY, float surfaceY, float tolerance)
+            => surfaceY - fingertipY > tolerance + Tolerance;
+
+        /// <summary>指尖压入键面的深度（米）：无穿模时为 0。</summary>
+        public static float KeyPenetrationDepth(Vector3 fingertip, float surfaceY)
+            => Mathf.Max(0f, surfaceY - fingertip.y);
+
+        /// <summary>
+        /// 指尖是否落在键面按压区内（横向与深度都在该键范围内）。
+        /// 用于区分「指尖在键上但高度偏高」与「指尖根本在另一块键上」。
+        /// </summary>
+        public static bool IsOverKey(Vector3 fingertip, Vector3 keyCenter, float halfWidth, float halfLength)
+        {
+            return Mathf.Abs(fingertip.x - keyCenter.x) <= halfWidth + Tolerance
+                && Mathf.Abs(fingertip.z - keyCenter.z) <= halfLength + Tolerance;
         }
     }
 }

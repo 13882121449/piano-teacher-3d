@@ -16,15 +16,27 @@ namespace PianoTeacher3D.Avatar
     /// <para>
     /// <b>骨架与可见网格分离</b>（审查 1.1 方案 A「先建立统一建模规范」/ 第 4 章 AvatarRigBuilder 行）：
     /// 本类只产出<b>纯坐标节点</b>（不挂任何 Renderer，见 PlayMode 测试 HumanoidRig_DoesNotAffectVisibleGeometry），
-    /// 人物的可见形状由 <c>AvatarManager</c> 依 <see cref="AvatarBodyMetrics"/> 统一尺寸表生成。
-    /// 手指骨骼此处仍为<b>每指 1 段</b>（映射到 Humanoid 的 Proximal，保证 Avatar 合法且与既有测试兼容）；
-    /// 可见手指的近端/中段/末端三段结构是 <c>IHandRig.Fingers</c> 根节点的子节点链，
-    /// 段数由 <see cref="AvatarQualityConfig.FingerSegments"/> 控制。
+    /// 人物的可见形状由 <c>AvatarManager</c> 依 <see cref="AvatarBodyMetrics"/> / <see cref="HandMetrics"/> 统一尺寸表生成。
+    /// </para>
+    /// <para>
+    /// <b>三关节手指链</b>（评估文档附录 A.4.1）：每指由
+    /// <c>Proximal（MCP）→ Intermediate（PIP）→ Distal（DIP）</c> 三个<b>可独立旋转</b>的节点组成，
+    /// 并映射到 Unity Humanoid 的标准手指骨骼名，因此 <c>Avatar.isValid</c> 仍成立。
+    /// 指根（Proximal）仍直接挂在 <c>Hand</c> 下，保持既有测试与 <see cref="Skeleton.LeftFingers"/> 语义不变。
     /// </para>
     /// </summary>
     public static class AvatarRigBuilder
     {
-        /// <summary>单手 5 指的 Humanoid 段名（本实现每指 1 段，映射到 Proximal）。</summary>
+        /// <summary>五指的解剖名（用于 Humanoid 骨骼名：LeftThumbProximal … RightLittleDistal）。</summary>
+        public static readonly string[] FingerNames = { "Thumb", "Index", "Middle", "Ring", "Little" };
+
+        /// <summary>每指三段关节名（MCP / PIP / DIP）。</summary>
+        public static readonly string[] JointSuffixes = { "Proximal", "Intermediate", "Distal" };
+
+        /// <summary>每指关节数（MCP / PIP / DIP）。</summary>
+        public const int JointsPerFinger = 3;
+
+        /// <summary>单手 5 指的 Humanoid 段名（近节，兼容既有 API）。</summary>
         public static readonly string[] FingerSuffixes =
             { "ThumbProximal", "IndexProximal", "MiddleProximal", "RingProximal", "LittleProximal" };
 
@@ -66,8 +78,14 @@ namespace PianoTeacher3D.Avatar
             public Transform RightShoulder, RightUpperArm, RightLowerArm, RightHand;
             public Transform LeftUpperLeg, LeftLowerLeg, LeftFoot;
             public Transform RightUpperLeg, RightLowerLeg, RightFoot;
+
+            /// <summary>每指近节（MCP）节点；索引 0 = 拇指 … 4 = 小指（兼容既有 API）。</summary>
             public readonly Transform[] LeftFingers = new Transform[5];
             public readonly Transform[] RightFingers = new Transform[5];
+
+            /// <summary>每指的 MCP / PIP / DIP 三关节（[手][指][关节]）。</summary>
+            public readonly Transform[][] LeftFingerJoints = new Transform[5][];
+            public readonly Transform[][] RightFingerJoints = new Transform[5][];
 
             // 注意：本文件位于命名空间 PianoTeacher3D.Avatar 内，
             // 直接用 `Avatar` 会被解析为命名空间（CS0118），故用完全限定名。
@@ -80,6 +98,24 @@ namespace PianoTeacher3D.Avatar
             {
                 if (fingerIndex < 0 || fingerIndex >= 5) return null;
                 return leftHand ? LeftFingers[fingerIndex] : RightFingers[fingerIndex];
+            }
+
+            /// <summary>
+            /// 取某指的 MCP / PIP / DIP 三关节。缺失时返回 false（旧骨架只有单关节的情况）。
+            /// </summary>
+            public bool TryGetFingerJoints(bool leftHand, int fingerIndex,
+                out Transform proximal, out Transform intermediate, out Transform distal)
+            {
+                proximal = intermediate = distal = null;
+                if (fingerIndex < 0 || fingerIndex >= 5) return false;
+
+                var joints = leftHand ? LeftFingerJoints[fingerIndex] : RightFingerJoints[fingerIndex];
+                if (joints == null || joints.Length < JointsPerFinger) return false;
+
+                proximal = joints[0];
+                intermediate = joints[1];
+                distal = joints[2];
+                return proximal != null && intermediate != null && distal != null;
             }
 
             public IReadOnlyList<Transform> LeftFingerList => LeftFingers;
@@ -131,11 +167,15 @@ namespace PianoTeacher3D.Avatar
             skeleton.RightLowerLeg = nodes["RightLowerLeg"];
             skeleton.RightFoot = nodes["RightFoot"];
 
-            // ---- 2. 手指骨骼（每手 5 指 × 1 段，映射到 Humanoid 的 Proximal）----
+            // ---- 2. 手指骨骼（每手 5 指 × 3 关节：MCP / PIP / DIP，映射到 Humanoid 标准名）----
             for (int f = 0; f < 5; f++)
             {
-                skeleton.LeftFingers[f] = BuildFinger(skeleton.LeftHand, "Left", f, scale, left: true);
-                skeleton.RightFingers[f] = BuildFinger(skeleton.RightHand, "Right", f, scale, left: false);
+                skeleton.LeftFingerJoints[f] = new Transform[JointsPerFinger];
+                skeleton.RightFingerJoints[f] = new Transform[JointsPerFinger];
+                skeleton.LeftFingers[f] = BuildFinger(skeleton.LeftHand, "Left", f, scale, left: true,
+                    skeleton.LeftFingerJoints[f]);
+                skeleton.RightFingers[f] = BuildFinger(skeleton.RightHand, "Right", f, scale, left: false,
+                    skeleton.RightFingerJoints[f]);
             }
 
             // ---- 3. 生成 Humanoid Avatar ----
@@ -143,18 +183,47 @@ namespace PianoTeacher3D.Avatar
             return skeleton;
         }
 
-        private static Transform BuildFinger(Transform hand, string side, int index, float scale, bool left)
+        /// <summary>
+        /// 构建一根手指的三关节链（MCP → PIP → DIP）。返回近节节点（与旧 API 的「手指根」等价）。
+        /// <para>
+        /// 关节位置来自 <see cref="AvatarBodyMetrics"/> 的统一尺寸表：横向位置按解剖顺序展开，
+        /// 拇指在内侧（朝身体中线）且带 57° 外展；纵向长度按三段比例分配。
+        /// 每段保留 4% 的重叠量，弯曲时不会露缝。
+        /// </para>
+        /// </summary>
+        private static Transform BuildFinger(Transform hand, string side, int index, float scale, bool left,
+            Transform[] joints)
         {
-            var t = new GameObject($"{side}{FingerSuffixes[index]}").transform;
-            t.SetParent(hand, false);
+            // 【左右约定】左手（left=true）位于局部 −X（整体旋转 180° 后 = 世界 +X = 角色真正的左手侧）。
+            float mirror = left ? -1f : 1f;
+            float lateral = (index - 2) * 0.014f * scale * mirror;
+            float palmLength = AvatarBodyMetrics.PalmLength * scale;
 
-            // 手指自手掌前端（+Z）伸出，横向按解剖顺序展开（拇指在一侧、小指在另一侧）
-            // 【左右约定】左手（left=true）位于局部 −X（旋转 180° 后 = 世界 +X = 角色真正的左手侧）。
-            // 拇指必须在内侧（朝身体中线），因此左手的横向偏移取负号。
-            float lateral = (index - 2) * 0.014f * scale * (left ? -1f : 1f);
-            float length = (0.055f - Mathf.Abs(index - 2) * 0.004f) * scale;
-            t.localPosition = new Vector3(lateral, 0f, length);
-            return t;
+            string fingerName = FingerNames[index];
+            float yaw = AvatarBodyMetrics.FingerChainYaw[index] * mirror;
+
+            float total = AvatarBodyMetrics.FingerLengths[index] * scale;
+            float[] ratios = AvatarBodyMetrics.FingerSegmentRatios;
+
+            Transform parent = hand;
+            Vector3 localPos = new Vector3(lateral, 0f, palmLength * 0.98f);
+            Quaternion localRot = Quaternion.Euler(0f, yaw, 0f);
+
+            for (int j = 0; j < JointsPerFinger; j++)
+            {
+                var t = new GameObject($"{side}{fingerName}{JointSuffixes[j]}").transform;
+                t.SetParent(parent, false);
+                t.localPosition = localPos;
+                t.localRotation = localRot;
+                joints[j] = t;
+
+                // 下一关节沿当前关节的 +Z 前进一个段长（4% 重叠，弯曲时不露缝）
+                parent = t;
+                localPos = new Vector3(0f, 0f, total * ratios[j] * 0.96f);
+                localRot = Quaternion.identity;
+            }
+
+            return joints[0];
         }
 
         /// <summary>
@@ -210,8 +279,13 @@ namespace PianoTeacher3D.Avatar
 
             for (int f = 0; f < 5; f++)
             {
-                humanBones.Add(FingerBone("Left", f, skeleton.LeftFingers[f]));
-                humanBones.Add(FingerBone("Right", f, skeleton.RightFingers[f]));
+                var left = skeleton.LeftFingerJoints[f];
+                var right = skeleton.RightFingerJoints[f];
+                for (int j = 0; j < JointsPerFinger; j++)
+                {
+                    humanBones.Add(FingerBone("Left", f, j, left[j]));
+                    humanBones.Add(FingerBone("Right", f, j, right[j]));
+                }
             }
 
             var skeletonBones = new List<SkeletonBone>();
@@ -243,11 +317,11 @@ namespace PianoTeacher3D.Avatar
             return AvatarBuilder.BuildHumanAvatar(rootGo, description);
         }
 
-        private static HumanBone FingerBone(string side, int index, Transform bone)
+        private static HumanBone FingerBone(string side, int index, int joint, Transform bone)
         {
             return new HumanBone
             {
-                humanName = $"{side}{FingerSuffixes[index]}",
+                humanName = $"{side}{FingerNames[index]}{JointSuffixes[joint]}",
                 boneName = bone != null ? bone.name : string.Empty,
                 limit = new HumanLimit { useDefaultValues = true }
             };

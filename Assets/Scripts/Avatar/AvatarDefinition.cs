@@ -55,14 +55,15 @@ namespace PianoTeacher3D.Avatar
         public const float HeadRadius = 0.105f;
         public const float UpperArmLength = 0.21f;
         public const float LowerArmLength = 0.20f;
-        public const float ArmRadius = 0.048f;
+        /// <summary>手臂半径：必须小于掌宽，否则腕部会像「粗圆柱插入手掌」（附录 A.3.2 第 6 条）。</summary>
+        public const float ArmRadius = 0.036f;
         public const float StoolTopHeight = 0.445f;    // 琴凳面高度（须与坐姿臀部接触，不悬空）
 
         // ---- 手部（以琴键为标尺）----
         public const float WhiteKeyWidth = 0.024f;     // 真实白键宽（与 PianoKeyMap.WhiteWidth 一致）
-        public const float PalmWidth = 0.076f;         // ≈ 3.2 个白键宽
+        public const float PalmWidth = 0.078f;         // ≈ 3.25 个白键宽
         public const float PalmThickness = 0.030f;
-        public const float PalmLength = 0.058f;        // 腕横纹 → 掌指关节
+        public const float PalmLength = 0.066f;        // 腕横纹 → 掌指关节（掌长/中指长 ≈ 0.73，接近真人比例）
         public const float WristRadius = 0.026f;
 
         /// <summary>拇指轴与其余四指轴的目标夹角（度）—— 决定虎口是否可见。</summary>
@@ -78,18 +79,179 @@ namespace PianoTeacher3D.Avatar
         public static readonly float[] FingerSegmentRatios = { 0.42f, 0.33f, 0.25f };
 
         /// <summary>掌指关节（手指根节点）局部位置，未镜像（side = +1 的左/右手基准，右手按 x 取反）。</summary>
+        /// <remarks>z 与 <see cref="PalmLength"/> 同步（≈ 0.98×掌长），改掌长必须一起改，否则指根会落在掌外或掌内。</remarks>
         public static readonly Vector3[] KnucklePositions =
         {
-            new Vector3(0.030f, -0.008f, 0.026f), // 拇指：靠近腕部、偏向外侧，形成虎口
-            new Vector3(0.018f, 0.002f, 0.056f),
-            new Vector3(0.004f, 0.003f, 0.058f),
-            new Vector3(-0.010f, 0.001f, 0.056f),
-            new Vector3(-0.023f, -0.005f, 0.048f)
+            new Vector3(0.030f, -0.008f, 0.0296f), // 拇指：靠近腕部、偏向外侧，形成虎口
+            new Vector3(0.018f, 0.002f, 0.0637f),
+            new Vector3(0.004f, 0.003f, 0.0660f),
+            new Vector3(-0.010f, 0.001f, 0.0637f),
+            new Vector3(-0.023f, -0.005f, 0.0546f)
         };
 
         /// <summary>各指链相对掌指关节的解剖朝向偏航（度）：拇指约 57°，与四指形成 45°–60° 夹角。</summary>
         public static readonly float[] FingerChainYaw =
             { ThumbSpreadDegrees, 6f, 1f, -5f, -12f };
+    }
+
+    /// <summary>
+    /// 单手手部比例与触键校准（评估文档附录 A.5.1「用琴键作比例标尺」）。
+    /// <para>
+    /// 全部数值以<b>米</b>为单位、以 <see cref="AvatarBodyMetrics.ReferenceHeight"/> 身高为基准；
+    /// 角色外观缩放由 <c>AvatarManager</c> 在构建时统一乘以体型系数 <c>s</c>。
+    /// 这些字段<b>同时</b>驱动网格生成（<c>HandMeshFactory</c>）、关节长度（<c>AvatarRigBuilder</c>）、
+    /// 姿态解算（<c>FingerPoseController</c>）与校验（<c>HandPoseValidator</c>），
+    /// 避免几何 / 动画 / 校验各自维护一套互相冲突的「手长」。
+    /// </para>
+    /// <para>
+    /// 默认值来自 <see cref="AvatarBodyMetrics"/>（与既有实现完全一致，因此不改变任何现有坐标），
+    /// 每个角色可在此基础上做比例微调（例如卡通角色掌宽加大、手指缩短）。
+    /// </para>
+    /// </summary>
+    public sealed class HandMetrics
+    {
+        /// <summary>手部整体缩放（在体型系数之外，用于同身高角色的手大手小差异）。</summary>
+        public float Scale = 1f;
+
+        /// <summary>腕横纹 → 掌指关节的掌长（米）。</summary>
+        public float PalmLength = AvatarBodyMetrics.PalmLength;
+
+        /// <summary>掌宽（米），约为 3.2 个白键宽。</summary>
+        public float PalmWidth = AvatarBodyMetrics.PalmWidth;
+
+        /// <summary>掌厚（米）。</summary>
+        public float PalmThickness = AvatarBodyMetrics.PalmThickness;
+
+        /// <summary>腕部半径（米）：掌根与手臂的连接收窄依据。</summary>
+        public float WristRadius = AvatarBodyMetrics.WristRadius;
+
+        /// <summary>各指总长（米），0 = 拇指 … 4 = 小指。</summary>
+        public readonly float[] FingerLengths = (float[])AvatarBodyMetrics.FingerLengths.Clone();
+
+        /// <summary>各指近节根部半径（米）。</summary>
+        public readonly float[] FingerRadii = (float[])AvatarBodyMetrics.FingerRadii.Clone();
+
+        /// <summary>近端 / 中段 / 末端长度占比（三段之和为 1，允许各指不同）。</summary>
+        public readonly float[][] FingerSegmentRatios =
+        {
+            (float[])AvatarBodyMetrics.FingerSegmentRatios.Clone(),
+            (float[])AvatarBodyMetrics.FingerSegmentRatios.Clone(),
+            (float[])AvatarBodyMetrics.FingerSegmentRatios.Clone(),
+            (float[])AvatarBodyMetrics.FingerSegmentRatios.Clone(),
+            (float[])AvatarBodyMetrics.FingerSegmentRatios.Clone()
+        };
+
+        /// <summary>拇指外展角（度，相对四指轴）：决定虎口宽度。</summary>
+        public float ThumbAbduction = AvatarBodyMetrics.ThumbSpreadDegrees;
+
+        /// <summary>拇指对掌内旋（度）：拇指绕自身轴转向掌心，形成抓握形态。</summary>
+        public float ThumbOpposition = 14f;
+
+        /// <summary>手腕静息俯仰（度，绕 X）：正值使掌心略朝键面。</summary>
+        public float WristPitch = 8f;
+
+        /// <summary>掌心到键面的额外高度偏移（米）：补偿不同角色手掌厚度。</summary>
+        public float PalmKeyPlaneOffset;
+
+        /// <summary>指尖触键点校准量（米）：正值抬高指尖目标，用于补偿末节几何偏差。</summary>
+        public float FingertipReachAdjustment;
+
+        /// <summary>按基准比例创建一份手部参数（默认值 = <see cref="AvatarBodyMetrics"/>）。</summary>
+        public static HandMetrics CreateDefault() => new HandMetrics();
+
+        /// <summary>整指长度（米）：三段占比之和为 1，因此等于 <see cref="FingerLengths"/>。</summary>
+        public float FingerLength(int finger)
+        {
+            int f = Mathf.Clamp(finger, 0, 4);
+            return FingerLengths[f];
+        }
+
+        /// <summary>某指某段长度（米）：<paramref name="segment"/> 0 = 近节 … 2 = 末节。</summary>
+        public float SegmentLength(int finger, int segment)
+        {
+            int f = Mathf.Clamp(finger, 0, 4);
+            int sg = Mathf.Clamp(segment, 0, 2);
+            return FingerLengths[f] * FingerSegmentRatios[f][sg];
+        }
+
+        /// <summary>某指某段的半径（米）：沿指节逐段递减（末节最细）。</summary>
+        public float SegmentRadius(int finger, int segment)
+        {
+            int f = Mathf.Clamp(finger, 0, 4);
+            int sg = Mathf.Clamp(segment, 0, 2);
+            return FingerRadii[f] * (1f - 0.14f * sg);
+        }
+
+        /// <summary>按比例整体缩放（用于角色外观差异，不影响键盘标定）。</summary>
+        public void ScaleBy(float factor)
+        {
+            if (factor <= 0f || Mathf.Approximately(factor, 1f)) return;
+
+            Scale *= factor;
+            PalmLength *= factor;
+            PalmWidth *= factor;
+            PalmThickness *= factor;
+            WristRadius *= factor;
+            for (int f = 0; f < 5; f++)
+            {
+                FingerLengths[f] *= factor;
+                FingerRadii[f] *= factor;
+            }
+        }
+
+        /// <summary>从另一份参数复制（用于角色定义初始化，避免共享数组引用）。</summary>
+        public void CopyFrom(HandMetrics other)
+        {
+            if (other == null) return;
+
+            Scale = other.Scale;
+            PalmLength = other.PalmLength;
+            PalmWidth = other.PalmWidth;
+            PalmThickness = other.PalmThickness;
+            WristRadius = other.WristRadius;
+            ThumbAbduction = other.ThumbAbduction;
+            ThumbOpposition = other.ThumbOpposition;
+            WristPitch = other.WristPitch;
+            PalmKeyPlaneOffset = other.PalmKeyPlaneOffset;
+            FingertipReachAdjustment = other.FingertipReachAdjustment;
+
+            for (int f = 0; f < 5; f++)
+            {
+                FingerLengths[f] = other.FingerLengths[f];
+                FingerRadii[f] = other.FingerRadii[f];
+                for (int sg = 0; sg < 3; sg++)
+                    FingerSegmentRatios[f][sg] = other.FingerSegmentRatios[f][sg];
+            }
+        }
+
+        /// <summary>校验比例是否可用。返回 null 表示通过；否则返回中文问题描述。</summary>
+        public string Validate()
+        {
+            if (PalmLength <= 0.01f || PalmLength > 0.20f) return $"掌长超出允许范围（{PalmLength:F3} m）";
+            if (PalmWidth <= 0.02f || PalmWidth > 0.20f) return $"掌宽超出允许范围（{PalmWidth:F3} m）";
+            if (PalmThickness <= 0.005f || PalmThickness > 0.10f) return $"掌厚超出允许范围（{PalmThickness:F3} m）";
+
+            for (int f = 0; f < 5; f++)
+            {
+                if (FingerLengths[f] <= 0.01f || FingerLengths[f] > 0.20f)
+                    return $"第 {f} 指长度超出允许范围（{FingerLengths[f]:F3} m）";
+                if (FingerRadii[f] <= 0.001f || FingerRadii[f] > 0.03f)
+                    return $"第 {f} 指半径超出允许范围（{FingerRadii[f]:F3} m）";
+
+                float sum = 0f;
+                for (int sg = 0; sg < 3; sg++)
+                {
+                    float r = FingerSegmentRatios[f][sg];
+                    if (r <= 0.01f || r >= 0.98f)
+                        return $"第 {f} 指第 {sg} 段占比超出允许范围（{r:F3}）";
+                    sum += r;
+                }
+                if (Mathf.Abs(sum - 1f) > 0.02f)
+                    return $"第 {f} 指三段占比之和应约为 1（实际 {sum:F3}）";
+            }
+
+            return null;
+        }
     }
 
     /// <summary>
@@ -147,6 +309,11 @@ namespace PianoTeacher3D.Avatar
         /// <summary>手腕深度偏移（米）：用于补偿不同角色手臂长度差异。</summary>
         public float HandDepthOffset;
 
+        /// <summary>
+        /// 手部比例与触键校准（评估文档附录 A.5.1）：网格、关节长度、姿态解算与校验共用同一份数据。
+        /// </summary>
+        public readonly HandMetrics Hand = HandMetrics.CreateDefault();
+
         /// <summary>质量配置（骨架上手指段数、网格精度档）。</summary>
         public readonly AvatarQualityConfig Quality = new AvatarQualityConfig();
 
@@ -165,6 +332,31 @@ namespace PianoTeacher3D.Avatar
             };
         }
 
+        /// <summary>
+        /// 按角色风格调整手部比例（附录 A.5.1）：只改外观比例，<b>不改变</b> MIDI 音高 → 琴键坐标的映射。
+        /// </summary>
+        /// <param name="palmWidthScale">掌宽倍率。</param>
+        /// <param name="palmThicknessScale">掌厚倍率。</param>
+        /// <param name="fingerLengthScale">指长倍率。</param>
+        /// <param name="fingerRadiusScale">指粗倍率。</param>
+        /// <param name="wristPitch">手腕静息俯仰（度）。</param>
+        public void ApplyHandStyle(float palmWidthScale, float palmThicknessScale,
+            float fingerLengthScale, float fingerRadiusScale, float wristPitch)
+        {
+            Hand.CopyFrom(HandMetrics.CreateDefault());
+
+            Hand.PalmWidth *= palmWidthScale;
+            Hand.PalmThickness *= palmThicknessScale;
+            Hand.WristRadius *= Mathf.Lerp(1f, palmWidthScale, 0.5f);
+            Hand.WristPitch = wristPitch;
+
+            for (int f = 0; f < 5; f++)
+            {
+                Hand.FingerLengths[f] *= fingerLengthScale;
+                Hand.FingerRadii[f] *= fingerRadiusScale;
+            }
+        }
+
         /// <summary>默认安全角色：任何自定义定义校验失败时回退到它（方案 5.2「校验失败不得影响曲目播放」）。</summary>
         public static AvatarDefinition CreateDefault()
         {
@@ -181,6 +373,9 @@ namespace PianoTeacher3D.Avatar
                 Cartoon = false
             };
             def.BodyScale = def.BodyHeight / AvatarBodyMetrics.ReferenceHeight;
+            // 写实女性：掌略窄、指略细（默认比例的 0.97 / 0.95），手腕轻俯。
+            def.ApplyHandStyle(palmWidthScale: 0.97f, palmThicknessScale: 0.96f,
+                fingerLengthScale: 1.00f, fingerRadiusScale: 0.95f, wristPitch: 8f);
             return def;
         }
 
@@ -214,6 +409,37 @@ namespace PianoTeacher3D.Avatar
             if (reach < armLimit * 0.7f || reach > armLimit * 1.6f)
                 return $"左手目标不可达（肩-手距离 {reach:F3} m，手臂总长约 {armLimit:F3} m）";
 
+            // 手部比例（附录 A.5.1）：比例异常会让网格/关节/校验互相冲突，必须在导入阶段拦住
+            string handIssue = definition.Hand != null ? definition.Hand.Validate() : "手部比例缺失";
+            if (handIssue != null) return $"手部比例无效：{handIssue}";
+
+            // 手指三关节链（附录 A.4.1）：缺少中节/末节说明骨架仍是单自由度，应视为不合格
+            string jointIssue = ValidateFingerChains(skeleton);
+            if (jointIssue != null) return jointIssue;
+
+            return null;
+        }
+
+        /// <summary>
+        /// 校验每指是否具备 MCP/PIP/DIP 三个独立关节，且关节长度非退化。
+        /// 返回 null 表示通过；否则返回中文问题描述。
+        /// </summary>
+        public static string ValidateFingerChains(AvatarRigBuilder.Skeleton skeleton)
+        {
+            if (skeleton == null) return "骨架未构建";
+
+            for (int f = 0; f < 5; f++)
+            {
+                if (!skeleton.TryGetFingerJoints(true, f, out var proximal, out var intermediate, out var distal))
+                    return $"左手第 {f} 指缺少三关节链";
+                if (!skeleton.TryGetFingerJoints(false, f, out proximal, out intermediate, out distal))
+                    return $"右手第 {f} 指缺少三关节链";
+
+                float proximalLength = Vector3.Distance(proximal.position, intermediate.position);
+                float intermediateLength = Vector3.Distance(intermediate.position, distal.position);
+                if (proximalLength < 0.008f || intermediateLength < 0.006f)
+                    return $"第 {f} 指关节长度退化（近节 {proximalLength:F4} m / 中节 {intermediateLength:F4} m）";
+            }
             return null;
         }
 

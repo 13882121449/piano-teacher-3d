@@ -1,7 +1,114 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace PianoTeacher3D.Avatar
 {
+    /// <summary>指尖误差的分组场景（评估文档附录 A.6.3「按场景分组的 P50/P95/P99 与峰值」）。</summary>
+    public enum HandMetricGroup
+    {
+        /// <summary>单音（旋律、无和弦、非快速音阶、无大跨手）。</summary>
+        SingleNote = 0,
+
+        /// <summary>和弦（同手 ≥ 2 个同时按下的音）。</summary>
+        Chord = 1,
+
+        /// <summary>快速音阶（平均音符间隔低于阈值）。</summary>
+        FastScale = 2,
+
+        /// <summary>跨手 / 跨八度大位移。</summary>
+        LargeMotion = 3,
+
+        /// <summary>分组数量（数组长度）。</summary>
+        Count = 4
+    }
+
+    /// <summary>一组误差样本的统计结果（样本数 + 均值 + 分位 + 峰值）。</summary>
+    public sealed class MetricStats
+    {
+        public int Samples { get; internal set; }
+        public float Mean { get; internal set; }
+        public float P50 { get; internal set; }
+        public float P95 { get; internal set; }
+        public float P99 { get; internal set; }
+        public float Max { get; internal set; }
+
+        /// <summary>一行中文摘要（样本为 0 时明确写「样本 0」，不伪造 100%）。</summary>
+        public string Describe()
+        {
+            if (Samples <= 0) return "样本 0";
+            return $"均值 {Mean * 1000f:0.#} mm · P50 {P50 * 1000f:0.#} · P95 {P95 * 1000f:0.#}" +
+                   $" · P99 {P99 * 1000f:0.#} · 峰值 {Max * 1000f:0.#}（{Samples}）";
+        }
+    }
+
+    /// <summary>
+    /// 误差样本累加器：只在 <see cref="Build"/> 时排序一次，避免逐帧排序。
+    /// <para>样本上限 20000，超出后按步长抽样替换，保证长时间播放不会无限增长内存。</para>
+    /// </summary>
+    internal sealed class MetricAccumulator
+    {
+        private const int Capacity = 20000;
+
+        private readonly List<float> _values = new List<float>(1024);
+        private float _sum;
+        private int _total;
+        private float _max;
+
+        public int Count => _values.Count;
+
+        public void Add(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return;
+
+            _total++;
+            _sum += value;
+            if (value > _max) _max = value;
+
+            if (_values.Count < Capacity) _values.Add(value);
+            else _values[(int)(_total % Capacity)] = value;   // 抽样替换，保留分布形态
+        }
+
+        public MetricStats Build()
+        {
+            var stats = new MetricStats { Samples = _total };
+            if (_total == 0) return stats;
+
+            stats.Mean = _sum / _total;
+            stats.Max = _max;
+
+            _values.Sort();
+            stats.P50 = Percentile(0.50f);
+            stats.P95 = Percentile(0.95f);
+            stats.P99 = Percentile(0.99f);
+            return stats;
+        }
+
+        public void Clear()
+        {
+            _values.Clear();
+            _sum = 0f;
+            _total = 0;
+            _max = 0f;
+        }
+
+        private float Percentile(float p)
+        {
+            if (_values.Count == 0) return 0f;
+            int index = Mathf.Clamp(Mathf.RoundToInt(p * (_values.Count - 1)), 0, _values.Count - 1);
+            return _values[index];
+        }
+    }
+
+    /// <summary>
+    /// 关节限位来源（由 <c>FingerPoseController</c> 实现）：让动作指标可以统计「关节被钳制的次数」，
+    /// 而不必让 IK 控制器反向依赖姿态控制器。
+    /// </summary>
+    public interface IHandJointIssueSource
+    {
+        /// <summary>累计触发关节角度上限的次数。</summary>
+        int JointLimitClampCount { get; }
+    }
+
     /// <summary>一帧的手部采样输入。所有后加字段都有默认值，既有构造方式（对象初始化器）继续可用。</summary>
     public struct HandMotionSample
     {
@@ -62,6 +169,35 @@ namespace PianoTeacher3D.Avatar
 
         /// <summary>该帧目标位移是否超过跨手位移阈值。</summary>
         public bool LargeMotionFrame;
+
+        // ==================== 附录 A.6.3 扩充字段（默认值 = 不参与统计） ====================
+
+        /// <summary>该帧是否包含「被分配指尖」的误差样本（与最近指尖区分开）。</summary>
+        public bool HasAssignedFingertipErrors;
+
+        /// <summary>左手「被分配手指」到目标键按压点的误差（米）。</summary>
+        public float LeftAssignedFingertipError;
+
+        /// <summary>右手「被分配手指」到目标键按压点的误差（米）。</summary>
+        public float RightAssignedFingertipError;
+
+        /// <summary>该帧是否包含指尖到键面的法向距离样本。</summary>
+        public bool HasSurfaceDistances;
+
+        /// <summary>左手「被分配指尖」到键面的法向距离（米，正值 = 高于键面，负值 = 压入键面）。</summary>
+        public float LeftSurfaceDistance;
+
+        /// <summary>右手「被分配指尖」到键面的法向距离（米）。</summary>
+        public float RightSurfaceDistance;
+
+        /// <summary>该帧是否处于换位过渡（目标大跳变或手腕横向快速移动）。</summary>
+        public bool TransitionFrame;
+
+        /// <summary>该帧由姿态控制器报告的关节限位触发次数。</summary>
+        public int JointLimitHits;
+
+        /// <summary>该帧是否检测到指尖压入键面（低于键面超过容差）。</summary>
+        public bool FingerPenetration;
     }
 
     /// <summary>
@@ -161,6 +297,32 @@ namespace PianoTeacher3D.Avatar
         /// <summary>离键悬空的帧数（按键时指尖明显高于目标键面）。</summary>
         public int HoveringFrames { get; internal set; }
 
+        // ==================== 附录 A.6.3：分项指标（P50/P95/P99 与峰值） ====================
+
+        /// <summary>手腕目标误差（手腕到自身目标位置的距离）：衡量跟随延迟，不是对键精度。</summary>
+        public MetricStats WristTargetError { get; internal set; } = new MetricStats();
+
+        /// <summary>被分配指尖到目标键按压点的误差（与视觉一致性测试同口径，非「最近指尖」乐观下界）。</summary>
+        public MetricStats AssignedFingertipError { get; internal set; } = new MetricStats();
+
+        /// <summary>指尖到键面的法向距离（正值 = 悬空，负值 = 压入键面）。</summary>
+        public MetricStats FingertipSurfaceDistance { get; internal set; } = new MetricStats();
+
+        /// <summary>换位过渡帧的指尖误差（用于解释历史记录中的「换位峰值」）。</summary>
+        public MetricStats TransitionFingertipError { get; internal set; } = new MetricStats();
+
+        /// <summary>按场景分组的指尖误差（单音 / 和弦 / 快速音阶 / 跨手）。</summary>
+        public MetricStats[] GroupFingertipError { get; internal set; } =
+        {
+            new MetricStats(), new MetricStats(), new MetricStats(), new MetricStats()
+        };
+
+        /// <summary>累计关节限位触发次数（姿态控制器上报）。</summary>
+        public int JointLimitHits { get; internal set; }
+
+        /// <summary>指尖压入键面的帧数。</summary>
+        public int FingerPenetrationFrames { get; internal set; }
+
         /// <summary>诊断日志：保留既有字段与顺序，本轮仅在末尾追加新维度。</summary>
         public string ToLogString()
         {
@@ -172,7 +334,12 @@ namespace PianoTeacher3D.Avatar
                    $"｜分组 黑键 {GroupText(BlackKeyHitRate, BlackKeyTargetSamples)} 和弦 {GroupText(ChordHitRate, ChordTargetSamples)}" +
                    $" 快速音阶 {GroupText(FastScaleHitRate, FastScaleTargetSamples)} 跨手 {GroupText(LargeMotionHitRate, LargeMotionTargetSamples)}" +
                    $"｜抽查 交叉 {CrossedHandFrames} 拇指 {ThumbOrientationIssues} 穿模 {PalmPenetrationFrames} 悬空 {HoveringFrames}" +
-                   $" · 速度异常 {SpeedAnomalyCount}";
+                   $" · 速度异常 {SpeedAnomalyCount}" +
+                   $"｜口径 手腕误差 {WristTargetError.Describe()}" +
+                   $" · 被分配指尖 {AssignedFingertipError.Describe()}" +
+                   $" · 键面距离 {FingertipSurfaceDistance.Describe()}" +
+                   $" · 换位峰值 {TransitionFingertipError.Describe()}" +
+                   $" · 关节限位 {JointLimitHits} 指尖压键 {FingerPenetrationFrames}";
         }
 
         private static string GroupText(float rate, int samples)
@@ -221,6 +388,18 @@ namespace PianoTeacher3D.Avatar
 
         // ---- 视觉抽查 ----
         private int _crossedFrames, _thumbIssues, _palmPenetrationFrames, _hoveringFrames;
+
+        // ---- 附录 A.6.3 分项指标 ----
+        private readonly MetricAccumulator _wristError = new MetricAccumulator();
+        private readonly MetricAccumulator _assignedError = new MetricAccumulator();
+        private readonly MetricAccumulator _surfaceDistance = new MetricAccumulator();
+        private readonly MetricAccumulator _transitionError = new MetricAccumulator();
+        private readonly MetricAccumulator[] _groupError =
+        {
+            new MetricAccumulator(), new MetricAccumulator(), new MetricAccumulator(), new MetricAccumulator()
+        };
+        private int _jointLimitHits;
+        private int _fingerPenetrationFrames;
 
         public int Samples => _samples;
 
@@ -286,6 +465,7 @@ namespace PianoTeacher3D.Avatar
 
             AccumulateFingertip(s);
             AccumulateVisualChecks(s);
+            AccumulateExtendedMetrics(s);
 
             _prevLeft = s.LeftWrist;
             _prevRight = s.RightWrist;
@@ -324,6 +504,52 @@ namespace PianoTeacher3D.Avatar
             if (s.Hovering) _hoveringFrames++;
         }
 
+        /// <summary>
+        /// 附录 A.6.3 的分项统计：手腕目标误差、被分配指尖误差、键面距离、换位峰值、分组与限位/碰撞。
+        /// 全部由采样字段驱动（未设置标志位的帧不参与），因此既有测试的采样构造方式无需改动。
+        /// </summary>
+        private void AccumulateExtendedMetrics(in HandMotionSample s)
+        {
+            // 手腕目标误差：只统计「该手有目标」的帧（与命中率同一采样范围）
+            if (s.LeftHasTarget) _wristError.Add(HorizontalDistance(s.LeftWrist, s.LeftTarget));
+            if (s.RightHasTarget) _wristError.Add(HorizontalDistance(s.RightWrist, s.RightTarget));
+
+            if (s.HasAssignedFingertipErrors)
+            {
+                AddAssigned(s.LeftAssignedFingertipError, s);
+                AddAssigned(s.RightAssignedFingertipError, s);
+            }
+
+            if (s.HasSurfaceDistances)
+            {
+                if (s.LeftSurfaceDistance > -100f) _surfaceDistance.Add(s.LeftSurfaceDistance);
+                if (s.RightSurfaceDistance > -100f) _surfaceDistance.Add(s.RightSurfaceDistance);
+            }
+
+            if (s.JointLimitHits > 0) _jointLimitHits += s.JointLimitHits;
+            if (s.FingerPenetration) _fingerPenetrationFrames++;
+        }
+
+        private void AddAssigned(float error, in HandMotionSample s)
+        {
+            if (error < 0f) return;
+
+            _assignedError.Add(error);
+            if (s.TransitionFrame) _transitionError.Add(error);
+
+            int group = SelectGroup(s);
+            _groupError[group].Add(error);
+        }
+
+        /// <summary>分组优先级：和弦 &gt; 快速音阶 &gt; 跨手 &gt; 单音（一帧只归一组，避免重复计入）。</summary>
+        private static int SelectGroup(in HandMotionSample s)
+        {
+            if (s.ChordFrame) return (int)HandMetricGroup.Chord;
+            if (s.FastScaleFrame) return (int)HandMetricGroup.FastScale;
+            if (s.LargeMotionFrame) return (int)HandMetricGroup.LargeMotion;
+            return (int)HandMetricGroup.SingleNote;
+        }
+
         public HandMotionReport Build()
         {
             var report = new HandMotionReport
@@ -351,8 +577,19 @@ namespace PianoTeacher3D.Avatar
                 CrossedHandFrames = _crossedFrames,
                 ThumbOrientationIssues = _thumbIssues,
                 PalmPenetrationFrames = _palmPenetrationFrames,
-                HoveringFrames = _hoveringFrames
+                HoveringFrames = _hoveringFrames,
+
+                WristTargetError = _wristError.Build(),
+                AssignedFingertipError = _assignedError.Build(),
+                FingertipSurfaceDistance = _surfaceDistance.Build(),
+                TransitionFingertipError = _transitionError.Build(),
+                JointLimitHits = _jointLimitHits,
+                FingerPenetrationFrames = _fingerPenetrationFrames
             };
+
+            var groups = new MetricStats[(int)HandMetricGroup.Count];
+            for (int i = 0; i < groups.Length; i++) groups[i] = _groupError[i].Build();
+            report.GroupFingertipError = groups;
 
             report.HitRate = _targetSamples > 0 ? _hitSamples / (float)_targetSamples : 1f;
 
@@ -407,6 +644,14 @@ namespace PianoTeacher3D.Avatar
             _largeTarget = _largeHit = 0;
 
             _crossedFrames = _thumbIssues = _palmPenetrationFrames = _hoveringFrames = 0;
+
+            _wristError.Clear();
+            _assignedError.Clear();
+            _surfaceDistance.Clear();
+            _transitionError.Clear();
+            for (int i = 0; i < _groupError.Length; i++) _groupError[i].Clear();
+            _jointLimitHits = 0;
+            _fingerPenetrationFrames = 0;
         }
 
         /// <summary>

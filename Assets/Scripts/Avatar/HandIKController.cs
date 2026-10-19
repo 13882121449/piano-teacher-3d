@@ -28,8 +28,18 @@ namespace PianoTeacher3D.Avatar
     public class HandIKController : MonoBehaviour, IFingertipTargetSource
     {
         [Header("手部目标几何（真实钢琴尺度，米）")]
-        public float HandHeight = 0.768f; // 手在键面上方（键面约 0.742m，按下时指尖落到键面）
-        public float HandDepth = 0.12f;   // 相对键根（世界 z≈-0.075）的深度偏移
+        /// <summary>
+        /// 腕部高度（键面约 0.742 m）。取 0.799 使掌指关节比键面高约 60 mm ——
+        /// 这是「手指弯曲后指尖仍落在键上」的几何前提；手太低会让手指必须向后反折。
+        /// </summary>
+        public float HandHeight = 0.799f;
+
+        /// <summary>
+        /// 腕部相对键根的深度偏移（米）。取 0.232 使掌指关节位于键面按压点<b>后方约 55 mm</b>（靠演奏者一侧）：
+        /// 指尖因此是「向前下方」落到键上，而不是向后缩回掌心。
+        /// 旧值 0.12 会把指根放到按压点<b>前方</b>，导致指尖必须反折、手型呈爪状。
+        /// </summary>
+        public float HandDepth = 0.232f;
 
         [Header("移动（过渡动作与自适应速度）")]
         public float MoveSpeed = 12f;        // 基准移动平滑速度
@@ -57,10 +67,29 @@ namespace PianoTeacher3D.Avatar
         [Header("姿态校验（防穿模）")]
         public bool EnablePoseClamp = true;
 
+        [Header("手腕姿态（附录 A.4.2）")]
+        /// <summary>是否让手腕按角色配置做受限俯仰 / 滚转（只影响姿态，不改变单帧位移上限）。</summary>
+        public bool EnableWristOrientation = true;
+
+        /// <summary>角色未提供 <see cref="HandMetrics.WristPitch"/> 时的默认俯仰（度）。</summary>
+        public float DefaultWristPitch = 8f;
+
+        /// <summary>手腕最大滚转（度）：键盘两端的掌根朝外侧轻微侧倾。</summary>
+        public float MaxWristRollDegrees = 6f;
+
+        /// <summary>手腕姿态跟随速度（指数阻尼）。</summary>
+        public float WristOrientationSpeed = 7f;
+
         [Header("动作质量指标")]
         public bool EnableMetrics = true;
         public float HitRadius = 0.09f;      // 「到达目标键」判定半径（米）
         public float MovingThreshold = 0.0006f; // 「正在移动」判定单帧位移（米）
+
+        /// <summary>指尖压入键面的容差（米）：超过即计为穿模。</summary>
+        public float FingertipPenetrationTolerance = 0.004f;
+
+        /// <summary>判定「换位过渡帧」的手腕单帧位移阈值（米）。</summary>
+        public float TransitionStepThreshold = 0.010f;
 
         [Header("指尖目标与黑键（方案 5.3 第二阶段 / 审查 1.2B）")]
         public bool EnableFingertipMetrics = true;
@@ -127,6 +156,14 @@ namespace PianoTeacher3D.Avatar
         private bool _palmPenetration;
         private float _leftLargeMotion, _rightLargeMotion;
 
+        // ---- 过渡帧判定（附录 A.6.3「换位峰值」需要与普通帧分开统计） ----
+        private Vector3 _prevLeftWrist, _prevRightWrist;
+        private bool _hasPrevWrist;
+        private bool _transitionFrame;
+
+        // ---- 关节限位增量（来自 PoseIssueSource） ----
+        private int _lastJointLimitCount;
+
         /// <summary>一个琴键的可复用按压目标点（键面前半段 + 该键真实键面高度）。</summary>
         private readonly struct KeyTouchPoint
         {
@@ -149,6 +186,12 @@ namespace PianoTeacher3D.Avatar
 
         /// <summary>动作质量累加器（Session / 测试读取）。</summary>
         public HandMotionAccumulator Metrics => _metrics;
+
+        /// <summary>
+        /// 关节限位来源（由会话层注入 <c>FingerPoseController</c>）：
+        /// 让指标统计「关节被钳制次数」，而不让 IK 反向依赖姿态控制器。
+        /// </summary>
+        public IHandJointIssueSource PoseIssueSource { get; set; }
 
         /// <summary>累计检测到并已钳制的异常姿态次数（方案阶段五「避免动作失控或穿模」）。</summary>
         public int PoseIssueCount => _poseIssueCount;
@@ -264,6 +307,8 @@ namespace PianoTeacher3D.Avatar
             _hasRightSmoothed = false;
             _leftHadPrevTarget = false;  // 复位分组判定，避免 Seek 后的首个采样被误判为「跨手大位移」
             _rightHadPrevTarget = false;
+            _hasPrevWrist = false;       // 复位过渡帧判定（否则首帧位移会被当成换位）
+            _transitionFrame = false;
             ResetFingertipTargets(leftHand: true);
             ResetFingertipTargets(leftHand: false);
         }
@@ -275,6 +320,9 @@ namespace PianoTeacher3D.Avatar
             _poseIssueCount = 0;
             _crossedHandWarningCount = 0;
             _poseIssues.Clear();
+            _hasPrevWrist = false;
+            _transitionFrame = false;
+            _lastJointLimitCount = PoseIssueSource != null ? PoseIssueSource.JointLimitClampCount : 0;
         }
 
         /// <summary>生成动作质量报告（方案阶段五验收量化）。</summary>
@@ -377,7 +425,12 @@ namespace PianoTeacher3D.Avatar
             // 每角色 IK 偏移（方案 5.2 中期「每角色 IK 偏移」；默认 0，不影响 HandHeight/HandDepth 的既有语义）
             var def = _avatar.CurrentDefinition;
             if (def != null)
-                rawTarget = new Vector3(rawTarget.x, rawTarget.y + def.HandHeightOffset, rawTarget.z + def.HandDepthOffset);
+            {
+                rawTarget = new Vector3(
+                    rawTarget.x,
+                    rawTarget.y + def.HandHeightOffset + def.Hand.PalmKeyPlaneOffset,
+                    rawTarget.z + def.HandDepthOffset);
+            }
 
             // 指尖贴键的手掌修正（方案 5.3 第二阶段）：把手腕朝「消灭指尖平均误差」的方向平移。
             // 只修正 XZ（高度由手指弯曲负责），并夹在键盘允许范围内，避免把手腕推出琴键区触发姿态钳制。
@@ -440,7 +493,38 @@ namespace PianoTeacher3D.Avatar
             hand.Wrist.position = next;
             StretchArm(shoulder, arm, hand.Wrist);
 
-            UpdateFingertipTargets(hand, leftHand);
+            if (EnableWristOrientation) ApplyWristOrientation(hand, leftHand, def);
+
+            UpdateFingertipTargets(hand, leftHand, def);
+        }
+
+        /// <summary>
+        /// 手腕姿态（附录 A.4.2「除位置外，增加受限的俯仰/滚转」）：
+        /// ① 俯仰让掌心略朝键面，同时把腕部抬高使掌指关节基本留在原位（否则掌体会压进琴键）；
+        /// ② 滚转在键盘两端产生轻微侧倾，幅度受限；
+        /// ③ 只改姿态，<b>不影响</b> <see cref="MaxStepPerFrame"/> 的位置硬约束。
+        /// </summary>
+        private void ApplyWristOrientation(IHandRig hand, bool leftHand, AvatarDefinition def)
+        {
+            if (hand == null || hand.Wrist == null) return;
+
+            float pitch = def != null ? def.Hand.WristPitch : DefaultWristPitch;
+            float roll = 0f;
+
+            if (_hasLimits)
+            {
+                float center = (_limits.MinX + _limits.MaxX) * 0.5f;
+                float half = Mathf.Max(0.001f, (_limits.MaxX - _limits.MinX) * 0.5f);
+                float offset = Mathf.Clamp((hand.Wrist.position.x - center) / half, -1f, 1f);
+                roll = offset * MaxWristRollDegrees * (leftHand ? -1f : 1f);
+            }
+
+            // 说明：不做位置补偿 —— 腕部位置是每帧递推的状态量，叠加抬高会形成累积漂移。
+            // 俯仰带来的指根位移由 FingerPoseController 的指尖 IK 每帧重新求解（以实际指根为基准），
+            // 掌体与键面之间仍有约 18 mm 余量，不会穿模。
+            var target = Quaternion.Euler(pitch, 0f, roll);
+            float k = 1f - Mathf.Exp(-WristOrientationSpeed * Time.deltaTime);
+            hand.Wrist.localRotation = Quaternion.Slerp(hand.Wrist.localRotation, target, k);
         }
 
         // ==================== 指尖目标（方案 5.3 第二阶段 / 审查 1.2B 第二步） ====================
@@ -450,7 +534,7 @@ namespace PianoTeacher3D.Avatar
         /// 再按和弦成形进度把目标从手型上方过渡到键面（避免所有指尖在同一帧突然到位）。
         /// 手腕/掌心的移动规则完全不受影响（<see cref="UpdateHand"/> 已处理）。
         /// </summary>
-        private void UpdateFingertipTargets(IHandRig hand, bool leftHand)
+        private void UpdateFingertipTargets(IHandRig hand, bool leftHand, AvatarDefinition def)
         {
             ClearFingertipTargets(leftHand);
             if (!EnableFingertipMetrics) return;
@@ -469,6 +553,8 @@ namespace PianoTeacher3D.Avatar
             // 第 f 根手指的目标就是「分配给第 f 根手指的那个音高」的键面按压点。
             // 这样弯曲的手指、指向的目标、真正按下的琴键三者严格一一对应
             // （旧实现用「离键最近的指尖」自行配对，会与指法分配产生矛盾）。
+            float reachAdjust = def != null ? def.Hand.FingertipReachAdjustment : 0f;
+
             for (int f = 0; f < fingerCount; f++)
             {
                 int pitch = Assignment.GetPitch(leftHand, f);
@@ -476,6 +562,7 @@ namespace PianoTeacher3D.Avatar
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) continue;
 
                 targets[f] = touch.Press;
+                if (reachAdjust != 0f) targets[f].y += reachAdjust;
                 has[f] = true;
             }
 
@@ -494,6 +581,7 @@ namespace PianoTeacher3D.Avatar
                 }
                 if (free < 0) break;
                 targets[free] = touch.Press;
+                if (reachAdjust != 0f) targets[free].y += reachAdjust;
                 has[free] = true;
             }
 
@@ -731,8 +819,32 @@ namespace PianoTeacher3D.Avatar
             _thumbOrientationIssue = HasThumbOrientationIssue();
             _palmPenetration = HasPalmPenetration();
 
+            // 被分配指尖误差 + 键面距离（附录 A.6.3：与「最近指尖」分开统计）
+            float leftAssigned = AssignedFingertipError(left, true, out float leftSurface, out bool leftPenetration);
+            float rightAssigned = AssignedFingertipError(right, false, out float rightSurface, out bool rightPenetration);
+
             bool crossed = HandPoseValidator.AreHandsCrossed(left.Wrist.position, right.Wrist.position);
             if (crossed) _crossedHandWarningCount++;
+
+            // 过渡帧：目标大跳变或手腕单帧位移超过阈值（用于「换位峰值」口径）
+            float step = 0f;
+            if (_hasPrevWrist)
+            {
+                step = Mathf.Max(
+                    Vector3.Distance(_prevLeftWrist, left.Wrist.position),
+                    Vector3.Distance(_prevRightWrist, right.Wrist.position));
+            }
+            _prevLeftWrist = left.Wrist.position;
+            _prevRightWrist = right.Wrist.position;
+            _hasPrevWrist = true;
+
+            _transitionFrame = _leftLargeMotion >= LargeMotionDistance
+                || _rightLargeMotion >= LargeMotionDistance
+                || step >= TransitionStepThreshold;
+
+            int jointLimitTotal = PoseIssueSource != null ? PoseIssueSource.JointLimitClampCount : 0;
+            int jointLimitDelta = Mathf.Max(0, jointLimitTotal - _lastJointLimitCount);
+            _lastJointLimitCount = jointLimitTotal;
 
             var sample = new HandMotionSample
             {
@@ -759,12 +871,63 @@ namespace PianoTeacher3D.Avatar
                 BlackKeyFrame = HasBlackKeyTarget(),
                 ChordFrame = CountHandPitches(true) >= 2 || CountHandPitches(false) >= 2,
                 FastScaleFrame = _avgNoteGap <= FastScaleGapSeconds,
-                LargeMotionFrame = _leftLargeMotion >= LargeMotionDistance || _rightLargeMotion >= LargeMotionDistance
+                LargeMotionFrame = _leftLargeMotion >= LargeMotionDistance || _rightLargeMotion >= LargeMotionDistance,
+
+                HasAssignedFingertipErrors = EnableFingertipMetrics && (leftAssigned >= 0f || rightAssigned >= 0f),
+                LeftAssignedFingertipError = leftAssigned,
+                RightAssignedFingertipError = rightAssigned,
+
+                HasSurfaceDistances = EnableFingertipMetrics && (leftSurface > -100f || rightSurface > -100f),
+                LeftSurfaceDistance = leftSurface,
+                RightSurfaceDistance = rightSurface,
+
+                TransitionFrame = _transitionFrame,
+                JointLimitHits = jointLimitDelta,
+                FingerPenetration = leftPenetration || rightPenetration
             };
             _metrics.AddSample(sample);
 
             _leftLargeMotion = 0f;
             _rightLargeMotion = 0f;
+        }
+
+        /// <summary>
+        /// 被分配指尖到目标键按压点的平均误差（米），以及该手指尖到键面的平均法向距离。
+        /// 与 <see cref="MeanFingertipError"/>（最近指尖 / 乐观下界）分开，口径与视觉一致性测试一致。
+        /// </summary>
+        private float AssignedFingertipError(IHandRig hand, bool leftHand, out float meanSurface, out bool penetration)
+        {
+            meanSurface = -999f;
+            penetration = false;
+            if (hand == null) return -1f;
+
+            CollectHandPitches(leftHand);
+            if (_pitchScratch.Count == 0) return -1f;
+
+            float sum = 0f;
+            float surfaceSum = 0f;
+            int count = 0;
+
+            for (int i = 0; i < _pitchScratch.Count; i++)
+            {
+                int pitch = _pitchScratch[i];
+                if (!_keyTouches.TryGetValue(pitch, out var touch)) continue;
+
+                int finger = Assignment.GetFinger(leftHand, pitch);
+                if (finger < 0) continue;
+
+                Vector3 tip = FingertipWorld(hand, finger);
+                sum += Vector3.Distance(tip, touch.Press);
+
+                float surface = HandPoseValidator.SignedDistanceToSurface(tip.y, touch.SurfaceY);
+                surfaceSum += surface;
+                if (surface < -FingertipPenetrationTolerance) penetration = true;
+                count++;
+            }
+
+            if (count == 0) return -1f;
+            meanSurface = surfaceSum / count;
+            return sum / count;
         }
 
         private bool HasBlackKeyTarget()

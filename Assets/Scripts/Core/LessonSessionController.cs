@@ -438,6 +438,7 @@ namespace PianoTeacher3D.Core
             _fingerPose.Assignment = _fingerAssignment;
             _fingerPose.TargetSource = _handIK;          // 手指朝"它该按的那个键"对准
             _fingerPose.Initialize(_avatar.LeftHand, _avatar.RightHand);
+            _handIK.PoseIssueSource = _fingerPose;       // 关节限位次数进入动作指标（附录 A.6.3）
 
             // 9. 摄像机控制 + 环境氛围
             var cam = Camera.main;
