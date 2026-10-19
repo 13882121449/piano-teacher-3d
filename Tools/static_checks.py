@@ -23,6 +23,7 @@
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -110,18 +111,31 @@ def check_empty_catch():
     return problems
 
 
+def declared_packages():
+    """读 manifest 里当前声明的包名；读不到返回 None（表示不做过滤）。"""
+    manifest = PROJECT_ROOT / "Packages" / "manifest.json"
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        return set((data.get("dependencies") or {}).keys())
+    except Exception:
+        return None
+
+
 def scan_packages():
+    declared = declared_packages()
     counts = {name: 0 for name in PACKAGE_PROBES}
     hits = {name: [] for name in PACKAGE_PROBES}
     for path in sorted(SCRIPTS.rglob("*.cs")):
         text = read(path)
         for name, probes in PACKAGE_PROBES.items():
+            if declared is not None and name not in declared:
+                continue  # 已从 manifest 移除的包不再参与扫描（§7-11 逐包删除）
             for probe in probes:
                 if re.search(probe, text):
                     counts[name] += 1
                     hits[name].append(str(path.relative_to(PROJECT_ROOT)))
                     break
-    return counts, hits
+    return counts, hits, (declared or set())
 
 
 def main():
@@ -149,11 +163,13 @@ def main():
         else:
             print(f"✓ {title}")
 
-    counts, hits = scan_packages()
-    unused = [name for name, count in counts.items() if count == 0]
+    counts, hits, declared = scan_packages()
+    unused = [name for name, count in counts.items() if count == 0 and name in declared]
     print("\n依赖使用扫描（信息性，不删包）")
     for name, count in sorted(counts.items()):
-        if count == 0:
+        if name not in declared:
+            print(f"  · {name}: 已从 manifest 移除，不再扫描")
+        elif count == 0:
             print(f"  · {name}: 代码中未发现引用（需先确认场景/Prefab 资产后再决定是否删除）")
         else:
             print(f"  · {name}: {count} 个脚本引用（{', '.join(sorted(set(hits[name]))[:3])}…）")
