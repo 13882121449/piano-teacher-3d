@@ -323,6 +323,22 @@ namespace PianoTeacher3D.Avatar
             new MetricStats(), new MetricStats(), new MetricStats(), new MetricStats()
         };
 
+        // ==================== 左右手分项（接触方案批次 1.3） ====================
+        // 「整体 95% 掩盖局部塌陷」的对策：两只手各自给出指尖误差与键面距离分布，
+        // 便于判断问题出在手性映射、指法分配还是 IK 可达性。
+
+        /// <summary>左手「被分配指尖」误差分布（米）。</summary>
+        public MetricStats LeftFingertipTargetError { get; internal set; } = new MetricStats();
+
+        /// <summary>右手「被分配指尖」误差分布（米）。</summary>
+        public MetricStats RightFingertipTargetError { get; internal set; } = new MetricStats();
+
+        /// <summary>左手指尖到键面的法向距离分布（米，正值悬空 / 负值压键）。</summary>
+        public MetricStats LeftKeyTopDistance { get; internal set; } = new MetricStats();
+
+        /// <summary>右手指尖到键面的法向距离分布（米）。</summary>
+        public MetricStats RightKeyTopDistance { get; internal set; } = new MetricStats();
+
         /// <summary>累计关节限位触发次数（姿态控制器上报）。</summary>
         public int JointLimitHits { get; internal set; }
 
@@ -359,7 +375,10 @@ namespace PianoTeacher3D.Avatar
                    $" · 键面距离 {KeyTopDistance.Describe()}" +
                    $" · 逐帧位移 {PerFrameDisplacement.Describe()}" +
                    $" · 换位峰值 {TransitionFingertipError.Describe()}" +
-                   $" · 关节限位 {JointLimitHits} 指尖压键 {FingerPenetrationFrames}";
+                   $" · 关节限位 {JointLimitHits} 指尖压键 {FingerPenetrationFrames}" +
+                   // 左右手分项（批次 1.3）：避免整体数字掩盖单侧塌陷
+                   $"｜左 指尖 {LeftFingertipTargetError.Describe()} 键面 {LeftKeyTopDistance.Describe()}" +
+                   $"｜右 指尖 {RightFingertipTargetError.Describe()} 键面 {RightKeyTopDistance.Describe()}";
         }
 
         private static string GroupText(float rate, int samples)
@@ -419,6 +438,10 @@ namespace PianoTeacher3D.Avatar
         {
             new MetricAccumulator(), new MetricAccumulator(), new MetricAccumulator(), new MetricAccumulator()
         };
+        private readonly MetricAccumulator _leftAssignedError = new MetricAccumulator();
+        private readonly MetricAccumulator _rightAssignedError = new MetricAccumulator();
+        private readonly MetricAccumulator _leftSurface = new MetricAccumulator();
+        private readonly MetricAccumulator _rightSurface = new MetricAccumulator();
         private int _jointLimitHits;
         private int _fingerPenetrationFrames;
 
@@ -541,25 +564,34 @@ namespace PianoTeacher3D.Avatar
 
             if (s.HasAssignedFingertipErrors)
             {
-                AddAssigned(s.LeftAssignedFingertipError, s);
-                AddAssigned(s.RightAssignedFingertipError, s);
+                AddAssigned(s.LeftAssignedFingertipError, s, true);
+                AddAssigned(s.RightAssignedFingertipError, s, false);
             }
 
             if (s.HasSurfaceDistances)
             {
-                if (s.LeftSurfaceDistance > -100f) _surfaceDistance.Add(s.LeftSurfaceDistance);
-                if (s.RightSurfaceDistance > -100f) _surfaceDistance.Add(s.RightSurfaceDistance);
+                if (s.LeftSurfaceDistance > -100f)
+                {
+                    _surfaceDistance.Add(s.LeftSurfaceDistance);
+                    _leftSurface.Add(s.LeftSurfaceDistance);
+                }
+                if (s.RightSurfaceDistance > -100f)
+                {
+                    _surfaceDistance.Add(s.RightSurfaceDistance);
+                    _rightSurface.Add(s.RightSurfaceDistance);
+                }
             }
 
             if (s.JointLimitHits > 0) _jointLimitHits += s.JointLimitHits;
             if (s.FingerPenetration) _fingerPenetrationFrames++;
         }
 
-        private void AddAssigned(float error, in HandMotionSample s)
+        private void AddAssigned(float error, in HandMotionSample s, bool isLeft)
         {
             if (error < 0f) return;
 
             _assignedError.Add(error);
+            (isLeft ? _leftAssignedError : _rightAssignedError).Add(error);
             if (s.TransitionFrame) _transitionError.Add(error);
 
             int group = SelectGroup(s);
@@ -609,6 +641,10 @@ namespace PianoTeacher3D.Avatar
                 FingertipSurfaceDistance = _surfaceDistance.Build(),
                 TransitionFingertipError = _transitionError.Build(),
                 PerFrameDisplacement = _stepDistance.Build(),
+                LeftFingertipTargetError = _leftAssignedError.Build(),
+                RightFingertipTargetError = _rightAssignedError.Build(),
+                LeftKeyTopDistance = _leftSurface.Build(),
+                RightKeyTopDistance = _rightSurface.Build(),
                 JointLimitHits = _jointLimitHits,
                 FingerPenetrationFrames = _fingerPenetrationFrames
             };
@@ -676,6 +712,10 @@ namespace PianoTeacher3D.Avatar
             _surfaceDistance.Clear();
             _transitionError.Clear();
             _stepDistance.Clear();
+            _leftAssignedError.Clear();
+            _rightAssignedError.Clear();
+            _leftSurface.Clear();
+            _rightSurface.Clear();
             for (int i = 0; i < _groupError.Length; i++) _groupError[i].Clear();
             _jointLimitHits = 0;
             _fingerPenetrationFrames = 0;

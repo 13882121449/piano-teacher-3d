@@ -417,5 +417,87 @@ namespace PianoTeacher3D.Tests.EditMode
             Assert.AreEqual(0, report.SpeedAnomalyCount);
             Assert.AreEqual(1f, report.BlackKeyHitRate, 1e-4f);
         }
+
+        // ==================== 左右手分项（接触方案批次 1.3） ====================
+
+        private static HandMotionSample HandSample(float leftError, float rightError,
+            float leftSurface = 0f, float rightSurface = 0f, bool hasSurface = false)
+        {
+            var s = Sample(Vector3.zero, Vector3.zero, Vector3.zero, Vector3.zero);
+            s.HasAssignedFingertipErrors = true;
+            s.LeftAssignedFingertipError = leftError;
+            s.RightAssignedFingertipError = rightError;
+            s.HasSurfaceDistances = hasSurface;
+            s.LeftSurfaceDistance = leftSurface;
+            s.RightSurfaceDistance = rightSurface;
+            return s;
+        }
+
+        [Test]
+        public void PerHandFingertipErrors_AreSeparated()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(HandSample(0.020f, 0.060f));
+
+            var report = acc.Build();
+
+            Assert.AreEqual(1, report.LeftFingertipTargetError.Samples);
+            Assert.AreEqual(1, report.RightFingertipTargetError.Samples);
+            Assert.AreEqual(0.020f, report.LeftFingertipTargetError.Mean, 1e-5f, "左手误差不得被右手样本污染");
+            Assert.AreEqual(0.060f, report.RightFingertipTargetError.Mean, 1e-5f);
+        }
+
+        [Test]
+        public void PerHandFingertipErrors_IgnoreNegativeSamples()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(HandSample(-1f, 0.030f));   // 负值 = 该手无样本
+
+            var report = acc.Build();
+
+            Assert.AreEqual(0, report.LeftFingertipTargetError.Samples, "负值样本不得计入左手");
+            Assert.AreEqual(1, report.RightFingertipTargetError.Samples);
+        }
+
+        [Test]
+        public void PerHandKeyTopDistance_AreSeparated()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(HandSample(0.01f, 0.01f, leftSurface: 0.004f, rightSurface: 0.020f, hasSurface: true));
+
+            var report = acc.Build();
+
+            Assert.AreEqual(1, report.LeftKeyTopDistance.Samples);
+            Assert.AreEqual(1, report.RightKeyTopDistance.Samples);
+            Assert.AreEqual(0.004f, report.LeftKeyTopDistance.Mean, 1e-5f);
+            Assert.AreEqual(0.020f, report.RightKeyTopDistance.Mean, 1e-5f);
+            Assert.AreEqual(0.012f, report.KeyTopDistance.Mean, 1e-5f, "整体口径仍是两手合并");
+        }
+
+        [Test]
+        public void LogString_ContainsPerHandSections()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(HandSample(0.02f, 0.03f, 0.001f, 0.002f, hasSurface: true));
+
+            string text = acc.Build().ToLogString();
+
+            StringAssert.Contains("左 指尖", text);
+            StringAssert.Contains("右 指尖", text);
+            StringAssert.Contains("键面", text);
+        }
+
+        [Test]
+        public void Reset_ClearsPerHandStatistics()
+        {
+            var acc = new HandMotionAccumulator();
+            acc.AddSample(HandSample(0.02f, 0.03f, 0.001f, 0.002f, hasSurface: true));
+
+            acc.Reset();
+            var report = acc.Build();
+
+            Assert.AreEqual(0, report.LeftFingertipTargetError.Samples);
+            Assert.AreEqual(0, report.RightKeyTopDistance.Samples);
+        }
     }
 }
