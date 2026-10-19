@@ -10,6 +10,7 @@
 |---|---|
 | 仓库 / 分支 | `13882121449/piano-teacher-3d` / `master` |
 | 起始 commit | `e5aa7fb`（docs: 手部网格设计契约、指标口径更新与完整项目说明） |
+| 本轮提交 | `3b73d4d`（feat(core): 原子写入、画质 Auto 优先级与声部抢占计数） |
 | Unity | `2022.3.22f1c1`（revision `c3cbd310e76e`） |
 | Python | 3.13.14（`Tools/verify.py` 只用标准库） |
 | 机器 | i9-14900HX / RTX 4060 Laptop 8GB + Intel UHD / 15.6 GB |
