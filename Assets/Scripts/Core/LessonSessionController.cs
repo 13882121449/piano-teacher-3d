@@ -395,7 +395,8 @@ namespace PianoTeacher3D.Core
             piano.transform.localPosition = new Vector3(-_keyMap.TotalWidth * 0.5f, 0f, 0f);
 
             // 5. 教学场景环境（地面 / 背景 / 三点光照 / 接触阴影近似；质量档位在此落地）
-            CurrentQualityTier = NormalizeTier(_prefs.QualityTier);
+            //    优先用户显式覆盖；否则走设备建议 Auto，首次启动不盲目应用 High（优化方案 P1-07）
+            CurrentQualityTier = _prefs.ResolveQualityTier();
             var quality = QualityProfile.For(CurrentQualityTier);
             _environment = gameObject.AddComponent<PianoSceneEnvironment>();
             _environment.Build(_keyMap, quality);
@@ -941,16 +942,32 @@ namespace PianoTeacher3D.Core
 
         // ==================== 画质档位（方案 7.1 / 7.2） ====================
 
-        /// <summary>切换画质档位（幂等，可重复调用；不影响时间轴与教学语义）。</summary>
+        /// <summary>切换画质档位（幂等，可重复调用；不影响时间轴与教学语义）。用户手动选择后会记为显式覆盖。</summary>
         public void SetQualityTier(QualityTier tier)
         {
             CurrentQualityTier = NormalizeTier((int)tier);
             var quality = QualityProfile.For(CurrentQualityTier);
             quality.Apply();
             _environment?.ApplyQuality(quality);
-            _prefs.QualityTier = (int)CurrentQualityTier;
+            _prefs.SetQualityTierOverride(CurrentQualityTier);
             MarkPrefsDirty();
         }
+
+        /// <summary>
+        /// 恢复画质 Auto：清掉用户覆盖，下次启动重新按设备建议（优化方案 P1-07「恢复自动的入口」）。
+        /// </summary>
+        public void UseAutomaticQuality()
+        {
+            _prefs.UseAutomaticQuality();
+            CurrentQualityTier = _prefs.ResolveQualityTier();
+            var quality = QualityProfile.For(CurrentQualityTier);
+            quality.Apply();
+            _environment?.ApplyQuality(quality);
+            MarkPrefsDirty();
+        }
+
+        /// <summary>当前画质是否处于 Auto（未显式覆盖），供 UI 显示当前档位与恢复自动的入口。</summary>
+        public bool IsQualityAutomatic => !_prefs.QualityTierUserOverride;
 
         /// <summary>画质档位的中文描述（诊断面板用）。</summary>
         public string QualityDescription => QualityProfile.For(CurrentQualityTier).Describe();

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using QualityTierValue = PianoTeacher3D.Core.QualityTier;
 
 namespace PianoTeacher3D.Core
 {
@@ -56,8 +57,11 @@ namespace PianoTeacher3D.Core
             public const int DisplayModeMin = 0;
             public const int DisplayModeMax = 1;
 
-            /// <summary>默认质量档位：1 = High（<c>Core.QualityTier</c>，由 <c>Core/QualityProfile.cs</c> 定义）。</summary>
-            public const int QualityTier = 1;
+            /// <summary>
+            /// 质量档位默认值：0 = Standard（<c>Core.QualityTier</c>）。
+            /// 仅当 <see cref="QualityTierUserOverride"/> 为 true 时该值才生效；否则按设备建议（Auto）解析。
+            /// </summary>
+            public const int QualityTier = 0;
 
             // ---- 合法范围（clamp 用；改动这里即可同时影响加载与保存） ----
             public const float SpeedMin = 0.1f;
@@ -117,6 +121,16 @@ namespace PianoTeacher3D.Core
         /// 该枚举由另一位同事在 <c>Core/QualityProfile.cs</c> 中新建，为避免并行改动冲突，这里先用 int 保存。
         /// </summary>
         public int QualityTier = Defaults.QualityTier;
+
+        /// <summary>
+        /// 用户是否<b>显式</b>选择过画质档位（优化方案 P1-07「区分 Auto / Standard / High 或增加 UserOverride」）。
+        /// <para>
+        /// false = Auto：启动时走 <see cref="QualityProfile.DetectRecommended"/> 的设备建议，不盲目应用 High；
+        /// true = 使用 <see cref="QualityTier"/> 的用户覆盖值。
+        /// 旧版本偏好文件没有该字段，反序列化后为 false，即自动回到 Auto，符合「首次启动走设备建议」。
+        /// </para>
+        /// </summary>
+        public bool QualityTierUserOverride = false;
 
         /// <summary>最近曲目的 ID 列表（最新在前）。</summary>
         public List<string> RecentSongIds = new List<string>();
@@ -196,22 +210,42 @@ namespace PianoTeacher3D.Core
             ClampAll();
         }
 
-        /// <summary>写入偏好（幂等；失败只记录诊断，不抛异常、不影响本次运行）。</summary>
+        /// <summary>
+        /// 写入偏好（幂等；失败只记录诊断，不抛异常、不影响本次运行）。
+        /// 采用「临时文件 + 原子替换」（优化方案 P1-10）：异常退出不会留下半截 JSON。
+        /// </summary>
         public void Save()
         {
             ClampAll();
-            try
+            if (AtomicFileWrite.TryWriteAllText(FilePath, JsonUtility.ToJson(this, true), out string error))
             {
-                string path = FilePath;
-                string dir = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllText(path, JsonUtility.ToJson(this, true), new UTF8Encoding(false));
                 LoadDiagnostic = null;
+                return;
             }
-            catch (Exception ex)
-            {
-                LoadDiagnostic = $"保存偏好失败：{ex.GetType().Name}";
-            }
+            LoadDiagnostic = $"保存偏好失败：{error}";
+        }
+
+        /// <summary>
+        /// 解析实际生效的画质档位（优化方案 P1-07）：
+        /// 用户显式覆盖过就用覆盖值，否则使用设备建议（Auto）。
+        /// </summary>
+        public QualityTier ResolveQualityTier()
+        {
+            if (!QualityTierUserOverride) return QualityProfile.DetectRecommended();
+            return QualityTier == (int)QualityTierValue.High ? QualityTierValue.High : QualityTierValue.Standard;
+        }
+
+        /// <summary>记录用户显式选择的画质档位，并置上覆盖标记（下一次启动仍然生效）。</summary>
+        public void SetQualityTierOverride(QualityTier tier)
+        {
+            QualityTier = tier == QualityTierValue.High ? (int)QualityTierValue.High : (int)QualityTierValue.Standard;
+            QualityTierUserOverride = true;
+        }
+
+        /// <summary>恢复画质自动档（清掉覆盖标记，下次启动重新按设备建议）。</summary>
+        public void UseAutomaticQuality()
+        {
+            QualityTierUserOverride = false;
         }
 
         /// <summary>恢复全部默认值（最近曲目 ID 一并清空）。</summary>
@@ -227,7 +261,9 @@ namespace PianoTeacher3D.Core
             BeatsPerBar = Defaults.BeatsPerBar;
             HighlightLookAhead = Defaults.HighlightLookAhead;
             PracticeToolsCollapsed = Defaults.PracticeToolsCollapsed;
+            DisplayMode = Defaults.DisplayMode;
             QualityTier = Defaults.QualityTier;
+            QualityTierUserOverride = false;
             RecentSongIds = new List<string>();
         }
 
@@ -245,7 +281,9 @@ namespace PianoTeacher3D.Core
             BeatsPerBar = other.BeatsPerBar;
             HighlightLookAhead = other.HighlightLookAhead;
             PracticeToolsCollapsed = other.PracticeToolsCollapsed;
+            DisplayMode = other.DisplayMode;
             QualityTier = other.QualityTier;
+            QualityTierUserOverride = other.QualityTierUserOverride;
             RecentSongIds = other.RecentSongIds != null ? new List<string>(other.RecentSongIds) : new List<string>();
         }
 

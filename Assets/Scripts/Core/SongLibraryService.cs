@@ -105,25 +105,20 @@ namespace PianoTeacher3D.Core
                 try
                 {
                     EnsureUserSongDirectory();
-                    File.Copy(path, destination, true);
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    return CopyFailure(id, destination, ImportRejection.Unreadable,
-                        "没有权限把曲目复制到用户数据目录。请检查该目录的访问权限，或以有权限的账户运行后再试一次。",
-                        "复制失败（权限）");
-                }
-                catch (IOException ex)
-                {
-                    return CopyFailure(id, destination, ImportRejection.Unreadable,
-                        "复制曲目失败（可能是磁盘空间不足或目标文件被占用）。请清理磁盘空间或关闭占用该目录的程序后重试。",
-                        $"复制失败（IO）：{ex.GetType().Name} {PathSanitizer.SanitizeMessage(ex.Message)}");
                 }
                 catch (Exception ex)
                 {
                     return CopyFailure(id, destination, ImportRejection.Unreadable,
-                        "复制曲目时发生意外错误。请重试一次；若仍然失败，可先把文件复制到「文档」后再导入。",
-                        $"复制失败：{ex.GetType().Name}");
+                        "无法创建用户曲目目录。请检查磁盘空间与目录权限后重试。",
+                        $"创建目录失败：{ex.GetType().Name}");
+                }
+
+                // 先写同目录临时文件，校验大小后原子替换（优化方案 P1-10）
+                if (!AtomicFileWrite.TryCopyFile(path, destination, out string copyError))
+                {
+                    return CopyFailure(id, destination, ImportRejection.Unreadable,
+                        "复制曲目失败（可能是磁盘空间不足或目标文件被占用）。请清理磁盘空间或关闭占用该目录的程序后重试。",
+                        $"复制失败：{PathSanitizer.SanitizeMessage(copyError)}");
                 }
             }
 
@@ -284,14 +279,17 @@ namespace PianoTeacher3D.Core
             Save();
         }
 
-        /// <summary>持久化最近曲目（幂等；失败只忽略本次写入，不抛异常）。</summary>
+        /// <summary>
+        /// 持久化最近曲目（幂等；失败只忽略本次写入，不抛异常）。
+        /// 采用「临时文件 + 原子替换」，并在替换前保留上一版为 <c>library.json.bak</c>（优化方案 P1-10）。
+        /// </summary>
         public void Save()
         {
             try
             {
                 EnsureProductDirectory();
                 var file = new LibraryFile { Version = 1, Recent = new List<SongMetadata>(_recent) };
-                File.WriteAllText(_libraryPath, JsonUtility.ToJson(file, true), new UTF8Encoding(false));
+                AtomicFileWrite.TryWriteAllText(_libraryPath, JsonUtility.ToJson(file, true), out _);
             }
             catch (Exception)
             {
@@ -299,19 +297,31 @@ namespace PianoTeacher3D.Core
             }
         }
 
-        /// <summary>读取最近曲目（缺失 / 损坏时保持空列表，不抛异常）。</summary>
+        /// <summary>
+        /// 读取最近曲目（缺失 / 损坏时保持空列表，不抛异常）。
+        /// 主文件损坏时回退最近一次有效备份 <c>library.json.bak</c>（优化方案 P1-10「必要时保留最近有效备份」）。
+        /// </summary>
         public void Load()
         {
             _recent.Clear();
+            if (TryLoadFrom(_libraryPath)) return;
+            if (TryLoadFrom(_libraryPath + AtomicFileWrite.BackupSuffix)) return;
+            _recent.Clear();
+        }
+
+        /// <summary>从指定文件读取最近曲目；文件缺失、为空或解析失败返回 false。</summary>
+        private bool TryLoadFrom(string path)
+        {
             try
             {
-                if (!File.Exists(_libraryPath)) return;
-                string json = File.ReadAllText(_libraryPath, Encoding.UTF8);
-                if (string.IsNullOrWhiteSpace(json)) return;
+                if (!File.Exists(path)) return false;
+                string json = File.ReadAllText(path, Encoding.UTF8);
+                if (string.IsNullOrWhiteSpace(json)) return false;
 
                 var file = JsonUtility.FromJson<LibraryFile>(json);
-                if (file == null || file.Recent == null) return;
+                if (file == null || file.Recent == null) return false;
 
+                _recent.Clear();
                 for (int i = 0; i < file.Recent.Count; i++)
                 {
                     var meta = file.Recent[i];
@@ -319,10 +329,12 @@ namespace PianoTeacher3D.Core
                     _recent.Add(meta);
                 }
                 TrimRecent();
+                return true; // 解析成功即视为有效（空列表也是合法状态，不能因此回退到旧备份）
             }
             catch (Exception)
             {
                 _recent.Clear();
+                return false;
             }
         }
 

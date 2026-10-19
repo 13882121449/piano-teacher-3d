@@ -293,3 +293,30 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots --json _v
 | 画面里看不到人物手部 | 用「视角」分段切到**手部特写**；全景下手在键盘上方 |
 | 导入后「最近播放」提示文件缺失 | 源文件被移动/删除属正常提示；点「导入 MIDI…」重新选择，或从最近列表移除该记录 |
 | Unity 在 `-runTests` 后挂起不退出 | 已由 `verify.py` 处理（结果 XML 生成即继续）；用编辑器 Test Runner 时属 Unity 已知行为，手动结束进程即可 |
+
+---
+
+## 11. 测试跳过项与发布门禁（2026-10-19 核对）
+
+对应优化方案 §7 清单第 2 项「整理测试跳过项并定义发布门禁」。
+本轮 `python Tools/verify.py` 实测：**EditMode 309/309 通过；PlayMode 90 通过、5 跳过、0 失败**（`_verify_out/playmode.xml`）。
+跳过的 5 项**全部是环境/显式配置跳过，不是失败**，逐项说明如下：
+
+| 跳过用例 | 跳过原因 | 补跑路径 |
+|---|---|---|
+| `PerformanceSamplingTests.SampleFrameTiming` | `[Category("Perf")]` 显式类别，默认「全部测试」不执行 | `python Tools/verify.py --perf` |
+| `PerformanceSamplingTests.SampleFrameTiming_UnderSwitchingLoad` | 同上（切换负载采样） | `python Tools/verify.py --perf` |
+| `StressAndStabilityTests.Soak_PlaysContinuously` | `[Category("Soak")]` 显式类别，默认 10 分钟不随常规验证跑 | `python Tools/verify.py --soak`（调试可用 `--soak --soak-seconds 120`） |
+| `VisualBaselineCompareTests.CompareAgainstBaseline` | 需要真实 GPU 与已确认的基线图；`-nographics` 下跳过 | `python Tools/verify.py --compare-visual` |
+| `VisualSnapshotTests.CaptureLessonViews` | 无图形设备时跳过（截图不可能产出） | `python Tools/verify.py --visual` |
+
+### 11.1 门禁分层（建议）
+
+| 层 | 触发 | 内容 | 通过标准 |
+|---|---|---|---|
+| PR 快速门禁 | 每次提交 | 编译 + EditMode + 关键 PlayMode | 0 编译错误；EditMode 全通过；无新增失败 |
+| 主分支 | 合并到 master | 完整 PlayMode | 跳过项必须在本表登记原因；跳过≠通过 |
+| 夜间 / 候选发布 | 定时或发版前 | `--visual --compare-visual --stress --perf` + Windows Player 冒烟 + 10 分钟 Soak | 截图差异需人工审阅后才能更新基线；Player 冒烟覆盖主菜单、加载 `demo.mid`、播放/暂停/恢复、切视角/角色、退出清理 |
+| 发布候选 | 发版前 | 30 分钟 Soak + 干净检出构建 | 资源数量无单调增长；错误降级路径可用 |
+
+> 边界说明：上表是**流程约定**，仓库当前没有 CI workflow 去自动执行它；`--perf` / `--soak` / `--visual` 跑的是 Editor 内的玩家循环，仍**不能**替代真实 Windows Player 的帧时间与内存结论（见优化方案 P0-01）。

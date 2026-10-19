@@ -78,6 +78,12 @@ namespace PianoTeacher3D.Piano
         /// <summary>正在发声（未进入释放淡出）的声部数。淡出中的声部不再计入，但其槽位仍占用至淡出结束。</summary>
         public int ActiveVoiceCount => _allocator != null ? _allocator.ActiveCount : 0;
 
+        /// <summary>声部池容量（= <see cref="MaxVoices"/>，供诊断/回归对照）。</summary>
+        public int VoiceCapacity => _allocator != null ? _allocator.Capacity : MaxVoices;
+
+        /// <summary>累计 voice-stealing 次数（池满抢占），供性能与音频回归诊断（优化方案 P1-04）。</summary>
+        public int VoiceStealCount => _allocator != null ? _allocator.StealCount : 0;
+
         private void Update()
         {
             if (_allocator == null || _sources == null) return;
@@ -302,6 +308,12 @@ namespace PianoTeacher3D.Piano
         /// <summary>被占用的槽位数（正在发声 + 正在淡出）。</summary>
         public int OccupiedCount { get; private set; }
 
+        /// <summary>
+        /// 累计 voice-stealing 次数：池满且没有空闲槽位时抢占已有声部的次数
+        /// （优化方案 P1-04「增加最大同时发声数与 voice-stealing 计数」，用于高密度和弦诊断）。
+        /// </summary>
+        public int StealCount { get; private set; }
+
         /// <summary>主音量，取值 [0,1]。</summary>
         public float MasterVolume => _masterVolume;
 
@@ -353,7 +365,11 @@ namespace PianoTeacher3D.Piano
 
             int slot = FindByPitch(pitch);
             if (slot < 0) slot = FindFree();
-            if (slot < 0) slot = FindVictim();
+            if (slot < 0)
+            {
+                slot = FindVictim();
+                if (slot >= 0) StealCount++; // 池满抢占：扣一次 voice-stealing
+            }
             if (slot < 0) return -1;
 
             _pitch[slot] = pitch;

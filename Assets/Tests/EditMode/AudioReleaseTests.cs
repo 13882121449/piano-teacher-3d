@@ -175,9 +175,41 @@ namespace PianoTeacher3D.Tests.EditMode
         }
 
         [Test]
-        public void Allocator_AdvanceReleases_FreesSlotOnlyAfterFadeCompletes()
+        public void Allocator_VoiceStealCount_CountsOnlyPoolFullTakeovers()
         {
-            var allocator = new PianoVoiceAllocator(4, FadeSeconds);
+            var allocator = new PianoVoiceAllocator(2, FadeSeconds);
+
+            allocator.NoteOn(60, 100);
+            allocator.NoteOn(64, 100);
+            Assert.AreEqual(0, allocator.StealCount, "池未满时不得计抢占");
+
+            allocator.NoteOn(67, 100);   // 池满 → 抢占一个槽位
+            Assert.AreEqual(1, allocator.StealCount, "池满后每次 NoteOn 记一次 voice-stealing");
+            Assert.AreEqual(2, allocator.OccupiedCount, "抢占后占用数不得超过容量");
+
+            allocator.NoteOn(67, 50);    // 同音高重复触发（repeat note）复用原槽位，不算抢占
+            Assert.AreEqual(1, allocator.StealCount, "同音高复用不得计抢占");
+        }
+
+        [Test]
+        public void Allocator_VoiceStealCount_NotIncrementedAfterSlotFreed()
+        {
+            var allocator = new PianoVoiceAllocator(2, FadeSeconds);
+
+            allocator.NoteOn(60, 100);
+            allocator.NoteOn(64, 100);
+            allocator.NoteOff(60);
+            allocator.AdvanceReleases(FadeSeconds * 1.5f);
+
+            allocator.NoteOn(67, 100);   // 淡出完成后有真实空闲槽位
+
+            Assert.AreEqual(0, allocator.StealCount, "有空闲槽位时不得记抢占");
+            Assert.AreEqual(2, allocator.ActiveCount);
+        }
+
+        [Test]
+        public void Allocator_AdvanceReleases_FreesSlotOnlyAfterFadeCompletes()
+        {            var allocator = new PianoVoiceAllocator(4, FadeSeconds);
 
             int slot = allocator.NoteOn(60, 100);
             allocator.NoteOff(60);
