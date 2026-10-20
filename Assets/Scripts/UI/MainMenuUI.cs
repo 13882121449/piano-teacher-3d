@@ -8,12 +8,11 @@ using UnityEngine.UI;
 namespace PianoTeacher3D.UI
 {
     /// <summary>
-    /// 主菜单（对应方案 3.1 曲库入口、6.4「导入 MIDI / 最近打开列表」，
-    /// 审查 2.1 视觉层级、审查 4 章「统一曲目卡片、主操作与错误状态风格」）。
+    /// 主菜单 / 曲库页（深色专业工作台风格）。
     /// <para>
-    /// 结构：标题 → 曲库（统一卡片 + 导入 MIDI 入口）→ 本次运行的最近播放（含失效提示）
-    /// → 底部快捷键说明。无曲目时显示空状态，曲库目录缺失时显示错误态并提供导入入口，
-    /// 两种情况都不会退化成一行红色报错文字。
+    /// 结构：28 hero 标题 + 12 副标题 → 曲目卡片网格（240×96，悬停升起 2px）→ 最近播放
+    /// → 底部快捷键说明。空态与错误态都用**居中卡片**（图标 + 说明 + 行动按钮）表达，
+    /// 不退化成一行红色报错文字。
     /// </para>
     /// <para>
     /// 选中曲目通过静态字段 <see cref="SelectedSongPath"/> 传给课程场景（原有跨场景通道，保持不变）。
@@ -24,13 +23,17 @@ namespace PianoTeacher3D.UI
         /// <summary>由主菜单选中的曲目路径（课程场景读取，保持原有契约）。</summary>
         public static string SelectedSongPath = "";
 
-        private const float CardHeight = 60f;
-        private const float CardStep = 68f;
-        private const float RecentRowHeight = 48f;
-        private const float RecentRowStep = 54f;
-        private const int MaxLibraryCards = 3;
+        private const int MaxLibraryCards = 8;
         private const int MaxRecentRows = 2;
+        private const float RecentRowHeight = 48f;
+        private const float RecentRowGap = 8f;
         private const float RemoveConfirmSeconds = 4f;
+
+        // ---- 纵向游标（参考分辨率下的顶部偏移，全部为 4 的倍数）----
+        private const float ContentTop = 108f;
+        private const float ContentBottom = 56f;
+        private const float SectionHeaderHeight = 40f;
+        private const float GridTopGap = 48f;
 
         private static bool _pendingImport;
         private static readonly List<string> RecentPaths = new List<string>();
@@ -59,6 +62,7 @@ namespace PianoTeacher3D.UI
         private RectTransform _content;
         private Button _pendingRemoveBtn;
         private float _removeConfirmUntil;
+        private bool _showRecent;
 
         private void Start()
         {
@@ -67,7 +71,7 @@ namespace PianoTeacher3D.UI
 
         private void Update()
         {
-            // 「移除最近曲目」的二次确认超时复位（破坏性操作需要确认，方案 3.4 / 审查 2.2B）
+            // 「移除最近曲目」的二次确认超时复位（破坏性操作需要确认）
             if (_pendingRemoveBtn != null && Time.unscaledTime > _removeConfirmUntil)
             {
                 UITheme.SetButtonLabel(_pendingRemoveBtn, "移除");
@@ -81,38 +85,40 @@ namespace PianoTeacher3D.UI
             UITheme.EnsureEventSystem();
             _canvas = UITheme.CreateCanvas(transform, "MainMenuCanvas");
 
-            // 标题区
-            var title = UITheme.CreateText(_canvas.transform, "钢琴 3D 教学", Vector2.zero, new Vector2(600f, 52f),
-                UITheme.FontPageTitle, UITheme.Accent, TextAnchor.MiddleCenter, FontStyle.Bold);
+            // ---- 标题区：28 hero + 12 副标题（居中，与内容区同一条中轴）----
+            var title = UIKit.Label(_canvas.transform, "钢琴 3D 教学", UITheme.FontPageTitle, UITheme.TextPrimary,
+                TextAnchor.MiddleCenter, FontStyle.Bold, "PageTitle");
+            title.horizontalOverflow = HorizontalWrapMode.Overflow;
             UITheme.StretchTop(title.rectTransform, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                UITheme.Space24, 52f);
+                UITheme.Space24, 38f);
 
-            var subtitle = UITheme.CreateText(_canvas.transform, "选择曲目开始练习，或导入自己的 MIDI 文件",
-                Vector2.zero, new Vector2(600f, 26f), UITheme.FontSmall, UITheme.TextSecondary);
+            var subtitle = UIKit.Label(_canvas.transform, "选择曲目开始练习，或导入自己的 MIDI 文件",
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleCenter, FontStyle.Normal,
+                "PageSubtitle");
+            subtitle.horizontalOverflow = HorizontalWrapMode.Overflow;
             UITheme.StretchTop(subtitle.rectTransform, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                UITheme.Space24 + 56f, 26f);
+                UITheme.Space24 + 42f, 16f);
 
-            _content = UITheme.CreateRect(_canvas.transform, "Content", Vector2.zero, new Vector2(640f, 452f),
+            _content = UITheme.CreateRect(_canvas.transform, "Content", Vector2.zero, Vector2.zero,
                 UITheme.Transparent);
-            UITheme.PlaceCenter(_content, 640f, 452f);
+            UITheme.StretchAll(_content, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
+                ContentBottom, ContentTop);
 
             BuildLibrarySection();
             BuildRecentSection();
             BuildFooter();
         }
 
-        // ---------- 曲库（统一卡片 + 导入入口 + 空 / 错误状态） ----------
+        // ---------- 曲库：统一卡片网格 + 导入入口 + 空 / 错误状态 ----------
 
         private void BuildLibrarySection()
         {
-            var header = UITheme.CreateText(_content, "曲库", Vector2.zero, new Vector2(300f, 24f),
-                UITheme.FontSmall, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(header.rectTransform, 0f, 0f, 300f, 24f);
+            var header = UIKit.SectionHeader(_content, "曲库");
+            UITheme.PlaceTopLeft(header.rectTransform, 0f, 10f, 300f, 20f);
 
-            var importBtn = UITheme.CreateButton(_content, "导入 MIDI…", Vector2.zero, new Vector2(148f, 28f),
-                RequestImport, UITheme.FontCaption, ButtonStyle.Primary,
-                "选择本机 .mid / .midi 文件导入后直接进入课程（不必手动复制到工程目录）");
-            UITheme.PlaceTopRight(importBtn.GetComponent<RectTransform>(), 0f, 0f, 148f, 28f);
+            var importBtn = UIKit.PrimaryButton(_content, "导入 MIDI…", new Vector2(148f, 40f),
+                RequestImport, "选择本机 .mid / .midi 文件导入后直接进入课程（不必手动复制到工程目录）");
+            UITheme.PlaceTopRight(importBtn.GetComponent<RectTransform>(), 0f, 0f, 148f, 40f);
 
             string dir = SongsDirectory;
             bool dirMissing = !SafeDirectoryExists(dir);
@@ -120,56 +126,58 @@ namespace PianoTeacher3D.UI
 
             if (dirMissing)
             {
-                BuildErrorState(dir);
+                _showRecent = false;
+                BuildStateCard("!", "曲库不可用",
+                    "没有找到示例曲目录 StreamingAssets/Songs。\n" +
+                    "这不影响导入自己的文件：点下方按钮选择本机的 .mid / .midi 即可开始练习。",
+                    UITheme.TextError, true);
                 return;
             }
             if (songs.Count == 0)
             {
-                BuildEmptyState();
+                _showRecent = false;
+                BuildStateCard("♪", "曲库为空",
+                    "还没有可练习的曲目。\n" +
+                    "点下方按钮从本机选择 .mid / .midi 文件，或把示例文件放进 StreamingAssets/Songs。",
+                    UITheme.Accent, false);
                 return;
             }
 
+            _showRecent = true;
             header.text = $"曲库（{songs.Count} 首）";
+
+            float avail = Width(_content);
+            float cardW = UITheme.Layout.SongCardWidth;
+            float cardH = UITheme.Layout.SongCardHeight;
+            float gap = UITheme.Layout.SongCardGap;
+            int columns = Mathf.Max(UITheme.Layout.SongCardMinColumns,
+                Mathf.FloorToInt((avail + gap) / (cardW + gap)));
+            columns = Mathf.Min(columns, Mathf.Max(1, songs.Count));
+
             int shown = Mathf.Min(songs.Count, MaxLibraryCards);
+            // 网格与标题、区块标题共享左基线（不居中），右侧余量留给「导入 MIDI…」
+            const float leftOffset = 0f;
+
             for (int i = 0; i < shown; i++)
             {
-                BuildSongCard(songs[i], i);
+                int col = i % columns;
+                int row = i / columns;
+                var card = UIKit.Card(_content, Path.GetFileNameWithoutExtension(songs[i]),
+                    DescribeSongMeta(songs[i]), new Vector2(cardW, cardH),
+                    () => LoadLesson(songs[i]), $"开始学习《{Path.GetFileNameWithoutExtension(songs[i])}》");
+                UITheme.PlaceTopLeft(card.GetComponent<RectTransform>(),
+                    leftOffset + col * (cardW + gap), GridTopGap + row * (cardH + gap), cardW, cardH);
             }
+
+            int rows = Mathf.CeilToInt(shown / (float)columns);
+            float gridBottom = GridTopGap + rows * cardH + Mathf.Max(0, rows - 1) * gap;
 
             if (songs.Count > shown)
             {
-                var more = UITheme.CreateText(_content,
-                    $"还有 {songs.Count - shown} 首未显示（可滚动查看：StreamingAssets/Songs）",
-                    Vector2.zero, new Vector2(600f, 22f), UITheme.FontStatusLabel, UITheme.TextSecondary,
-                    TextAnchor.MiddleLeft);
-                UITheme.PlaceTopLeft(more.rectTransform, 0f, 34f + shown * CardStep, 600f, 22f);
+                var more = UIKit.Label(_content, $"还有 {songs.Count - shown} 首未显示（可滚动查看：StreamingAssets/Songs）",
+                    UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "MoreHint");
+                UITheme.PlaceTopLeft(more.rectTransform, 0f, gridBottom + UITheme.Space8, 600f, 16f);
             }
-        }
-
-        /// <summary>统一风格的曲目卡片：标题 + 文件大小 + 「开始学习」提示。</summary>
-        private void BuildSongCard(string path, int index)
-        {
-            string name = Path.GetFileNameWithoutExtension(path);
-            var card = UITheme.CreateButton(_content, name, Vector2.zero, new Vector2(640f, CardHeight),
-                () => LoadLesson(path), UITheme.FontButton, ButtonStyle.Secondary,
-                $"开始学习《{name}》");
-            UITheme.PlaceTopLeft(card.GetComponent<RectTransform>(), 0f, 34f + index * CardStep, 640f, CardHeight);
-
-            var label = UITheme.GetLabel(card);
-            if (label != null)
-            {
-                label.alignment = TextAnchor.MiddleLeft;
-                label.fontStyle = FontStyle.Bold;
-                UITheme.StretchAll(label.rectTransform, 18f, 160f, 22f, 6f);
-            }
-
-            var startHint = UITheme.CreateText(card.transform, "点击开始学习 ▸", Vector2.zero,
-                new Vector2(140f, 20f), UITheme.FontStatusLabel, UITheme.TextSecondary, TextAnchor.MiddleRight);
-            UITheme.StretchAll(startHint.rectTransform, 460f, 18f, 22f, 6f);
-
-            var meta = UITheme.CreateText(card.transform, DescribeSongMeta(path), Vector2.zero,
-                new Vector2(560f, 20f), UITheme.FontStatusLabel, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-            UITheme.StretchAll(meta.rectTransform, 18f, 18f, 4f, 30f);
         }
 
         /// <summary>曲目元信息（只读文件大小与文件名，不解析文件内容，避免菜单卡顿）。</summary>
@@ -182,141 +190,163 @@ namespace PianoTeacher3D.UI
                 string size = bytes >= 1024 * 1024
                     ? $"{bytes / 1024f / 1024f:0.0} MB"
                     : $"{Mathf.Max(0f, bytes / 1024f):0.0} KB";
-                return $"{size}　·　示例曲库：StreamingAssets/Songs";
+                return $"{size}　·　点击开始学习";
             }
             catch (Exception)
             {
-                return "示例曲库：StreamingAssets/Songs";
+                return "点击开始学习";
             }
         }
 
-        /// <summary>空状态：给出「导入 MIDI」与目录说明，而不是一行报错文字（方案 8.2）。</summary>
-        private void BuildEmptyState()
+        /// <summary>空态 / 错误态统一用居中卡片：图标 + 说明（15）+ 行动按钮（40 高）。</summary>
+        private void BuildStateCard(string glyph, string title, string body, Color glyphColor, bool isError)
         {
-            var panel = UITheme.CreatePanel(_content, "EmptyState", Vector2.zero, new Vector2(640f, 168f),
-                UITheme.PanelBgRaised, UITheme.RadiusLarge);
-            UITheme.PlaceTopLeft(panel, 0f, 34f, 640f, 168f);
+            const float w = 520f;
+            const float h = 232f;
 
-            var title = UITheme.CreateText(panel, "曲库为空", Vector2.zero, new Vector2(600f, 26f),
-                UITheme.FontSongTitle, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(title.rectTransform, 20f, 16f, 600f, 26f);
+            var panel = UIKit.Panel(_content, isError ? "LibraryError" : "LibraryEmpty",
+                isError ? UITheme.ErrorBannerColor(Core.ErrorSeverity.Recoverable) : UITheme.PanelBgRaised,
+                UITheme.RadiusLarge);
+            panel.anchorMin = new Vector2(0.5f, 0.5f);
+            panel.anchorMax = new Vector2(0.5f, 0.5f);
+            panel.pivot = new Vector2(0.5f, 0.5f);
+            panel.sizeDelta = new Vector2(w, h);
+            panel.anchoredPosition = new Vector2(0f, -8f);
 
-            var body = UITheme.CreateText(panel,
-                "还没有可练习的曲目。可点上方「导入 MIDI…」从本机选择 .mid / .midi 文件，\n" +
-                "或把示例文件放入 StreamingAssets/Songs 目录后重新打开本界面。",
-                Vector2.zero, new Vector2(600f, 52f), UITheme.FontCaption, UITheme.TextSecondary,
-                TextAnchor.UpperLeft);
-            body.horizontalOverflow = HorizontalWrapMode.Wrap;
-            body.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.PlaceTopLeft(body.rectTransform, 20f, 48f, 600f, 52f);
+            var icon = UITheme.CreatePanel(panel, "Icon", Vector2.zero, new Vector2(48f, 48f),
+                isError ? UITheme.DangerBg : UITheme.PanelBgDeep, 24);
+            UITheme.PlaceTopLeft(icon, (w - 48f) * 0.5f, UITheme.Space24, 48f, 48f);
+            var iconImg = icon.GetComponent<Image>();
+            if (iconImg != null) iconImg.raycastTarget = false;
+            var glyphText = UIKit.Label(icon, glyph, UITheme.FontTitle, glyphColor, TextAnchor.MiddleCenter,
+                FontStyle.Bold, "Glyph");
+            UITheme.StretchAll(glyphText.rectTransform, 0f, 0f, 0f, 0f);
 
-            var importBtn = UITheme.CreateButton(panel, "导入 MIDI…", Vector2.zero, new Vector2(150f, 32f),
-                RequestImport, UITheme.FontCaption, ButtonStyle.Primary, "选择本机 MIDI 文件导入");
-            UITheme.Place(importBtn.GetComponent<RectTransform>(), 20f, 14f, 150f, 32f);
-        }
+            var titleText = UIKit.Label(panel, title, UITheme.FontSubtitle,
+                isError ? UITheme.TextError : UITheme.TextPrimary, TextAnchor.MiddleCenter, FontStyle.Bold,
+                "StateTitle");
+            UITheme.PlaceTopLeft(titleText.rectTransform, UITheme.Space24, UITheme.Space24 + 48f + UITheme.Space8,
+                w - UITheme.Space24 * 2f, 20f);
 
-        /// <summary>错误态：目录缺失（可恢复）→ 说明原因 + 下一步动作 + 导入入口，统一错误色与「!」标记。</summary>
-        private void BuildErrorState(string directory)
-        {
-            var panel = UITheme.CreatePanel(_content, "LibraryError", Vector2.zero, new Vector2(640f, 168f),
-                UITheme.ErrorBannerColor(Core.ErrorSeverity.Recoverable), UITheme.RadiusLarge);
-            UITheme.PlaceTopLeft(panel, 0f, 34f, 640f, 168f);
+            var bodyText = UIKit.Label(panel, body, UITheme.FontBodySmall,
+                isError ? UITheme.TextPrimary : UITheme.TextSecondary, TextAnchor.UpperCenter,
+                FontStyle.Normal, "StateBody");
+            bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            bodyText.verticalOverflow = VerticalWrapMode.Truncate;
+            UITheme.PlaceTopLeft(bodyText.rectTransform, UITheme.Space32, 112f, w - UITheme.Space32 * 2f, 44f);
 
-            var tag = UITheme.CreateText(panel, "! 曲库不可用", Vector2.zero, new Vector2(200f, 24f),
-                UITheme.FontCaption, UITheme.TextError, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(tag.rectTransform, 20f, 16f, 200f, 24f);
+            var importBtn = UIKit.PrimaryButton(panel, "导入 MIDI…", new Vector2(148f, 40f), RequestImport,
+                "选择本机 MIDI 文件导入");
+            UITheme.Place(importBtn.GetComponent<RectTransform>(), (w - 148f) * 0.5f, UITheme.Space16, 148f, 40f);
 
-            var body = UITheme.CreateText(panel,
-                "没有找到示例曲目录 StreamingAssets/Songs。\n" +
-                "这不影响导入自己的文件：点下方「导入 MIDI…」选择本机的 .mid / .midi 文件即可开始练习。",
-                Vector2.zero, new Vector2(600f, 56f), UITheme.FontCaption, UITheme.TextPrimary,
-                TextAnchor.UpperLeft);
-            body.horizontalOverflow = HorizontalWrapMode.Wrap;
-            body.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.PlaceTopLeft(body.rectTransform, 20f, 44f, 600f, 56f);
-
-            var importBtn = UITheme.CreateButton(panel, "导入 MIDI…", Vector2.zero, new Vector2(150f, 32f),
-                RequestImport, UITheme.FontCaption, ButtonStyle.Primary, "选择本机 MIDI 文件导入");
-            UITheme.Place(importBtn.GetComponent<RectTransform>(), 20f, 14f, 150f, 32f);
-
-            Debug.LogWarning($"[PianoTeacher3D][UI] 曲库目录缺失：{Core.PathSanitizer.Sanitize(directory)}");
+            if (isError)
+                Debug.LogWarning("[PianoTeacher3D][UI] 曲库目录缺失，已显示错误态卡片。");
         }
 
         // ---------- 最近播放（含失效提示） ----------
 
         private void BuildRecentSection()
         {
-            var divider = UITheme.CreateDivider(_content, "Divider", Vector2.zero, new Vector2(640f, 1f));
-            UITheme.StretchTop(divider, 0f, 0f, 268f, 1f);
+            if (!_showRecent) return;   // 空态 / 错误态卡片居中显示，不再叠一个空的「最近播放」
+            float avail = Width(_content);
+            float top = RecentSectionTop();
 
-            var header = UITheme.CreateText(_content, "最近播放（本次运行）", Vector2.zero, new Vector2(400f, 24f),
-                UITheme.FontCaption, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(header.rectTransform, 0f, 280f, 400f, 24f);
+            var divider = UITheme.CreateDivider(_content, "Divider", Vector2.zero, new Vector2(avail, 1f));
+            UITheme.PlaceTopLeft(divider, 0f, top, avail, 1f);
+
+            var header = UIKit.SectionHeader(_content, "最近播放（本次运行）");
+            UITheme.PlaceTopLeft(header.rectTransform, 0f, top + UITheme.Space16, 400f, 20f);
 
             int shown = 0;
             for (int i = 0; i < RecentPaths.Count && shown < MaxRecentRows; i++)
             {
                 string path = RecentPaths[i];
                 bool missing = !SafeFileExists(path);
-                BuildRecentRow(path, missing, shown);
+                BuildRecentRow(path, missing, shown, top + UITheme.Space16 + 28f, avail);
                 shown++;
             }
 
             if (shown == 0)
             {
-                var empty = UITheme.CreateText(_content,
-                    "本次运行还没有从本菜单进入过曲目。从上方曲库选择一首，或导入自己的 MIDI 文件。",
-                    Vector2.zero, new Vector2(620f, 22f), UITheme.FontStatusLabel, UITheme.TextSecondary,
-                    TextAnchor.MiddleLeft);
-                UITheme.PlaceTopLeft(empty.rectTransform, 0f, 310f, 620f, 22f);
+                var empty = UIKit.Label(_content, "本次运行还没有从本菜单进入过曲目。从上方曲库选择一首，或导入自己的 MIDI 文件。",
+                    UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal,
+                    "RecentEmpty");
+                UITheme.PlaceTopLeft(empty.rectTransform, 0f, top + UITheme.Space16 + 28f, avail, 20f);
             }
         }
 
-        private void BuildRecentRow(string path, bool missing, int index)
+        /// <summary>最近播放区起点：曲库网格最多两行卡片之后。</summary>
+        private float RecentSectionTop()
+        {
+            float avail = Width(_content);
+            float gap = UITheme.Layout.SongCardGap;
+            int columns = Mathf.Max(UITheme.Layout.SongCardMinColumns,
+                Mathf.FloorToInt((avail + gap) / (UITheme.Layout.SongCardWidth + gap)));
+            int shown = Mathf.Min(SongsCount(), MaxLibraryCards);
+            if (shown <= 0) columns = UITheme.Layout.SongCardMinColumns;
+            int rows = Mathf.Max(1, Mathf.CeilToInt(shown / (float)Mathf.Max(1, columns)));
+            return GridTopGap + rows * UITheme.Layout.SongCardHeight + (rows - 1) * gap + UITheme.Space24;
+        }
+
+        private static int SongsCount()
+        {
+            string dir = SongsDirectory;
+            return SafeDirectoryExists(dir) ? Mathf.Min(ListSongs(dir).Count, MaxLibraryCards) : 0;
+        }
+
+        private void BuildRecentRow(string path, bool missing, int index, float top, float width)
         {
             string name = Path.GetFileNameWithoutExtension(path);
-            float top = 310f + index * RecentRowStep;
+            float y = top + index * (RecentRowHeight + RecentRowGap);
 
             if (!missing)
             {
-                var row = UITheme.CreateButton(_content, name, Vector2.zero, new Vector2(640f, RecentRowHeight),
-                    () => LoadLesson(path), UITheme.FontCaption, ButtonStyle.Secondary,
+                var row = UITheme.CreateButton(_content, name, Vector2.zero, new Vector2(width, RecentRowHeight),
+                    () => LoadLesson(path), UITheme.FontBody, ButtonStyle.Secondary,
                     $"再次打开《{name}》");
-                UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), 0f, top, 640f, RecentRowHeight);
+                UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), 0f, y, width, RecentRowHeight);
+                var rowImg = row.targetGraphic as Image;
+                if (rowImg != null)
+                {
+                    var sprite = UITheme.GetRoundedSprite(UITheme.RadiusMedium);
+                    if (sprite != null) { rowImg.sprite = sprite; rowImg.type = Image.Type.Sliced; }
+                    UITheme.SetOutline(rowImg, true, UITheme.Divider, 1f);
+                }
                 var label = UITheme.GetLabel(row);
                 if (label != null)
                 {
                     label.alignment = TextAnchor.MiddleLeft;
-                    UITheme.StretchAll(label.rectTransform, 16f, 150f, 0f, 0f);
+                    UITheme.StretchAll(label.rectTransform, UITheme.Space16, 160f, 0f, 0f);
                 }
-                var meta = UITheme.CreateText(row.transform, "可直接打开", Vector2.zero, new Vector2(130f, 20f),
-                    UITheme.FontStatusLabel, UITheme.TextSecondary, TextAnchor.MiddleRight);
-                UITheme.StretchAll(meta.rectTransform, 460f, 16f, 0f, 0f);
+                var meta = UIKit.Label(row.transform, "可直接打开", UITheme.FontBodySmall,
+                    UITheme.TextSecondary, TextAnchor.MiddleRight, FontStyle.Normal, "Meta");
+                UITheme.StretchAll(meta.rectTransform, width - 140f, UITheme.Space16, 0f, 0f);
                 return;
             }
 
             // 文件被移动 / 删除：给出失效提示 + 重新导入入口，并允许移除该条记录（危险色 + 二次确认）
             var panel = UITheme.CreatePanel(_content, "RecentMissing", Vector2.zero,
-                new Vector2(640f, RecentRowHeight), UITheme.PanelBgRaised, UITheme.RadiusMedium);
-            UITheme.PlaceTopLeft(panel, 0f, top, 640f, RecentRowHeight);
+                new Vector2(width, RecentRowHeight), UITheme.PanelBgRaised, UITheme.RadiusLarge);
+            var panelBg = panel.GetComponent<Image>();
+            if (panelBg != null) UITheme.SetOutline(panelBg, true, UITheme.Divider, 1f);
+            UITheme.PlaceTopLeft(panel, 0f, y, width, RecentRowHeight);
 
-            var title = UITheme.CreateText(panel, "! " + name, Vector2.zero, new Vector2(340f, 20f),
-                UITheme.FontCaption, UITheme.TextWarning, TextAnchor.MiddleLeft);
-            UITheme.StretchAll(title.rectTransform, 16f, 296f, 22f, 6f);
+            var title = UIKit.Label(panel, "! " + name, UITheme.FontBody, UITheme.TextWarning,
+                TextAnchor.MiddleLeft, FontStyle.Normal, "MissingTitle");
+            UITheme.PlaceTopLeft(title.rectTransform, UITheme.Space16, 8f, 320f, 20f);
 
-            var hint = UITheme.CreateText(panel, "文件已移动或删除：请点「导入 MIDI…」重新选择文件",
-                Vector2.zero, new Vector2(340f, 18f), UITheme.FontStatusLabel, UITheme.TextSecondary,
-                TextAnchor.MiddleLeft);
-            UITheme.StretchAll(hint.rectTransform, 16f, 296f, 4f, 26f);
+            var hint = UIKit.Label(panel, "文件已移动或删除：请点「重新导入」重新选择文件",
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "MissingHint");
+            UITheme.PlaceTopLeft(hint.rectTransform, UITheme.Space16, 28f, 420f, 16f);
 
             var reimportBtn = UITheme.CreateButton(panel, "重新导入", Vector2.zero, new Vector2(88f, 28f),
-                RequestImport, UITheme.FontStatusLabel, ButtonStyle.Secondary, "重新选择本机 MIDI 文件");
+                RequestImport, UITheme.FontBodySmall, ButtonStyle.Ghost, "重新选择本机 MIDI 文件");
             UITheme.PlaceRight(reimportBtn.GetComponent<RectTransform>(), 104f, 10f, 88f, 28f);
 
-            var removeBtn = UITheme.CreateButton(panel, "移除", Vector2.zero, new Vector2(92f, 28f),
-                null, UITheme.FontStatusLabel, ButtonStyle.Danger,
+            var removeBtn = UITheme.CreateButton(panel, "移除", Vector2.zero, new Vector2(88f, 28f),
+                null, UITheme.FontBodySmall, ButtonStyle.Danger,
                 "从最近列表移除这条记录（需再次点击确认）");
-            UITheme.PlaceRight(removeBtn.GetComponent<RectTransform>(), 8f, 10f, 92f, 28f);
+            UITheme.PlaceRight(removeBtn.GetComponent<RectTransform>(), 8f, 10f, 88f, 28f);
             removeBtn.onClick.AddListener(() => RequestRemoveRecent(removeBtn, path));
         }
 
@@ -355,11 +385,19 @@ namespace PianoTeacher3D.UI
 
         private void BuildFooter()
         {
-            var footer = UITheme.CreateText(_canvas.transform,
-                "进入课程后可用：空格 播放/暂停　·　[ 重播　·　R 重置视角　·　H 高亮　·　M 节拍器　·　Tab 曲目分析　·　F1 帮助",
-                Vector2.zero, new Vector2(900f, 24f), UITheme.FontStatusLabel, UITheme.TextSecondary);
+            var footer = UIKit.Label(_canvas.transform,
+                "进入课程后：空格 播放/暂停　·　[ 重播　·　R 重置视角　·　H 高亮　·　M 节拍器　·　Tab 分析　·　F1 帮助",
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleCenter, FontStyle.Normal, "Footer");
+            footer.horizontalOverflow = HorizontalWrapMode.Overflow;
             UITheme.StretchX(footer.rectTransform, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                UITheme.Layout.ScreenMargin, 24f);
+                UITheme.Layout.ScreenMargin, 20f);
+        }
+
+        private static float Width(RectTransform rt)
+        {
+            if (rt == null) return UITheme.Layout.ReferenceResolution.x - UITheme.Layout.ScreenMargin * 2f;
+            float w = rt.rect.width;
+            return w > 1f ? w : UITheme.Layout.ReferenceResolution.x - UITheme.Layout.ScreenMargin * 2f;
         }
 
         // ---------- 场景跳转与文件访问 ----------

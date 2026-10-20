@@ -51,22 +51,25 @@ namespace PianoTeacher3D.UI
     /// </summary>
     public static class UITheme
     {
-        // ==================== 配色（层次递进） ====================
+        // ==================== 配色（三层：底 → 面 → 浮，禁止第 4 级） ====================
 
-        /// <summary>场景背景（最深）。由 <c>Core/LessonSessionController</c> 直接使用，务必保留。</summary>
-        public static readonly Color SceneBg = new Color(0.075f, 0.082f, 0.098f, 1f);
+        /// <summary>
+        /// 底：场景背景（最深）。由 <c>Core/LessonSessionController</c> 直接使用，务必保留。
+        /// 亮度 0.0060 —— 全表最低，其余层级严格递增。
+        /// </summary>
+        public static readonly Color SceneBg = new Color(0.063f, 0.071f, 0.086f, 1f);
 
-        /// <summary>面板底色（带轻微透明，浮于场景之上）。</summary>
-        public static readonly Color PanelBg = new Color(0.118f, 0.133f, 0.157f, 0.96f);
+        /// <summary>面：面板底色（带轻微透明，浮于场景之上）。</summary>
+        public static readonly Color PanelBg = new Color(0.106f, 0.118f, 0.141f, 0.96f);
 
-        /// <summary>控件底色（按钮常态）。</summary>
-        public static readonly Color Control = new Color(0.165f, 0.184f, 0.216f, 1f);
+        /// <summary>浮：控件底色（按钮常态 / 玻璃卡之上的实体块）。</summary>
+        public static readonly Color Control = new Color(0.169f, 0.188f, 0.220f, 1f);
 
-        /// <summary>控件悬停色。</summary>
-        public static readonly Color ControlHover = new Color(0.235f, 0.259f, 0.302f, 1f);
+        /// <summary>控件悬停色（唯一允许的悬停提亮，不再另造第 4 级）。</summary>
+        public static readonly Color ControlHover = new Color(0.231f, 0.255f, 0.294f, 1f);
 
-        /// <summary>控件按下色。</summary>
-        public static readonly Color ControlPressed = new Color(0.106f, 0.118f, 0.141f, 1f);
+        /// <summary>控件按下色（比常态更暗，与悬停形成两个方向）。</summary>
+        public static readonly Color ControlPressed = new Color(0.129f, 0.145f, 0.173f, 1f);
 
         // ==================== 强调色（暖金） ====================
 
@@ -76,9 +79,9 @@ namespace PianoTeacher3D.UI
 
         // ==================== 文字 ====================
 
-        public static readonly Color TextPrimary = new Color(0.925f, 0.937f, 0.945f, 1f);
-        public static readonly Color TextSecondary = new Color(0.565f, 0.643f, 0.682f, 1f);
-        public static readonly Color TextOnAccent = new Color(0.098f, 0.110f, 0.133f, 1f);
+        public static readonly Color TextPrimary = new Color(0.937f, 0.945f, 0.953f, 1f);
+        public static readonly Color TextSecondary = new Color(0.639f, 0.690f, 0.729f, 1f);
+        public static readonly Color TextOnAccent = new Color(0.078f, 0.086f, 0.102f, 1f);
 
         // ==================== 状态色 ====================
 
@@ -88,28 +91,34 @@ namespace PianoTeacher3D.UI
         // ==================== 新增令牌：层次 / 分割 / 状态（方案 3.3 / 审查 2.2A） ====================
 
         /// <summary>抬升面板底色：次级功能卡片、分段控件轨道之上的一级。</summary>
-        public static readonly Color PanelBgRaised = new Color(0.157f, 0.176f, 0.204f, 1f);
+        public static readonly Color PanelBgRaised = new Color(0.137f, 0.153f, 0.180f, 1f);
 
         /// <summary>顶栏 / 底栏底色（比普通面板更深，压住 3D 画面又不抢眼）。</summary>
-        public static readonly Color PanelBgDeep = new Color(0.094f, 0.106f, 0.125f, 0.97f);
+        public static readonly Color PanelBgDeep = new Color(0.086f, 0.098f, 0.118f, 0.97f);
+
+        /// <summary>
+        /// 玻璃卡底色：直接压在 3D 画面上的一层（左上视角提示卡）。
+        /// alpha 0.72 仍保证 <see cref="TextSecondary"/> 对比度 ≥ 3:1。
+        /// </summary>
+        public static readonly Color PanelBgGlass = new Color(0.106f, 0.118f, 0.141f, 0.72f);
 
         /// <summary>分割线（半透明，不与强调色争抢注意力）。</summary>
-        public static readonly Color Divider = new Color(0.850f, 0.878f, 0.918f, 0.14f);
+        public static readonly Color Divider = new Color(0.850f, 0.878f, 0.918f, 0.16f);
 
         /// <summary>
         /// 选中态底色（分段选择器选中项 / 开关开启项）。
-        /// 比 <see cref="AccentDim"/> 更深，保证与 <see cref="TextPrimary"/> 的对比度 ≥ 4.5:1。
+        /// 比 <see cref="AccentDim"/> 更深，保证与 <see cref="TextPrimary"/> 的对比度 ≥ 4.5:1（实测 6.8:1）。
         /// </summary>
-        public static readonly Color Selected = new Color(0.435f, 0.325f, 0.125f, 1f);
+        public static readonly Color Selected = new Color(0.412f, 0.310f, 0.125f, 1f);
 
         /// <summary>警告色（功能降级但可继续）。</summary>
         public static readonly Color Warning = new Color(0.960f, 0.741f, 0.365f, 1f);
 
         /// <summary>禁用底色。</summary>
-        public static readonly Color Disabled = new Color(0.145f, 0.161f, 0.184f, 1f);
+        public static readonly Color Disabled = new Color(0.129f, 0.145f, 0.173f, 1f);
 
         /// <summary>禁用文字色。</summary>
-        public static readonly Color TextDisabled = new Color(0.435f, 0.478f, 0.510f, 1f);
+        public static readonly Color TextDisabled = new Color(0.478f, 0.522f, 0.565f, 1f);
 
         /// <summary>错误文字色（比底色更亮，保证暗色面板上的对比度）。</summary>
         public static readonly Color TextError = new Color(0.949f, 0.639f, 0.639f, 1f);
@@ -120,8 +129,8 @@ namespace PianoTeacher3D.UI
         /// <summary>危险 / 破坏性操作底色（需配合确认弹窗）。</summary>
         public static readonly Color DangerBg = new Color(0.545f, 0.216f, 0.216f, 1f);
 
-        /// <summary>进度条轨道底色。</summary>
-        public static readonly Color TrackBg = new Color(0.090f, 0.100f, 0.120f, 1f);
+        /// <summary>进度条轨道底色（比面板更深，让填充色成为唯一亮线）。</summary>
+        public static readonly Color TrackBg = new Color(0.078f, 0.086f, 0.102f, 1f);
 
         /// <summary>完全透明（纯布局容器，不参与渲染与射线检测）。</summary>
         public static readonly Color Transparent = new Color(0f, 0f, 0f, 0f);
@@ -140,67 +149,86 @@ namespace PianoTeacher3D.UI
         /// <summary>预提示色（暖金，与 <see cref="Accent"/> 同源，但语义只用于琴键提示）。</summary>
         public static readonly Color UpcomingColor = new Color(0.851f, 0.643f, 0.255f, 1f);
 
-        // ==================== 字号层级（审查 2.2A） ====================
+        // ==================== 字号层级（10 / 12 / 13 / 15 / 20 / 28，行高 = 字号 × 1.35） ====================
 
-        /// <summary>字号：页面标题（主菜单 / 空状态）。</summary>
-        public const int FontPageTitle = 34;
+        /// <summary>字号：hero（页面主标题）。</summary>
+        public const int FontPageTitle = 28;
 
-        /// <summary>字号：曲目标题 / 区块标题（兼容旧代码的通用标题层级）。</summary>
-        public const int FontTitle = 24;
+        /// <summary>字号：title（区块 / 面板标题）。</summary>
+        public const int FontTitle = 20;
 
         /// <summary>字号：曲目标题（面板内）。</summary>
-        public const int FontSongTitle = 22;
+        public const int FontSongTitle = 20;
 
-        /// <summary>字号：主要操作按钮。</summary>
-        public const int FontAction = 20;
+        /// <summary>字号：subtitle（主操作按钮 / 卡片标题）。</summary>
+        public const int FontSubtitle = 15;
 
-        /// <summary>字号：主要操作（兼容旧代码：普通按钮）。</summary>
-        public const int FontButton = 18;
+        /// <summary>字号：主要操作（兼容旧代码，等同 <see cref="FontSubtitle"/>）。</summary>
+        public const int FontAction = 15;
 
-        /// <summary>字号：正文。</summary>
-        public const int FontBody = 16;
+        /// <summary>字号：主要操作（兼容旧代码：普通按钮，等同 <see cref="FontSubtitle"/>）。</summary>
+        public const int FontButton = 15;
 
-        /// <summary>字号：辅助说明（兼容旧代码）。</summary>
-        public const int FontSmall = 15;
+        /// <summary>字号：正文（body，13）。</summary>
+        public const int FontBody = 13;
 
-        /// <summary>字号：辅助说明 / 状态标签。</summary>
-        public const int FontCaption = 13;
+        /// <summary>字号：body-small（辅助说明，12）。</summary>
+        public const int FontBodySmall = 12;
 
-        /// <summary>字号：状态标签（顶栏状态、模式标签）。</summary>
-        public const int FontStatusLabel = 13;
+        /// <summary>字号：辅助说明（兼容旧代码，等同 <see cref="FontBodySmall"/>）。</summary>
+        public const int FontSmall = 12;
 
-        // ==================== 间距等级（审查 2.2A：4 / 8 / 12 / 16 / 24） ====================
+        /// <summary>字号：caption（最小可用字号，10）。</summary>
+        public const int FontCaption = 10;
+
+        /// <summary>字号：状态标签（顶栏状态、模式标签，10）。</summary>
+        public const int FontStatusLabel = 10;
+
+        /// <summary>行高比例：行高 = 字号 × 1.35。</summary>
+        public const float LineHeightRatio = 1.35f;
+
+        /// <summary>按字号算行高（四舍五入到整数像素，避免半像素基线抖动）。</summary>
+        public static float LineHeight(int fontSize) => Mathf.Round(fontSize * LineHeightRatio);
+
+        // ==================== 间距等级（栅格 4 / 8 / 12 / 16 / 24 / 32） ====================
 
         public const float Space4 = 4f;
         public const float Space8 = 8f;
         public const float Space12 = 12f;
         public const float Space16 = 16f;
         public const float Space24 = 24f;
+        public const float Space32 = 32f;
 
-        // ==================== 圆角等级（审查 2.2A：小 / 中 / 大） ====================
+        // ==================== 圆角等级（面板 12 / 按钮 10 / chip 8 / 进度条 3） ====================
 
-        /// <summary>圆角：小型输入 / 标签 / 分段项。</summary>
+        /// <summary>圆角：chip / 分段项 / 状态标签（8）。</summary>
         public const int RadiusSmall = 8;
 
-        /// <summary>圆角：中型按钮 / 卡片。</summary>
-        public const int RadiusMedium = 14;
+        /// <summary>圆角：按钮 / 输入类控件（10）。</summary>
+        public const int RadiusMedium = 10;
 
-        /// <summary>圆角：大型面板。</summary>
-        public const int RadiusLarge = 22;
+        /// <summary>圆角：面板 / 卡片 / 浮层（12）。</summary>
+        public const int RadiusLarge = 12;
 
-        // ==================== 控件高度（审查 2.2A） ====================
+        /// <summary>圆角：进度条轨道 / 填充（3，接近直角的细线感）。</summary>
+        public const int RadiusBar = 3;
 
-        /// <summary>主按钮高度（播放 / 暂停）。</summary>
+        // ==================== 控件高度（全部为 4 的倍数） ====================
+
+        /// <summary>主按钮高度（主菜单 / 空状态的首个行动按钮）。</summary>
         public const float HeightPrimary = 48f;
 
-        /// <summary>普通按钮高度。</summary>
+        /// <summary>普通按钮高度（底栏播放按钮 / 弹窗按钮）。</summary>
         public const float HeightButton = 40f;
 
-        /// <summary>输入类控件高度（分段选择器 / 滑块行）。</summary>
-        public const float HeightInput = 36f;
+        /// <summary>输入类控件高度（分段选择器 / chip 行）。</summary>
+        public const float HeightInput = 32f;
 
         /// <summary>小按钮 / 状态标签高度。</summary>
         public const float HeightSmall = 32f;
+
+        /// <summary>图标按钮边长（顶栏返回 / 帮助 / 重播）。</summary>
+        public const float SizeIconButton = 32f;
 
         // ==================== 动画 / 交互常量 ====================
 
@@ -226,26 +254,101 @@ namespace PianoTeacher3D.UI
             /// <summary>参考分辨率（与 CanvasScaler.referenceResolution 一致）。</summary>
             public static readonly Vector2 ReferenceResolution = new Vector2(1280f, 720f);
 
-            /// <summary>屏幕四周统一外边距。</summary>
-            public const float ScreenMargin = Space12;
+            /// <summary>屏幕四周统一外边距（16，所有栏体与屏幕边缘保持一致留白）。</summary>
+            public const float ScreenMargin = Space16;
 
-            /// <summary>顶栏高度。</summary>
-            public const float StatusBarHeight = 44f;
+            /// <summary>顶栏高度（单行 56）。</summary>
+            public const float StatusBarHeight = 56f;
 
-            /// <summary>主播放栏高度（常规）。</summary>
-            public const float MainBarHeightNormal = 92f;
+            /// <summary>顶栏左右内边距。</summary>
+            public const float TopBarPadding = Space16;
 
-            /// <summary>主播放栏高度（手部特写：尽量矮，避免遮挡琴键与双手）。</summary>
-            public const float MainBarHeightCompact = 60f;
+            /// <summary>底栏总高度：16 上内边距 + 44 进度行 + 16 行距 + 40 控制行 + 16 下内边距。</summary>
+            public const float MainBarHeightNormal = 132f;
 
-            /// <summary>练习工具栏高度（展开：标题行 + 两行控件）。</summary>
+            /// <summary>底栏紧凑高度（手部特写：隐藏进度行，仅保留 40 控制行 + 上下 16）。</summary>
+            public const float MainBarHeightCompact = 72f;
+
+            /// <summary>
+            /// 练习工具栏高度（兼容保留：新底栏已把练习工具并入控制行，不再单独成栏，
+            /// 但历史调用与验收公式仍引用该令牌）。
+            /// </summary>
             public const float ToolbarHeightExpanded = 124f;
 
-            /// <summary>练习工具栏高度（折叠：仅保留「练习设置」标题行，入口不丢失）。</summary>
+            /// <summary>练习工具栏高度（折叠，兼容保留）。</summary>
             public const float ToolbarHeightCollapsed = 36f;
 
-            /// <summary>练习工具栏标题行高度。</summary>
+            /// <summary>练习工具栏标题行高度（兼容保留）。</summary>
             public const float ToolbarHeaderHeight = 28f;
+
+            // ---- 底栏内部几何（1280×720 参考分辨率） ----
+
+            /// <summary>底栏内部上 / 下 / 左 / 右内边距。</summary>
+            public const float PlayerPadding = Space16;
+
+            /// <summary>底栏进度行高度（轨道 6 垂直居中，时间标签 12 号字左右对齐）。</summary>
+            public const float PlayerProgressRowHeight = 44f;
+
+            /// <summary>底栏控制行高度（主按钮 40，其余控件 32 垂直居中）。</summary>
+            public const float PlayerControlRowHeight = 40f;
+
+            /// <summary>进度行与控制行之间的行距。</summary>
+            public const float PlayerRowGap = Space16;
+
+            /// <summary>进度条轨道高度（圆角 3）。</summary>
+            public const float ProgressBarHeight = 6f;
+
+            /// <summary>进度条手柄直径。</summary>
+            public const float ProgressHandleSize = 12f;
+
+            /// <summary>时间标签宽度（44，右 / 左对齐夹住轨道）。</summary>
+            public const float TimeLabelWidth = 44f;
+
+            /// <summary>主按钮（播放 / 暂停）宽度。</summary>
+            public const float PrimaryActionWidth = 96f;
+
+            /// <summary>chip 高度（与分段控件同高，保证控制行成一条基线）。</summary>
+            public const float ChipHeight = 32f;
+
+            /// <summary>底栏控件组内间距。</summary>
+            public const float ChipGapInner = Space8;
+
+            /// <summary>底栏控件组间间距。</summary>
+            public const float ChipGapGroup = Space12;
+
+            // ---- 左上视角提示卡 ----
+
+            /// <summary>提示卡宽度（只占左上 220，不进入演奏区中心）。</summary>
+            public const float HintCardWidth = 220f;
+
+            /// <summary>提示卡高度（12 内边距 + 18 标题行 + 4 + 16 + 4 + 16 + 12）。</summary>
+            public const float HintCardHeight = 88f;
+
+            /// <summary>提示卡距顶栏的垂直间距。</summary>
+            public const float HintCardTopGap = Space12;
+
+            /// <summary>鼠标移出后淡到的透明度（不完全隐藏，避免新手找不到）。</summary>
+            public const float HintCardIdleAlpha = 0.45f;
+
+            /// <summary>鼠标移出多久后开始淡出（秒）。</summary>
+            public const float HintCardFadeDelay = 2.5f;
+
+            /// <summary>提示卡淡入淡出速度（alpha / 秒）。</summary>
+            public const float HintCardFadeSpeed = 4f;
+
+            // ---- 曲库页 ----
+
+            /// <summary>曲目卡片宽度。</summary>
+            public const float SongCardWidth = 240f;
+
+            /// <summary>曲目卡片高度。</summary>
+            public const float SongCardHeight = 96f;
+
+            /// <summary>曲目卡片间距（横纵一致）。</summary>
+            public const float SongCardGap = Space16;
+
+            /// <summary>曲库页最少列数。</summary>
+            public const int SongCardMinColumns = 3;
 
             /// <summary>提示条（toast）高度。</summary>
             public const float ToastHeight = 36f;
@@ -264,25 +367,25 @@ namespace PianoTeacher3D.UI
 
             public const float AvatarPanelHeight = 160f;
 
-            /// <summary>曲库浮层尺寸。</summary>
-            public const float LibraryPanelWidth = 560f;
+            /// <summary>曲库浮层尺寸（标题 40 + 操作行 40 + 6 行最近曲目）。</summary>
+            public const float LibraryPanelWidth = 640f;
 
-            public const float LibraryPanelHeight = 320f;
+            public const float LibraryPanelHeight = 480f;
 
             /// <summary>曲库 / 最近曲目行高与行距。</summary>
-            public const float LibraryRowHeight = 44f;
+            public const float LibraryRowHeight = 48f;
 
             public const float LibraryRowGap = 8f;
 
-            /// <summary>帮助浮层尺寸。</summary>
-            public const float HelpPanelWidth = 620f;
+            /// <summary>帮助浮层尺寸（26 行 × 16.2 行高 + 标题）。</summary>
+            public const float HelpPanelWidth = 640f;
 
-            public const float HelpPanelHeight = 384f;
+            public const float HelpPanelHeight = 480f;
 
             /// <summary>确认弹窗尺寸。</summary>
-            public const float ConfirmPanelWidth = 460f;
+            public const float ConfirmPanelWidth = 480f;
 
-            public const float ConfirmPanelHeight = 180f;
+            public const float ConfirmPanelHeight = 192f;
 
             /// <summary>提示条（toast）宽度。</summary>
             public const float ToastWidth = 600f;
@@ -290,13 +393,16 @@ namespace PianoTeacher3D.UI
             /// <summary>角色卡片宽度（三张卡片 + 8px 间距恰好铺满角色面板内容宽）。</summary>
             public const float AvatarCardWidth = 104f;
 
-            /// <summary>窄窗口阈值：参考分辨率宽度小于该值时自动折叠练习工具栏（不缩小按钮硬塞）。</summary>
+            /// <summary>
+            /// 窄窗口阈值：参考分辨率宽度小于该值时按优先级收起底栏的低频控件
+            /// （曲目分析 → 显示模式），不缩小主按钮、不折行。
+            /// </summary>
             public const float NarrowWidthThreshold = 1100f;
 
-            /// <summary>宽窗口阈值：≥ 该值时顶栏显示「保存状态」等次要状态位。</summary>
+            /// <summary>宽窗口阈值：≥ 该值时顶栏显示「偏好：本次会话生效」等次要状态位。</summary>
             public const float WideWidthThreshold = 1180f;
 
-            /// <summary>主播放栏内进度条行高（常规 / 手部特写紧凑）。</summary>
+            /// <summary>进度条行高（兼容保留：新底栏改用 <see cref="PlayerProgressRowHeight"/>）。</summary>
             public const float ProgressRowHeightNormal = 18f;
 
             public const float ProgressRowHeightCompact = 14f;
@@ -312,12 +418,12 @@ namespace PianoTeacher3D.UI
             /// <summary>提示最大宽度（超出自动换行）。</summary>
             public const float TooltipMaxWidth = 320f;
 
-            /// <summary>提示最小高度。</summary>
-            public const float TooltipMinHeight = 28f;
+            /// <summary>提示最小高度（12 号字 + 上下 8 内边距）。</summary>
+            public const float TooltipMinHeight = 32f;
 
-            public const float TooltipPadX = 10f;
+            public const float TooltipPadX = Space12;
 
-            public const float TooltipPadY = 5f;
+            public const float TooltipPadY = Space8;
 
             /// <summary>提示与被指向控件之间的垂直间距。</summary>
             public const float TooltipGap = 8f;
@@ -398,6 +504,50 @@ namespace PianoTeacher3D.UI
 
         /// <summary>圆形 sprite（程序化生成）。</summary>
         public static Sprite CreateCircleSprite(int size) => BuildCircleSprite(size);
+
+        private static Sprite _triangle;
+
+        /// <summary>
+        /// 三角形 sprite（程序化生成，默认朝上）：几何图标（播放 / 循环箭头）用，
+        /// 通过 RectTransform 的旋转复用同一张贴图，不引入任何外部素材。
+        /// </summary>
+        public static Sprite TriangleSprite
+        {
+            get
+            {
+                if (_triangle == null) _triangle = BuildTriangleSprite(32);
+                return _triangle;
+            }
+        }
+
+        private static Sprite BuildTriangleSprite(int size)
+        {
+            size = Mathf.Clamp(size, 8, 128);
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                name = "UITheme_Triangle"
+            };
+            var pixels = new Color32[size * size];
+            // 顶点在正上方 (0.5, 1)，底边在 y = 0.08 处，留 1px 抗锯齿边
+            float bottom = 0.08f * size;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float px = x + 0.5f;
+                    float py = y + 0.5f;
+                    float halfWidthAtY = (py - bottom) / (size - bottom) * (size * 0.5f);
+                    float dx = Mathf.Abs(px - size * 0.5f);
+                    float a = py < bottom ? 0f : Mathf.Clamp01(halfWidthAtY - dx + 0.5f);
+                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+        }
 
         /// <summary>
         /// 圆环 sprite（程序化生成）：用于拍点 / 选中指示等需要「非纯色」标识的位置。
@@ -929,6 +1079,14 @@ namespace PianoTeacher3D.UI
 
         /// <summary>给控件加（或去掉）高亮描边：选中 / 焦点 / 错误状态的颜色之外的第二重区分。</summary>
         public static void SetOutline(Graphic graphic, bool on, Color color)
+            => SetOutline(graphic, on, color, 1f);
+
+        /// <summary>
+        /// 带像素宽度的描边（1 = 面板内分区描边，2 = 键盘焦点环）。
+        /// <para>Unity 的 <see cref="Outline"/> 会按 effectDistance 在四个方向复制蒙版，
+        /// 因此 (px, px) 得到的是等宽环，而不是阴影。</para>
+        /// </summary>
+        public static void SetOutline(Graphic graphic, bool on, Color color, float px)
         {
             if (graphic == null) return;
             var outline = graphic.GetComponent<Outline>();
@@ -939,10 +1097,91 @@ namespace PianoTeacher3D.UI
             }
             if (outline == null) outline = graphic.gameObject.AddComponent<Outline>();
             outline.effectColor = color;
-            outline.effectDistance = new Vector2(2f, -2f);
+            outline.effectDistance = new Vector2(Mathf.Max(1f, px), Mathf.Max(1f, px));
             outline.useGraphicAlpha = false;
             outline.enabled = true;
         }
+
+        /// <summary>键盘焦点环（2px <see cref="BorderSelected"/>）：焦点必须可见。</summary>
+        public static void SetFocusRing(Graphic graphic, bool on)
+            => SetOutline(graphic, on, BorderSelected, 2f);
+
+        // ==================== chip / 分段项绘制（不用 ButtonStyle 枚举，避免出现新的视觉层级） ====================
+
+        /// <summary>
+        /// 把按钮切换成「扁平」模式：关闭 <see cref="Selectable"/> 的 ColorTint 乘算，
+        /// 颜色完全由 <see cref="PaintChip"/> / <see cref="PaintSegment"/> 与
+        /// <c>UIHoverFeedback</c> 直接控制（透明底也能有悬停态）。
+        /// </summary>
+        public static void ApplyFlatLook(Button btn)
+        {
+            if (btn == null) return;
+            btn.transition = Selectable.Transition.None;
+            var colors = btn.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = Color.white;
+            colors.pressedColor = Color.white;
+            colors.selectedColor = Color.white;
+            colors.disabledColor = Color.white;
+            colors.colorMultiplier = 1f;
+            colors.fadeDuration = ButtonFadeSeconds;
+            btn.colors = colors;
+        }
+
+        /// <summary>chip 底色：开启 <see cref="Selected"/>，关闭透明；禁用 <see cref="Disabled"/>。</summary>
+        public static Color ChipBackground(bool active, bool enabled)
+            => !enabled ? Disabled : (active ? Selected : Transparent);
+
+        /// <summary>
+        /// 绘制 chip（带状态后缀的只读/可点小控件）：常态透明 + 1px <see cref="Divider"/> 边，
+        /// 开启态 <see cref="Selected"/> 底 + 1px <see cref="BorderSelected"/> 边 + 粗体，
+        /// 禁用态 <see cref="Disabled"/> 底 + <see cref="TextDisabled"/> 文字，并置 <c>interactable = false</c>。
+        /// </summary>
+        public static void PaintChip(Button btn, bool active, bool enabled, int radius = RadiusSmall)
+        {
+            if (btn == null) return;
+            ApplyFlatLook(btn);
+            if (btn.targetGraphic is Image img)
+            {
+                var sprite = GetRoundedSprite(radius);
+                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+                img.color = ChipBackground(active, enabled);
+                SetOutline(img, true, active && enabled ? BorderSelected : Divider, 1f);
+            }
+            var label = GetLabel(btn);
+            if (label != null)
+            {
+                label.color = !enabled ? TextDisabled : (active ? TextPrimary : TextSecondary);
+                label.fontStyle = active && enabled ? FontStyle.Bold : FontStyle.Normal;
+            }
+            btn.interactable = enabled;
+        }
+
+        /// <summary>
+        /// 绘制分段项：未选中透明（悬停出 <see cref="ControlHover"/>），
+        /// 选中 <see cref="Selected"/> 底 + 1px <see cref="BorderSelected"/> 边 + 粗体，
+        /// 因此「当前值」同时靠底色、描边、字重三重表达，不只靠颜色。
+        /// </summary>
+        public static void PaintSegment(Button btn, bool selected, bool enabled, int radius = RadiusSmall)
+        {
+            if (btn == null) return;
+            ApplyFlatLook(btn);
+            if (btn.targetGraphic is Image img)
+            {
+                var sprite = GetRoundedSprite(radius);
+                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+                img.color = !enabled ? Disabled : (selected ? Selected : Transparent);
+                SetOutline(img, selected, BorderSelected, 1f);
+            }
+            var label = GetLabel(btn);
+            if (label != null)
+            {
+                label.color = !enabled ? TextDisabled : (selected ? TextPrimary : TextSecondary);
+                label.fontStyle = selected && enabled ? FontStyle.Bold : FontStyle.Normal;
+            }
+            btn.interactable = enabled;
+        }
+
 
         private static void SetOutline(Button btn, bool on, Color color)
         {
@@ -950,7 +1189,11 @@ namespace PianoTeacher3D.UI
             SetOutline(btn.targetGraphic, on, color);
         }
 
-        /// <summary>创建进度条（圆角轨道 + 强调色填充 + 圆形手柄 + 可拖动）。</summary>
+        /// <summary>
+        /// 创建进度条（6px 细轨道 + 强调色填充 + 12px 圆形手柄 + 2px 描边 + 可拖动）。
+        /// <para>圆角 3（<see cref="RadiusBar"/>），手柄用 <see cref="ProgressHandleSize"/> 的圆点，
+        /// 外加一圈 2px 的 <see cref="PanelBg"/> 描边把圆点从填充色里「抬」出来，不再与轨道脱节。</para>
+        /// </summary>
         public static Slider CreateSlider(Transform parent, string name, Vector2 pos, Vector2 size)
         {
             var go = new GameObject(name);
@@ -959,48 +1202,101 @@ namespace PianoTeacher3D.UI
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
 
-            // 轨道
+            // 透明的整行点击区（6px 轨道太细，拖动 / 点击都需要更宽的命中范围）
+            var hit = new GameObject("HitArea");
+            hit.transform.SetParent(go.transform, false);
+            var hitRt = hit.AddComponent<RectTransform>();
+            hitRt.anchorMin = new Vector2(0f, 0.5f);
+            hitRt.anchorMax = new Vector2(1f, 0.5f);
+            hitRt.pivot = new Vector2(0.5f, 0.5f);
+            hitRt.anchoredPosition = Vector2.zero;
+            hitRt.sizeDelta = new Vector2(0f, Layout.ProgressHandleSize + 8f);
+            var hitImg = hit.AddComponent<Image>();
+            hitImg.color = new Color(0f, 0f, 0f, 0f);
+            hitImg.raycastTarget = true;
+
+            // 轨道：纵向居中、高 6
             var bg = new GameObject("Background");
             bg.transform.SetParent(go.transform, false);
             var bgRt = bg.AddComponent<RectTransform>();
-            bgRt.anchorMin = Vector2.zero; bgRt.anchorMax = Vector2.one;
-            bgRt.offsetMin = Vector2.zero; bgRt.offsetMax = Vector2.zero;
+            bgRt.anchorMin = new Vector2(0f, 0.5f);
+            bgRt.anchorMax = new Vector2(1f, 0.5f);
+            bgRt.pivot = new Vector2(0.5f, 0.5f);
+            bgRt.anchoredPosition = Vector2.zero;
+            bgRt.sizeDelta = new Vector2(0f, Layout.ProgressBarHeight);
             var bgImg = bg.AddComponent<Image>();
             bgImg.color = TrackBg;
-            bgImg.sprite = GetRoundedSprite(RadiusSmall);
+            bgImg.sprite = GetRoundedSprite(RadiusBar);
             bgImg.type = Image.Type.Sliced;
+            bgImg.raycastTarget = true; // 轨道本身可点击跳转
 
-            // 填充区
+            // 填充区：高度固定 6（Slider 会把 fill 的 y 轴 anchor 撑成 0..1）
             var fillArea = new GameObject("Fill Area");
             fillArea.transform.SetParent(go.transform, false);
             var faRt = fillArea.AddComponent<RectTransform>();
-            faRt.anchorMin = Vector2.zero; faRt.anchorMax = Vector2.one;
-            faRt.offsetMin = new Vector2(Space4, Space4); faRt.offsetMax = new Vector2(-Space4, -Space4);
+            faRt.anchorMin = new Vector2(0f, 0.5f);
+            faRt.anchorMax = new Vector2(1f, 0.5f);
+            faRt.pivot = new Vector2(0.5f, 0.5f);
+            faRt.anchoredPosition = Vector2.zero;
+            faRt.sizeDelta = new Vector2(0f, Layout.ProgressBarHeight);
 
             var fill = new GameObject("Fill");
             fill.transform.SetParent(fillArea.transform, false);
             var fillRt = fill.AddComponent<RectTransform>();
-            fillRt.anchorMin = Vector2.zero; fillRt.anchorMax = Vector2.one;
-            fillRt.sizeDelta = new Vector2(10f, 0f);
+            fillRt.anchorMin = Vector2.zero;
+            fillRt.anchorMax = Vector2.one;
+            fillRt.sizeDelta = new Vector2(0f, 0f);
             var fillImg = fill.AddComponent<Image>();
             fillImg.color = Accent;
-            fillImg.sprite = GetRoundedSprite(RadiusSmall);
+            fillImg.sprite = GetRoundedSprite(RadiusBar);
             fillImg.type = Image.Type.Sliced;
+            fillImg.raycastTarget = false;
 
-            // 手柄
+            // 手柄滑动区：高度 = 手柄直径，纵向居中（Slider 会把 handle 的 y 轴 anchor 改成 0..1，
+            // 所以只能靠容器高度控制圆点尺寸，否则会拉成竖椭圆）
+            float handleSize = Layout.ProgressHandleSize + 4f;
             var handleArea = new GameObject("Handle Slide Area");
             handleArea.transform.SetParent(go.transform, false);
             var haRt = handleArea.AddComponent<RectTransform>();
-            haRt.anchorMin = Vector2.zero; haRt.anchorMax = Vector2.one;
-            haRt.offsetMin = new Vector2(6f, 0f); haRt.offsetMax = new Vector2(-6f, 0f);
+            haRt.anchorMin = new Vector2(0f, 0.5f);
+            haRt.anchorMax = new Vector2(1f, 0.5f);
+            haRt.pivot = new Vector2(0.5f, 0.5f);
+            haRt.anchoredPosition = Vector2.zero;
+            haRt.sizeDelta = new Vector2(-handleSize, handleSize);
 
             var handle = new GameObject("Handle");
             handle.transform.SetParent(handleArea.transform, false);
             var hRt = handle.AddComponent<RectTransform>();
-            hRt.sizeDelta = new Vector2(14f, 14f);
-            var hImg = handle.AddComponent<Image>();
-            hImg.color = AccentBright;
+            hRt.anchorMin = new Vector2(0f, 0f);
+            hRt.anchorMax = new Vector2(0f, 1f);
+            hRt.pivot = new Vector2(0.5f, 0.5f);
+            hRt.anchoredPosition = Vector2.zero;
+            hRt.sizeDelta = new Vector2(handleSize, 0f);
+
+            // 描边环：把圆点与轨道分开（2px，纯装饰）
+            var ring = new GameObject("HandleRing");
+            ring.transform.SetParent(handle.transform, false);
+            var ringRt = ring.AddComponent<RectTransform>();
+            ringRt.anchorMin = Vector2.zero;
+            ringRt.anchorMax = Vector2.one;
+            ringRt.sizeDelta = Vector2.zero;
+            var ringImg = ring.AddComponent<Image>();
+            ringImg.sprite = CreateRingSprite(16, 2f);
+            ringImg.color = PanelBg;
+            ringImg.raycastTarget = false;
+
+            var dot = new GameObject("HandleDot");
+            dot.transform.SetParent(handle.transform, false);
+            var dotRt = dot.AddComponent<RectTransform>();
+            dotRt.anchorMin = new Vector2(0.5f, 0.5f);
+            dotRt.anchorMax = new Vector2(0.5f, 0.5f);
+            dotRt.pivot = new Vector2(0.5f, 0.5f);
+            dotRt.anchoredPosition = Vector2.zero;
+            dotRt.sizeDelta = new Vector2(Layout.ProgressHandleSize, Layout.ProgressHandleSize);
+            var hImg = dot.AddComponent<Image>();
             hImg.sprite = KnobSprite;
+            hImg.color = AccentBright;
+            hImg.raycastTarget = true;
 
             var slider = go.AddComponent<Slider>();
             slider.fillRect = fillRt;
@@ -1024,8 +1320,8 @@ namespace PianoTeacher3D.UI
             var go = new GameObject("TrackMarker");
             go.transform.SetParent(host, false);
             var rt = go.AddComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0f, 0.05f);
-            rt.anchorMax = new Vector2(0f, 0.95f);
+            rt.anchorMin = new Vector2(0f, 0.32f);
+            rt.anchorMax = new Vector2(0f, 0.68f);
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.sizeDelta = new Vector2(width, 0f);
             var img = go.AddComponent<Image>();
@@ -1050,7 +1346,7 @@ namespace PianoTeacher3D.UI
         // ==================== 样式 → 颜色映射 ====================
 
         private static int RadiusFor(ButtonStyle style)
-            => style == ButtonStyle.Ghost ? RadiusSmall : RadiusMedium;
+            => RadiusMedium; // 按钮统一圆角 10（chip / 分段项另由 PaintChip / PaintSegment 指定 8）
 
         /// <summary>样式基调色（Default 状态）。</summary>
         public static Color BaseColor(ButtonStyle style) => style switch

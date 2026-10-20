@@ -1100,7 +1100,7 @@ namespace PianoTeacher3D.Avatar
             int? best = null;
             foreach (var pitch in _pressed)
             {
-                bool isLeft = pitch < MIDI.PianoNoteFilter.SplitPitch;
+                bool isLeft = MIDI.PianoNoteFilter.IsLeftHand(pitch);
                 if (isLeft != leftHand) continue;
                 if (!best.HasValue) { best = pitch; continue; }
                 if (leftHand && pitch < best.Value) best = pitch;    // 左手取最低音

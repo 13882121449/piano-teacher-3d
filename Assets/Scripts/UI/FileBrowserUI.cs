@@ -26,10 +26,10 @@ namespace PianoTeacher3D.UI
         private const int MaxEntriesPerDirectory = 300;
 
         /// <summary>每页显示的行数（无滚动条，用分页替代，避免额外的 UGUI 组件依赖）。</summary>
-        private const int RowsPerPage = 11;
+        private const int RowsPerPage = 9;
 
-        private const float RowHeight = 30f;
-        private const float RowStep = 32f;
+        private const float RowHeight = 32f;
+        private const float RowStep = 36f;
 
         /// <summary>双击判定窗口（秒）。</summary>
         private const float DoubleClickSeconds = 0.4f;
@@ -156,18 +156,18 @@ namespace PianoTeacher3D.UI
                 UITheme.PanelBg, UITheme.RadiusLarge);
             UITheme.PlaceCenter(panel, 780f, 620f);
 
-            var title = UITheme.CreateText(panel, "选择 MIDI 文件", Vector2.zero, new Vector2(520f, 30f),
+            var title = UITheme.CreateText(panel, "选择 MIDI 文件", Vector2.zero, new Vector2(520f, 28f),
                 UITheme.FontTitle, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(title.rectTransform, 24f, 16f, 520f, 30f);
+            UITheme.PlaceTopLeft(title.rectTransform, 24f, 16f, 520f, 28f);
 
             var hint = UITheme.CreateText(panel,
                 "单击选中，双击或点「选择」确认；点文件夹可进入下一级。",
-                Vector2.zero, new Vector2(700f, 20f), UITheme.FontSmall, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-            UITheme.PlaceTopLeft(hint.rectTransform, 24f, 48f, 700f, 20f);
+                Vector2.zero, new Vector2(700f, 16f), UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft);
+            UITheme.PlaceTopLeft(hint.rectTransform, 24f, 46f, 700f, 16f);
 
-            _pathText = UITheme.CreateText(panel, "", Vector2.zero, new Vector2(732f, 24f),
-                UITheme.FontSmall, UITheme.Accent, TextAnchor.MiddleLeft);
-            UITheme.PlaceTopLeft(_pathText.rectTransform, 24f, 72f, 732f, 24f);
+            _pathText = UITheme.CreateText(panel, "", Vector2.zero, new Vector2(732f, 20f),
+                UITheme.FontBodySmall, UITheme.Accent, TextAnchor.MiddleLeft);
+            UITheme.PlaceTopLeft(_pathText.rectTransform, 24f, 68f, 732f, 20f);
 
             _listHost = UITheme.CreatePanel(panel, "List", Vector2.zero, new Vector2(732f, 352f),
                 UITheme.Transparent);
@@ -175,44 +175,44 @@ namespace PianoTeacher3D.UI
             var listImage = _listHost.GetComponent<Image>();
             if (listImage != null) listImage.raycastTarget = false; // 列表本身不拦射线，交给行按钮
 
-            _messageText = UITheme.CreateText(panel, "", Vector2.zero, new Vector2(520f, 20f),
-                UITheme.FontSmall, UITheme.TextWarning, TextAnchor.MiddleLeft);
-            UITheme.PlaceTopLeft(_messageText.rectTransform, 24f, 458f, 520f, 20f);
+            _messageText = UITheme.CreateText(panel, "", Vector2.zero, new Vector2(560f, 20f),
+                UITheme.FontBodySmall, UITheme.TextWarning, TextAnchor.MiddleLeft);
+            UITheme.PlaceTopLeft(_messageText.rectTransform, 24f, 458f, 560f, 20f);
 
-            _selectionText = UITheme.CreateText(panel, "尚未选择文件", Vector2.zero, new Vector2(560f, 22f),
-                UITheme.FontSmall, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-            UITheme.PlaceTopLeft(_selectionText.rectTransform, 24f, 482f, 560f, 22f);
+            _selectionText = UITheme.CreateText(panel, "尚未选择文件", Vector2.zero, new Vector2(560f, 20f),
+                UITheme.FontBody, UITheme.TextSecondary, TextAnchor.MiddleLeft);
+            UITheme.PlaceTopLeft(_selectionText.rectTransform, 24f, 480f, 560f, 20f);
 
             // 行 A：驱动器 / 上一级 / 分页
-            var drivesBtn = UITheme.CreateButton(panel, "驱动器", Vector2.zero, new Vector2(104f, 30f),
-                GoToDrives, UITheme.FontSmall, ButtonStyle.Ghost, "回到驱动器列表");
-            UITheme.Place(drivesBtn.GetComponent<RectTransform>(), 24f, 70f, 104f, 30f);
+            var drivesBtn = UITheme.CreateButton(panel, "驱动器", Vector2.zero, new Vector2(104f, 32f),
+                GoToDrives, UITheme.FontBodySmall, ButtonStyle.Ghost, "回到驱动器列表");
+            UITheme.Place(drivesBtn.GetComponent<RectTransform>(), 24f, 70f, 104f, 32f);
 
-            var upBtn = UITheme.CreateButton(panel, "上一级", Vector2.zero, new Vector2(104f, 30f),
-                GoUp, UITheme.FontSmall, ButtonStyle.Ghost, "返回上一级文件夹");
-            UITheme.Place(upBtn.GetComponent<RectTransform>(), 136f, 70f, 104f, 30f);
+            var upBtn = UITheme.CreateButton(panel, "上一级", Vector2.zero, new Vector2(104f, 32f),
+                GoUp, UITheme.FontBodySmall, ButtonStyle.Ghost, "返回上一级文件夹");
+            UITheme.Place(upBtn.GetComponent<RectTransform>(), 136f, 70f, 104f, 32f);
 
-            _prevPageBtn = UITheme.CreateButton(panel, "上一页", Vector2.zero, new Vector2(100f, 30f),
-                () => ChangePage(-1), UITheme.FontSmall, ButtonStyle.Ghost, "查看上一页");
-            UITheme.Place(_prevPageBtn.GetComponent<RectTransform>(), 260f, 70f, 100f, 30f);
+            _prevPageBtn = UITheme.CreateButton(panel, "上一页", Vector2.zero, new Vector2(100f, 32f),
+                () => ChangePage(-1), UITheme.FontBodySmall, ButtonStyle.Ghost, "查看上一页");
+            UITheme.Place(_prevPageBtn.GetComponent<RectTransform>(), 260f, 70f, 100f, 32f);
 
-            _nextPageBtn = UITheme.CreateButton(panel, "下一页", Vector2.zero, new Vector2(100f, 30f),
-                () => ChangePage(1), UITheme.FontSmall, ButtonStyle.Ghost, "查看下一页");
-            UITheme.Place(_nextPageBtn.GetComponent<RectTransform>(), 368f, 70f, 100f, 30f);
+            _nextPageBtn = UITheme.CreateButton(panel, "下一页", Vector2.zero, new Vector2(100f, 32f),
+                () => ChangePage(1), UITheme.FontBodySmall, ButtonStyle.Ghost, "查看下一页");
+            UITheme.Place(_nextPageBtn.GetComponent<RectTransform>(), 368f, 70f, 100f, 32f);
 
             // 行 B：筛选开关 / 取消 / 选择
-            _showAllBtn = UITheme.CreateButton(panel, "显示全部文件：关", Vector2.zero, new Vector2(190f, 36f),
-                ToggleShowAllFiles, UITheme.FontSmall, ButtonStyle.Ghost,
+            _showAllBtn = UITheme.CreateButton(panel, "显示全部文件：关", Vector2.zero, new Vector2(190f, 40f),
+                ToggleShowAllFiles, UITheme.FontBodySmall, ButtonStyle.Ghost,
                 "默认只显示 .mid / .midi；打开后显示该文件夹的所有文件");
-            UITheme.Place(_showAllBtn.GetComponent<RectTransform>(), 24f, 18f, 190f, 36f);
+            UITheme.Place(_showAllBtn.GetComponent<RectTransform>(), 24f, 18f, 190f, 40f);
 
-            var cancelBtn = UITheme.CreateButton(panel, "取消", Vector2.zero, new Vector2(140f, 36f),
-                () => Finish(null), UITheme.FontButton, ButtonStyle.Secondary, "关闭并返回，不导入文件");
-            UITheme.PlaceRight(cancelBtn.GetComponent<RectTransform>(), 186f, 18f, 140f, 36f);
+            var cancelBtn = UITheme.CreateButton(panel, "取消", Vector2.zero, new Vector2(140f, 40f),
+                () => Finish(null), UITheme.FontSubtitle, ButtonStyle.Secondary, "关闭并返回，不导入文件");
+            UITheme.PlaceRight(cancelBtn.GetComponent<RectTransform>(), 186f, 18f, 140f, 40f);
 
-            var pickBtn = UITheme.CreateButton(panel, "选择", Vector2.zero, new Vector2(150f, 36f),
-                Confirm, UITheme.FontButton, ButtonStyle.Primary, "使用已选中的 MIDI 文件");
-            UITheme.PlaceRight(pickBtn.GetComponent<RectTransform>(), 24f, 18f, 150f, 36f);
+            var pickBtn = UIKit.PrimaryButton(panel, "选择", new Vector2(150f, 40f),
+                Confirm, "使用已选中的 MIDI 文件");
+            UITheme.PlaceRight(pickBtn.GetComponent<RectTransform>(), 24f, 18f, 150f, 40f);
         }
 
         // ==================== 导航与列举 ====================
@@ -383,7 +383,7 @@ namespace PianoTeacher3D.UI
                     : entry.Name + "    " + FormatSize(entry.Size);
 
                 var button = UITheme.CreateButton(_listHost, label, Vector2.zero, new Vector2(732f, RowHeight),
-                    () => OnRowClicked(index), UITheme.FontSmall,
+                    () => OnRowClicked(index), UITheme.FontBodySmall,
                     entry.IsDirectory ? ButtonStyle.Ghost : ButtonStyle.Secondary,
                     entry.IsDirectory ? "进入文件夹" : "选择这个 MIDI 文件");
 

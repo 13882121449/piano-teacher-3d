@@ -8,16 +8,14 @@ namespace PianoTeacher3D.UI
     /// <summary>
     /// 分段选择器（对应方案 3.4 / 审查 2.1「用分段选择器直接显示当前选中项，不要靠循环点击猜当前值」）。
     /// <para>
-    /// 用于：练习手「双手 | 左手 | 右手」、速度「0.5× | 1.0× | 1.5×」、高亮「关闭 | 预提示 | 发声 | 全部」。
-    /// 选中态同时使用强调底 + 描边 + 「▍」标记 + 粗体，不依赖颜色单一维度（方案 3.3 / 审查 2.3）。
+    /// 用于：练习手「双手 | 左手 | 右手」、视角「特写 | 全景 | 自由」等互斥选项。
+    /// 视觉：透明轨道（仅 1px 分组描边）+ 选中项 <see cref="UITheme.Selected"/> 底 +
+    /// 1px <see cref="UITheme.BorderSelected"/> 边 + 粗体 —— 底色 / 描边 / 字重三重表达，不依赖颜色单一维度。
     /// </para>
     /// <para>纯表现层：只通过 <see cref="OnChanged"/> 通知调用方，自身不读写会话状态。</para>
     /// </summary>
     public class UISegmentedControl : MonoBehaviour
     {
-        /// <summary>选中项标记符（颜色之外的区分维度）。</summary>
-        private const string SelectedMarker = "▍";
-
         private readonly List<Button> _segments = new List<Button>();
         private readonly List<Text> _labels = new List<Text>();
         private readonly List<string> _optionLabels = new List<string>();
@@ -78,11 +76,13 @@ namespace PianoTeacher3D.UI
 
         private void BuildTrack()
         {
+            // 轨道本身透明：靠 1px 分组描边标识「这是一组互斥选项」，不额外叠一层底色（避免第 4 级色）
             var img = gameObject.AddComponent<Image>();
-            img.color = UITheme.Control;
+            img.color = UITheme.Transparent;
             var sprite = UITheme.GetRoundedSprite(UITheme.RadiusSmall);
             if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
-            UITheme.SetOutline(img, true, UITheme.Divider); // 常驻细边框：分组身份可辨
+            img.raycastTarget = false;
+            UITheme.SetOutline(img, true, UITheme.Divider, 1f);
         }
 
         /// <summary>重建选项（文字可随语言 / 语义变化）。</summary>
@@ -111,13 +111,18 @@ namespace PianoTeacher3D.UI
 
                 int index = i;
                 var btn = UITheme.CreateButton(_rt, text, Vector2.zero, Vector2.zero,
-                    () => Select(index, true), _fontSize, ButtonStyle.Secondary);
-                // 分段项等分容器宽度：窄窗口下不会挤压主按钮
+                    () => Select(index, true), _fontSize, ButtonStyle.Ghost);
+                // 分段项等分容器宽度：窄窗口下不会挤压其它控件
                 UITheme.StretchFraction(btn.GetComponent<RectTransform>(), i / (float)options.Length,
-                    (i + 1) / (float)options.Length, 2f);
+                    (i + 1) / (float)options.Length, 1f);
 
                 var label = UITheme.GetLabel(btn);
-                if (label != null) label.alignment = TextAnchor.MiddleCenter;
+                if (label != null)
+                {
+                    label.alignment = TextAnchor.MiddleCenter;
+                    UITheme.StretchAll(label.rectTransform, 2f, 2f, 0f, 0f);
+                }
+                UIHoverFeedback.Attach(btn, UITheme.Transparent, UITheme.ControlHover);
                 _segments.Add(btn);
                 _labels.Add(label);
             }
@@ -187,18 +192,22 @@ namespace PianoTeacher3D.UI
             for (int i = 0; i < _segments.Count; i++)
             {
                 bool selected = i == _selected;
-                ButtonState state;
-                if (!_interactable || !_optionEnabled[i]) state = ButtonState.Disabled;
-                else state = selected ? ButtonState.Selected : ButtonState.Default;
+                bool enabled = _interactable && _optionEnabled[i];
 
                 var btn = _segments[i];
-                UITheme.ApplyButtonState(btn, state, ButtonStyle.Secondary);
+                UITheme.PaintSegment(btn, selected, enabled);
 
                 var label = _labels[i];
-                if (label != null)
+                if (label != null) label.text = _optionLabels[i];
+
+                var feedback = btn != null ? btn.GetComponent<UIHoverFeedback>() : null;
+                if (feedback != null)
                 {
-                    label.text = selected ? SelectedMarker + _optionLabels[i] : _optionLabels[i];
-                    label.fontStyle = selected ? FontStyle.Bold : FontStyle.Normal;
+                    feedback.SetInteractable(enabled);
+                    feedback.SetOutlineState(selected, UITheme.BorderSelected);
+                    // 选中项悬停保持金色底（避免一悬停就失去「当前值」的视觉）
+                    feedback.SetColors(UITheme.Transparent,
+                        !enabled ? UITheme.Transparent : (selected ? UITheme.Selected : UITheme.ControlHover));
                 }
             }
         }

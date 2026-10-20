@@ -6,16 +6,15 @@ using UnityEngine.UI;
 namespace PianoTeacher3D.UI
 {
     /// <summary>
-    /// 顶部状态栏 + 错误 / 加载 / 提示反馈 + 浮层容器（对应方案 3.1 顶栏、
-    /// 方案 8.3「错误提示结构 = 发生了什么 + 为什么可能发生 + 下一步做什么」、
-    /// 审查 2.2C「错误提示应提供恢复动作」）。
+    /// 顶部状态栏 + 错误 / 加载 / 提示反馈 + 浮层容器。
     /// <para>
-    /// 顶栏结构：返回曲库 ｜ 曲库 ｜ 曲名 · 状态 ｜ 保存状态 · 帮助 ｜ 当前人物。
-    /// 反馈按「顶部堆叠」排列：错误横幅（含恢复按钮）→ 加载条（含取消）→ 轻量提示。
+    /// 顶栏是**单行**结构（高 56、左右内边距 16、垂直居中）：
+    /// 返回 32×32 ｜ 分隔线 1×20 ｜ 曲名（点开曲库） …… 状态 chip ｜ 帮助 32×32 ｜ 角色 chip。
+    /// 所有控件同高（32）、同内边距、间距统一 8，不再出现「高度各不相同、有的贴边有的留白」的浮块。
     /// </para>
     /// <para>
-    /// 破坏性操作（返回曲库 / 返回主菜单）一律经过 <see cref="ShowConfirm"/> 二次确认
-    /// （方案 3.4「提供适量确认」）。
+    /// 反馈按「顶部堆叠」排列：错误横幅（含恢复按钮）→ 加载条（含取消）→ 轻量提示。
+    /// 破坏性操作（返回曲库 / 返回主菜单）一律经过 <see cref="ShowConfirm"/> 二次确认。
     /// </para>
     /// </summary>
     public class UIStatusBar : MonoBehaviour
@@ -28,13 +27,18 @@ namespace PianoTeacher3D.UI
         // ---- 顶栏 ----
         private RectTransform _bar;
         private RectTransform _midArea;
-        private Text _songText;
+        private Button _songBtn;
         private RectTransform _stateChip;
+        private Image _stateDot;
         private Text _stateChipText;
-        private Button _libraryBtn;
         private Button _helpBtn;
         private Button _avatarBtn;
+        private Text _avatarInitial;
+        private Text _avatarName;
         private Text _saveHint;
+        private float _songLeft;
+        private float _topRowY;
+        private float _rightClusterInset;
 
         // ---- 顶部堆叠 ----
         private RectTransform _errorBanner;
@@ -67,6 +71,15 @@ namespace PianoTeacher3D.UI
 
         private float _animTime;
 
+        // ---- 顶栏几何（全部为 4 的倍数）----
+        private const float BackSize = UITheme.SizeIconButton;       // 32
+        private const float BarInnerGap = UITheme.Space8;            // 8
+        private const float DividerWidth = 1f;
+        private const float DividerHeight = 20f;
+        private const float SongMaxWidth = 320f;
+        private const float AvatarChipWidth = 132f;
+        private const float StateChipWidth = 120f;
+
         /// <summary>帮助浮层是否可见。</summary>
         public bool IsHelpOpen => _helpPanel != null && _helpPanel.gameObject.activeSelf;
 
@@ -81,7 +94,7 @@ namespace PianoTeacher3D.UI
 
         /// <summary>
         /// 初始化顶栏。<paramref name="onBackToLibrary"/> = 确认后的返回动作；
-        /// <paramref name="onAvatarToggle"/> = 点击「当前人物」时切换角色面板。
+        /// <paramref name="onAvatarToggle"/> = 点击「角色 chip」时切换角色面板。
         /// </summary>
         public void Initialize(Core.LessonSessionController session, Action onBackToLibrary, Action onAvatarToggle)
         {
@@ -104,14 +117,16 @@ namespace PianoTeacher3D.UI
 
         // ==================== 对外状态接口 ====================
 
-        /// <summary>刷新曲名 / 会话状态 / 播放状态（三者一起决定顶栏文案）。</summary>
+        /// <summary>刷新曲名 / 会话状态 / 播放状态（三者一起决定顶栏文案与状态圆点颜色）。</summary>
         public void SetSong(string songName, bool hasSong, Core.LessonState state, Core.PlaybackState playback)
         {
-            if (_songText != null)
+            if (_songBtn != null)
             {
                 string name = string.IsNullOrEmpty(songName) ? (hasSong ? "未命名曲目" : "未加载曲目") : songName;
-                _songText.text = "♪ " + UITheme.Truncate(name, UITheme.Layout.TopBarSongNameMaxChars);
-                _songText.color = hasSong ? UITheme.TextPrimary : UITheme.TextSecondary;
+                UITheme.SetButtonLabel(_songBtn,
+                    "♪ " + UITheme.Truncate(name, UITheme.Layout.TopBarSongNameMaxChars) + "  ▾");
+                var label = UITheme.GetLabel(_songBtn);
+                if (label != null) label.color = hasSong ? UITheme.TextPrimary : UITheme.TextSecondary;
             }
 
             if (_stateChipText != null)
@@ -129,6 +144,15 @@ namespace PianoTeacher3D.UI
                     : (state == Core.LessonState.NoSong ? UITheme.TextSecondary : UITheme.TextPrimary);
             }
 
+            if (_stateDot != null)
+            {
+                _stateDot.color = state == Core.LessonState.Error ? UITheme.Error
+                    : (state == Core.LessonState.Loading ? UITheme.Accent
+                        : playback == Core.PlaybackState.Playing ? UITheme.Success
+                        : playback == Core.PlaybackState.Paused ? UITheme.Warning
+                        : UITheme.TextDisabled);
+            }
+
             if (_stateChip != null)
             {
                 var chipBg = _stateChip.GetComponent<Image>();
@@ -141,14 +165,19 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        /// <summary>刷新顶栏「当前人物」。</summary>
+        /// <summary>刷新顶栏「角色 chip」：16×16 头像位（首字）+ 名称。</summary>
         public void SetAvatarName(string avatarName)
         {
-            if (_avatarBtn == null) return;
-            UITheme.SetButtonLabel(_avatarBtn, $"人物：{UITheme.Truncate(avatarName, 6)}");
+            if (_avatarName == null) return;
+            string name = string.IsNullOrEmpty(avatarName) ? "—" : avatarName;
+            _avatarName.text = UITheme.Truncate(name, 5);
+            if (_avatarInitial != null)
+                _avatarInitial.text = string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1);
+            if (_avatarBtn != null)
+                UITheme.SetButtonTooltip(_avatarBtn, $"角色 / 外观：当前 {name}（切换不会改变播放进度）");
         }
 
-        /// <summary>刷新顶栏「保存状态」位置（本项目偏好仅在本次会话内生效，据实显示，不谎称已持久化）。</summary>
+        /// <summary>刷新「偏好：本次会话生效」提示（据实显示，不谎称已持久化）。</summary>
         public void SetSaveHint(string text)
         {
             if (_saveHint == null) return;
@@ -156,25 +185,27 @@ namespace PianoTeacher3D.UI
         }
 
         /// <summary>
-        /// 顶栏自适应（方案 3.4 末条 / 15 章窗口缩放）：
-        /// 窄窗口或窄参考宽度下隐藏「保存状态」这类次要信息，把宽度让给曲名与状态标签，
-        /// 而不是压缩按钮尺寸。
+        /// 顶栏自适应：窄窗口隐藏「偏好」这类次要信息，把宽度让给曲名；
+        /// 按钮尺寸不缩放（可点区域永远 ≥ 32）。
         /// </summary>
         public void ApplyResponsiveLayout(float referenceWidth)
         {
-            bool showSaveHint = referenceWidth >= UITheme.Layout.WideWidthThreshold;
-            if (_saveHint != null)
-            {
-                if (_saveHint.gameObject.activeSelf != showSaveHint)
-                    _saveHint.gameObject.SetActive(showSaveHint);
-            }
-            // 右侧簇固定由 帮助 + 当前人物 构成；保存状态隐藏后中部曲名区自然变宽
-            if (_midArea != null) UITheme.StretchX(_midArea, 216f, 288f, 8f, 28f);
+            bool wide = referenceWidth >= UITheme.Layout.WideWidthThreshold;
+            if (_saveHint != null && _saveHint.gameObject.activeSelf != wide)
+                _saveHint.gameObject.SetActive(wide);
+
+            // 窄窗口把宽度让给曲名后面的右侧簇，但曲名区不小于 220（仍能读出 8 个汉字）
+            float songW = wide ? SongMaxWidth : 220f;
+            if (_songBtn != null)
+                UITheme.Place(_songBtn.GetComponent<RectTransform>(), _songLeft, _topRowY,
+                    songW, UITheme.HeightSmall);
+            if (_midArea != null)
+                UITheme.StretchX(_midArea, _songLeft + songW, _rightClusterInset, _topRowY,
+                    UITheme.HeightSmall);
         }
 
         /// <summary>
-        /// 加载条开关（方案 6.2 Loading 状态：可取消、防重复点击）。
-        /// <paramref name="stageLabel"/> 显示当前阶段（优化方案 §7-8：只报阶段，不编造百分比）。
+        /// 加载条开关（可取消、防重复点击）。<paramref name="stageLabel"/> 只报阶段，不编造百分比。
         /// </summary>
         public void SetLoading(bool loading, string songName, string stageLabel = null)
         {
@@ -197,8 +228,7 @@ namespace PianoTeacher3D.UI
         }
 
         /// <summary>
-        /// 错误横幅（方案 8.3 / 8.1）：显示「发生了什么 + 为什么 + 下一步」，
-        /// 恢复按钮文案取 <c>LastError.RecoveryLabel</c>，点击调用 <c>HandleRecovery()</c>。
+        /// 错误横幅：显示「发生了什么 + 为什么 + 下一步」，恢复按钮文案取 <c>LastError.RecoveryLabel</c>。
         /// </summary>
         public void ShowError(Core.AppError error)
         {
@@ -225,7 +255,7 @@ namespace PianoTeacher3D.UI
             if (!_errorBanner.gameObject.activeSelf) _errorBanner.gameObject.SetActive(true);
             LayoutTopStack();
 
-            // 诊断信息只写日志，不进 UI（方案 8.3「不要把堆栈信息直接显示给普通用户」）
+            // 诊断信息只写日志，不进 UI
             Debug.LogWarning($"[PianoTeacher3D][UI] {error.ToLogString()}");
         }
 
@@ -238,10 +268,7 @@ namespace PianoTeacher3D.UI
             LayoutTopStack();
         }
 
-        /// <summary>
-        /// 轻量提示（toast）：用于 <c>OnError</c>（string）兜底与操作反馈，
-        /// 保证任何用户可见错误都不会只写进 Console（方案 8.3）。
-        /// </summary>
+        /// <summary>轻量提示（toast）：任何用户可见错误都不会只写进 Console。</summary>
         public void ShowToast(string message, Core.ErrorSeverity severity = Core.ErrorSeverity.Info)
         {
             if (_toast == null || string.IsNullOrEmpty(message)) return;
@@ -299,10 +326,7 @@ namespace PianoTeacher3D.UI
             return false;
         }
 
-        /// <summary>
-        /// 破坏性操作二次确认（方案 3.4：停止 / 切歌 / 覆盖外观等需要确认）。
-        /// <paramref name="onConfirm"/> 在用户点击确认按钮时执行。
-        /// </summary>
+        /// <summary>破坏性操作二次确认。<paramref name="onConfirm"/> 在点击确认按钮时执行。</summary>
         public void ShowConfirm(string title, string body, string confirmLabel, Action onConfirm,
             string cancelLabel = "取消")
         {
@@ -351,87 +375,148 @@ namespace PianoTeacher3D.UI
 
         private void BuildTopBar()
         {
-            _bar = UITheme.CreatePanel(_canvas.transform, "StatusBar", Vector2.zero,
-                new Vector2(UITheme.Layout.ReferenceResolution.x, UITheme.Layout.StatusBarHeight),
-                UITheme.PanelBgDeep, UITheme.RadiusMedium);
-            UITheme.StretchTop(_bar, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                UITheme.Layout.ScreenMargin, UITheme.Layout.StatusBarHeight);
+            float barH = UITheme.Layout.StatusBarHeight;   // 56
+            float pad = UITheme.Layout.TopBarPadding;      // 16
+            float y = Mathf.Round((barH - UITheme.HeightSmall) * 0.5f);   // 32 高控件垂直居中 = 12
 
-            var backBtn = UITheme.CreateButton(_bar, "← 返回曲库", Vector2.zero,
-                new Vector2(108f, UITheme.HeightSmall),
+            _bar = UITheme.CreatePanel(_canvas.transform, "StatusBar", Vector2.zero,
+                new Vector2(UITheme.Layout.ReferenceResolution.x, barH), UITheme.PanelBgDeep,
+                UITheme.RadiusLarge);
+            var barBg = _bar.GetComponent<Image>();
+            if (barBg != null) UITheme.SetOutline(barBg, true, UITheme.Divider, 1f);
+            UITheme.StretchTop(_bar, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
+                UITheme.Layout.ScreenMargin, barH);
+
+            // —— 左侧：返回 32×32 → 8 → 分隔线 1×20 → 8 → 曲名 ——
+            var backBtn = UIKit.IconButton(_bar, "BackToLibrary", UIIcon.ArrowLeft, BackSize,
                 () => ShowConfirm("返回曲库？",
                     "将停止当前播放并返回主菜单，当前曲目的播放进度与循环标记不会保留。",
                     "返回主菜单", () => _onBackToLibrary?.Invoke()),
-                UITheme.FontCaption, ButtonStyle.Ghost,
                 "返回曲库：停止播放并回到主菜单（需确认）");
-            UITheme.Place(backBtn.GetComponent<RectTransform>(), 8f, 6f, 108f, UITheme.HeightSmall);
+            UITheme.Place(backBtn.GetComponent<RectTransform>(), pad, y, BackSize, BackSize);
 
-            _libraryBtn = UITheme.CreateButton(_bar, "曲库 ▾", Vector2.zero, new Vector2(84f, UITheme.HeightSmall),
-                () => ShowLibrary(!IsLibraryOpen), UITheme.FontCaption, ButtonStyle.Ghost,
-                "打开曲库：最近曲目、导入 MIDI、返回主菜单");
-            UITheme.Place(_libraryBtn.GetComponent<RectTransform>(), 124f, 6f, 84f, UITheme.HeightSmall);
+            float x = pad + BackSize + BarInnerGap;
+            var divider = UIKit.Divider(_bar, "BarDivider");
+            UITheme.Place(divider, x, Mathf.Round((barH - DividerHeight) * 0.5f), DividerWidth, DividerHeight);
+            x += DividerWidth + BarInnerGap;
 
-            // 中部：曲名 + 状态标签
-            _midArea = UITheme.CreateRect(_bar, "MidArea", Vector2.zero, Vector2.zero, UITheme.Transparent);
-            UITheme.StretchX(_midArea, 216f, 288f, 8f, 28f);
+            _songBtn = UIKit.TextButton(_bar, "♪ 未加载曲目  ▾", SongMaxWidth, UITheme.HeightSmall,
+                () => ShowLibrary(!IsLibraryOpen), UITheme.FontBody,
+                "曲库：最近曲目、导入 MIDI、返回主菜单");
+            _songBtn.gameObject.name = "Btn_曲库";
+            _songLeft = x;
+            _topRowY = y;
+            UITheme.Place(_songBtn.GetComponent<RectTransform>(), x, y, SongMaxWidth, UITheme.HeightSmall);
+            var songLabel = UITheme.GetLabel(_songBtn);
+            if (songLabel != null) songLabel.alignment = TextAnchor.MiddleLeft;
 
-            _songText = UITheme.CreateText(_midArea, "♪ 加载中…", Vector2.zero, new Vector2(300f, 28f),
-                UITheme.FontBody, UITheme.TextPrimary, TextAnchor.MiddleLeft);
-            UITheme.StretchAll(_songText.rectTransform, 0f, 164f, 0f, 0f);
+            // —— 右侧（从右往左）：角色 chip → 8 → 帮助 32×32 → 8 → 状态 chip ——
+            float rightX = pad;
 
-            _stateChip = UITheme.CreatePanel(_midArea, "StateChip", Vector2.zero, new Vector2(156f, 26f),
-                UITheme.PanelBgRaised, UITheme.RadiusSmall);
-            UITheme.PlaceRight(_stateChip, 0f, 1f, 156f, 26f);
-            _stateChipText = UITheme.CreateText(_stateChip, "— 未加载曲目", Vector2.zero, new Vector2(148f, 24f),
-                UITheme.FontStatusLabel, UITheme.TextSecondary);
-            UITheme.StretchAll(_stateChipText.rectTransform, 6f, 6f, 0f, 0f);
+            var avatarChip = UITheme.CreateButton(_bar, "", Vector2.zero,
+                new Vector2(AvatarChipWidth, UITheme.HeightSmall), () => _onAvatarToggle?.Invoke(),
+                UITheme.FontBodySmall, ButtonStyle.Ghost);
+            avatarChip.gameObject.name = "Btn_角色";
+            _avatarBtn = avatarChip;
+            if (avatarChip.targetGraphic is Image avImg)
+            {
+                avImg.color = UITheme.Transparent;
+                var sprite = UITheme.GetRoundedSprite(UITheme.RadiusSmall);
+                if (sprite != null) { avImg.sprite = sprite; avImg.type = Image.Type.Sliced; }
+                UITheme.SetOutline(avImg, true, UITheme.Divider, 1f);
+            }
+            UITheme.ApplyFlatLook(avatarChip);
+            UIHoverFeedback.Attach(avatarChip, UITheme.Transparent, UITheme.ControlHover);
 
-            // 保存状态 + 帮助 + 当前人物
-            _saveHint = UITheme.CreateText(_bar, "偏好：本次会话生效", Vector2.zero, new Vector2(152f, 28f),
-                UITheme.FontStatusLabel, UITheme.TextSecondary, TextAnchor.MiddleRight);
-            UITheme.PlaceRight(_saveHint.rectTransform, 268f, 8f, 152f, 28f);
+            // 头部文字由 CreateButton 生成，这里只清空并复用为名称位
+            var avatarLabel = UITheme.GetLabel(avatarChip);
+            if (avatarLabel != null) avatarLabel.gameObject.SetActive(false);
 
-            _helpBtn = UITheme.CreateButton(_bar, "帮助", Vector2.zero, new Vector2(84f, UITheme.HeightSmall),
-                ToggleHelp, UITheme.FontCaption, ButtonStyle.Ghost,
+            var initialBg = UITheme.CreatePanel(avatarChip.transform, "AvatarBadge", Vector2.zero,
+                new Vector2(16f, 16f), UITheme.AccentDim, 8);
+            UITheme.Place(initialBg, BarInnerGap, Mathf.Round((UITheme.HeightSmall - 16f) * 0.5f), 16f, 16f);
+            var initialImg = initialBg.GetComponent<Image>();
+            if (initialImg != null) initialImg.raycastTarget = false;
+            _avatarInitial = UIKit.Label(initialBg, "写", UITheme.FontStatusLabel, UITheme.TextPrimary,
+                TextAnchor.MiddleCenter, FontStyle.Bold, "Initial");
+
+            _avatarName = UIKit.Label(avatarChip.transform, "—", UITheme.FontBodySmall, UITheme.TextSecondary,
+                TextAnchor.MiddleLeft, FontStyle.Normal, "AvatarName");
+            UITheme.StretchAll(_avatarName.rectTransform, BarInnerGap + 16f + BarInnerGap, BarInnerGap, 0f, 0f);
+
+            UITheme.PlaceRight(avatarChip.GetComponent<RectTransform>(), rightX, y, AvatarChipWidth,
+                UITheme.HeightSmall);
+            rightX += AvatarChipWidth + BarInnerGap;
+            UITheme.SetButtonTooltip(avatarChip, "角色 / 外观：切换角色不会改变播放进度");
+
+            _helpBtn = UIKit.IconButton(_bar, "Help", UIIcon.Help, BackSize, ToggleHelp,
                 "帮助：查看快捷键与操作说明", "F1");
-            UITheme.PlaceRight(_helpBtn.GetComponent<RectTransform>(), 176f, 6f, 84f, UITheme.HeightSmall);
+            UITheme.PlaceRight(_helpBtn.GetComponent<RectTransform>(), rightX, y, BackSize, BackSize);
+            rightX += BackSize + BarInnerGap;
 
-            _avatarBtn = UITheme.CreateButton(_bar, "人物：—", Vector2.zero, new Vector2(168f, UITheme.HeightSmall),
-                () => _onAvatarToggle?.Invoke(), UITheme.FontCaption, ButtonStyle.Ghost,
-                "打开角色 / 外观面板：切换角色不会改变播放进度");
-            UITheme.PlaceRight(_avatarBtn.GetComponent<RectTransform>(), 8f, 6f, 168f, UITheme.HeightSmall);
+            _stateChip = UITheme.CreatePanel(_bar, "StateChip", Vector2.zero,
+                new Vector2(StateChipWidth, UITheme.HeightSmall), UITheme.PanelBgRaised,
+                UITheme.RadiusSmall);
+            var stateBg = _stateChip.GetComponent<Image>();
+            if (stateBg != null) stateBg.raycastTarget = false;
+            UITheme.PlaceRight(_stateChip, rightX, y, StateChipWidth, UITheme.HeightSmall);
 
-            UITheme.ChainHorizontal(backBtn, _libraryBtn, _helpBtn, _avatarBtn);
+            _stateDot = UITheme.CreatePanel(_stateChip, "Dot", Vector2.zero, new Vector2(8f, 8f),
+                UITheme.TextDisabled, 4).GetComponent<Image>();
+            if (_stateDot != null) _stateDot.raycastTarget = false;
+            UITheme.Place(_stateDot.rectTransform, UITheme.Space12, Mathf.Round((UITheme.HeightSmall - 8f) * 0.5f),
+                8f, 8f);
+
+            _stateChipText = UIKit.Label(_stateChip, "— 未加载曲目", UITheme.FontBodySmall,
+                UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "StateText");
+            UITheme.StretchAll(_stateChipText.rectTransform, UITheme.Space12 + 8f + UITheme.Space8,
+                UITheme.Space8, 0f, 0f);
+
+            // 偏好提示（仅在宽窗口出现，纯文本，不额外占一个浮块）
+            _saveHint = UIKit.Label(_bar, "偏好：本次会话生效", UITheme.FontStatusLabel, UITheme.TextSecondary,
+                TextAnchor.MiddleRight, FontStyle.Normal, "SaveHint");
+            UITheme.PlaceRight(_saveHint.rectTransform, rightX + StateChipWidth + UITheme.Space8, y,
+                120f, UITheme.HeightSmall);
+            _saveHint.gameObject.SetActive(false);
+
+            // 中部容器（曲名与右侧簇之间的弹性区，供后续状态位扩展）
+            _rightClusterInset = rightX + StateChipWidth + UITheme.Space16;
+            _midArea = UITheme.CreateRect(_bar, "MidArea", Vector2.zero, Vector2.zero, UITheme.Transparent);
+            UITheme.StretchX(_midArea, x + SongMaxWidth, _rightClusterInset, y, UITheme.HeightSmall);
+
+            UITheme.ChainHorizontal(backBtn, _songBtn, _helpBtn, avatarChip);
         }
 
         private void BuildErrorBanner()
         {
+            const float pad = UITheme.Space16;
+            float h = UITheme.Layout.ErrorBannerHeight;   // 96
             _errorBanner = UITheme.CreatePanel(_canvas.transform, "ErrorBanner", Vector2.zero,
-                new Vector2(UITheme.Layout.ReferenceResolution.x, UITheme.Layout.ErrorBannerHeight),
-                UITheme.ErrorBannerColor(Core.ErrorSeverity.Recoverable), UITheme.RadiusMedium);
+                new Vector2(UITheme.Layout.ReferenceResolution.x, h),
+                UITheme.ErrorBannerColor(Core.ErrorSeverity.Recoverable), UITheme.RadiusLarge);
             _errorBannerBg = _errorBanner.GetComponent<Image>();
             UITheme.StretchTop(_errorBanner, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                64f, UITheme.Layout.ErrorBannerHeight);
+                UITheme.Layout.ScreenMargin + UITheme.Layout.StatusBarHeight + UITheme.Space8, h);
 
-            // 第一行：严重程度标签 + 恢复 / 忽略按钮；第二行：完整说明（可换行）
-            _errorTag = UITheme.CreateText(_errorBanner, "✕ 错误", Vector2.zero, new Vector2(96f, 24f),
-                UITheme.FontCaption, UITheme.TextError, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.Place(_errorTag.rectTransform, 12f, 60f, 96f, 24f);
+            _errorTag = UIKit.Label(_errorBanner, "✕ 错误", UITheme.FontBodySmall, UITheme.TextError,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "ErrorTag");
+            UITheme.Place(_errorTag.rectTransform, pad, h - pad - 18f, 96f, 18f);
 
-            _errorBody = UITheme.CreateText(_errorBanner, "", Vector2.zero, new Vector2(400f, 44f),
-                UITheme.FontStatusLabel, UITheme.TextPrimary, TextAnchor.UpperLeft);
+            _errorBody = UIKit.Label(_errorBanner, "", UITheme.FontBodySmall, UITheme.TextPrimary,
+                TextAnchor.UpperLeft, FontStyle.Normal, "ErrorBody");
             _errorBody.horizontalOverflow = HorizontalWrapMode.Wrap;
             _errorBody.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.StretchAll(_errorBody.rectTransform, 16f, 16f, 14f, 38f);
+            UITheme.StretchAll(_errorBody.rectTransform, pad, 200f, pad, 34f);
 
-            _errorActionBtn = UITheme.CreateButton(_errorBanner, "重试", Vector2.zero,
-                new Vector2(120f, 26f), HandleRecoveryClicked, UITheme.FontCaption, ButtonStyle.Primary,
-                "执行建议的恢复动作");
-            UITheme.PlaceRight(_errorActionBtn.GetComponent<RectTransform>(), 116f, 62f, 120f, 26f);
+            _errorActionBtn = UIKit.PrimaryButton(_errorBanner, "重试", new Vector2(96f, 32f),
+                HandleRecoveryClicked, "执行建议的恢复动作");
+            UITheme.PlaceRight(_errorActionBtn.GetComponent<RectTransform>(), pad + 76f + UITheme.Space8,
+                Mathf.Round((h - 32f) * 0.5f), 96f, 32f);
 
-            _errorClose = UITheme.CreateButton(_errorBanner, "忽略", Vector2.zero, new Vector2(96f, 26f),
-                DismissError, UITheme.FontCaption, ButtonStyle.Ghost, "收起提示（不影响播放）");
-            UITheme.PlaceRight(_errorClose.GetComponent<RectTransform>(), 12f, 62f, 96f, 26f);
+            _errorClose = UIKit.TextButton(_errorBanner, "忽略", 76f, 32f, DismissError, UITheme.FontBodySmall,
+                "收起提示（不影响播放）");
+            UITheme.PlaceRight(_errorClose.GetComponent<RectTransform>(), pad,
+                Mathf.Round((h - 32f) * 0.5f), 76f, 32f);
 
             UITheme.ChainHorizontal(_errorActionBtn, _errorClose);
             _errorBanner.gameObject.SetActive(false);
@@ -455,28 +540,29 @@ namespace PianoTeacher3D.UI
 
         private void BuildLoadingStrip()
         {
+            const float pad = UITheme.Space16;
+            float h = UITheme.Layout.LoadingStripHeight;   // 40
             _loadingStrip = UITheme.CreatePanel(_canvas.transform, "LoadingStrip", Vector2.zero,
-                new Vector2(UITheme.Layout.ReferenceResolution.x, UITheme.Layout.LoadingStripHeight),
-                UITheme.PanelBgRaised, UITheme.RadiusMedium);
+                new Vector2(UITheme.Layout.ReferenceResolution.x, h), UITheme.PanelBgRaised,
+                UITheme.RadiusLarge);
             UITheme.StretchTop(_loadingStrip, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                64f, UITheme.Layout.LoadingStripHeight);
+                UITheme.Layout.ScreenMargin + UITheme.Layout.StatusBarHeight + UITheme.Space8, h);
 
-            _loadingText = UITheme.CreateText(_loadingStrip, "正在解析 MIDI 曲目…", Vector2.zero,
-                new Vector2(420f, 26f), UITheme.FontCaption, UITheme.TextPrimary, TextAnchor.MiddleLeft);
-            UITheme.StretchAll(_loadingText.rectTransform, 16f, 120f, 12f, 10f);
+            _loadingText = UIKit.Label(_loadingStrip, "正在解析 MIDI 曲目…", UITheme.FontBodySmall,
+                UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Normal, "LoadingText");
+            UITheme.StretchAll(_loadingText.rectTransform, pad, 120f, 8f, 12f);
 
-            var cancelBtn = UITheme.CreateButton(_loadingStrip, "取消加载", Vector2.zero,
-                new Vector2(104f, 26f), () => _session?.CancelLoading(), UITheme.FontCaption,
-                ButtonStyle.Secondary, "取消当前曲目加载");
-            UITheme.PlaceRight(cancelBtn.GetComponent<RectTransform>(), 12f, 7f, 104f, 26f);
+            var cancelBtn = UIKit.TextButton(_loadingStrip, "取消加载", 88f, 28f,
+                () => _session?.CancelLoading(), UITheme.FontBodySmall, "取消当前曲目加载");
+            UITheme.PlaceRight(cancelBtn.GetComponent<RectTransform>(), pad, 6f, 88f, 28f);
 
             // 轻量进度脉冲条：只表达「正在处理」，不假装知道百分比
             _loadingPulse = UITheme.CreateRect(_loadingStrip, "Pulse", Vector2.zero, new Vector2(120f, 3f),
                 UITheme.Accent);
             _loadingPulse.anchorMin = new Vector2(0f, 0f);
             _loadingPulse.anchorMax = new Vector2(0.25f, 0f);
-            _loadingPulse.offsetMin = new Vector2(16f, 6f);
-            _loadingPulse.offsetMax = new Vector2(16f, 9f);
+            _loadingPulse.offsetMin = new Vector2(pad, 4f);
+            _loadingPulse.offsetMax = new Vector2(pad, 7f);
 
             _loadingStrip.gameObject.SetActive(false);
         }
@@ -484,7 +570,7 @@ namespace PianoTeacher3D.UI
         private void UpdateLoadingPulse()
         {
             if (_loadingPulse == null) return;
-            // 0.25 宽的脉冲在轨道内来回滑动，避免"卡住"的错觉
+            // 0.25 宽的脉冲在轨道内来回滑动，避免「卡住」的错觉
             float phase = Mathf.PingPong(_animTime * 0.6f, 1f);
             float min = Mathf.Lerp(0f, 0.7f, phase);
             _loadingPulse.anchorMin = new Vector2(min, 0f);
@@ -496,58 +582,60 @@ namespace PianoTeacher3D.UI
             _toast = UITheme.CreatePanel(_canvas.transform, "Toast", Vector2.zero,
                 new Vector2(UITheme.Layout.ToastWidth, UITheme.Layout.ToastHeight),
                 UITheme.PanelBgRaised, UITheme.RadiusSmall);
-            _toastText = UITheme.CreateText(_toast, "", Vector2.zero,
-                new Vector2(UITheme.Layout.ToastWidth - 24f, UITheme.Layout.ToastHeight - 8f),
-                UITheme.FontCaption, UITheme.TextPrimary);
-            UITheme.StretchAll(_toastText.rectTransform, 12f, 12f, 4f, 4f);
+            var bg = _toast.GetComponent<Image>();
+            if (bg != null) bg.raycastTarget = false;
+            _toastText = UIKit.Label(_toast, "", UITheme.FontBodySmall, UITheme.TextPrimary,
+                TextAnchor.MiddleLeft, FontStyle.Normal, "ToastText");
+            UITheme.StretchAll(_toastText.rectTransform, UITheme.Space12, UITheme.Space12, 0f, 0f);
             _toastText.verticalOverflow = VerticalWrapMode.Truncate;
             _toast.gameObject.SetActive(false);
         }
 
         private void BuildLibraryPanel()
         {
+            const float pad = UITheme.Space16;
+            float w = UITheme.Layout.LibraryPanelWidth;
+            float h = UITheme.Layout.LibraryPanelHeight;
+
             _libraryPanel = UITheme.CreatePanel(_canvas.transform, "LibraryPanel", Vector2.zero,
-                new Vector2(UITheme.Layout.LibraryPanelWidth, UITheme.Layout.LibraryPanelHeight),
-                UITheme.PanelBg, UITheme.RadiusLarge);
-            UITheme.PlaceCenter(_libraryPanel, UITheme.Layout.LibraryPanelWidth, UITheme.Layout.LibraryPanelHeight);
+                new Vector2(w, h), UITheme.PanelBg, UITheme.RadiusLarge);
+            var panelBg = _libraryPanel.GetComponent<Image>();
+            if (panelBg != null) UITheme.SetOutline(panelBg, true, UITheme.Divider, 1f);
+            UITheme.PlaceCenter(_libraryPanel, w, h);
 
-            var titleText = UITheme.CreateText(_libraryPanel, "曲库", Vector2.zero, new Vector2(160f, 30f),
-                UITheme.FontSongTitle, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.Place(titleText.rectTransform, 20f,
-                UITheme.Layout.LibraryPanelHeight - 46f, 160f, 30f);
+            var titleText = UIKit.Label(_libraryPanel, "曲库", UITheme.FontSubtitle, UITheme.TextPrimary,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "LibraryTitle");
+            UITheme.PlaceTopLeft(titleText.rectTransform, pad, pad, 240f, 24f);
 
-            var closeBtn = UITheme.CreateButton(_libraryPanel, "关闭", Vector2.zero, new Vector2(80f, 28f),
-                () => ShowLibrary(false), UITheme.FontCaption, ButtonStyle.Ghost, "关闭曲库面板");
-            UITheme.PlaceRight(closeBtn.GetComponent<RectTransform>(), 16f,
-                UITheme.Layout.LibraryPanelHeight - 46f, 80f, 28f);
+            var closeBtn = UIKit.TextButton(_libraryPanel, "关闭", 56f, 24f, () => ShowLibrary(false),
+                UITheme.FontBodySmall, "关闭曲库面板");
+            UITheme.PlaceTopRight(closeBtn.GetComponent<RectTransform>(), pad, pad, 56f, 24f);
 
-            var importBtn = UITheme.CreateButton(_libraryPanel, "导入 MIDI…", Vector2.zero,
-                new Vector2(150f, UITheme.HeightSmall), () =>
-                {
-                    ShowLibrary(false);
-                    _session?.ImportMidi();
-                }, UITheme.FontCaption, ButtonStyle.Primary,
-                "打开文件选择器导入 .mid / .midi 文件");
-            UITheme.Place(importBtn.GetComponent<RectTransform>(), 20f,
-                UITheme.Layout.LibraryPanelHeight - 88f, 150f, UITheme.HeightSmall);
+            var importBtn = UIKit.PrimaryButton(_libraryPanel, "导入 MIDI…", new Vector2(148f, 40f), () =>
+            {
+                ShowLibrary(false);
+                _session?.ImportMidi();
+            }, "打开文件选择器导入 .mid / .midi 文件");
+            UITheme.PlaceTopLeft(importBtn.GetComponent<RectTransform>(), pad, pad + 32f, 148f, 40f);
 
-            var menuBtn = UITheme.CreateButton(_libraryPanel, "返回主菜单", Vector2.zero,
-                new Vector2(130f, UITheme.HeightSmall), RequestBackToLibrary, UITheme.FontCaption,
-                ButtonStyle.Secondary, "返回主菜单（需确认）");
-            UITheme.Place(menuBtn.GetComponent<RectTransform>(), 178f,
-                UITheme.Layout.LibraryPanelHeight - 88f, 130f, UITheme.HeightSmall);
+            var menuBtn = UIKit.SecondaryButton(_libraryPanel, "返回主菜单", new Vector2(132f, 40f),
+                RequestBackToLibrary, "返回主菜单（需确认）");
+            UITheme.PlaceTopLeft(menuBtn.GetComponent<RectTransform>(), pad + 148f + UITheme.Space12,
+                pad + 32f, 132f, 40f);
 
+            // 列表区：顶部标题 32 + 操作行 40 + 两处 12 间距
+            float listTop = pad + 32f + 12f + 40f + 12f;
             _libraryList = UITheme.CreateRect(_libraryPanel, "RecentList", Vector2.zero, Vector2.zero,
                 UITheme.Transparent);
-            UITheme.StretchAll(_libraryList, 20f, 20f, 20f, 104f);
+            UITheme.StretchAll(_libraryList, pad, pad, pad, listTop);
 
-            _libraryEmptyText = UITheme.CreateText(_libraryPanel,
+            _libraryEmptyText = UIKit.Label(_libraryPanel,
                 "本次运行还没有打开过曲目。\n可点「导入 MIDI…」选择本地文件，或返回主菜单选择示例曲。",
-                Vector2.zero, new Vector2(500f, 60f), UITheme.FontCaption, UITheme.TextSecondary,
-                TextAnchor.UpperLeft);
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.UpperLeft, FontStyle.Normal,
+                "LibraryEmpty");
             _libraryEmptyText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _libraryEmptyText.verticalOverflow = VerticalWrapMode.Overflow;
-            UITheme.StretchAll(_libraryEmptyText.rectTransform, 20f, 20f, 20f, 104f);
+            UITheme.StretchAll(_libraryEmptyText.rectTransform, pad, pad, pad, listTop);
 
             UITheme.ChainHorizontal(importBtn, menuBtn, closeBtn);
             _libraryPanel.gameObject.SetActive(false);
@@ -573,8 +661,9 @@ namespace PianoTeacher3D.UI
 
             float rowHeight = UITheme.Layout.LibraryRowHeight;
             float gap = UITheme.Layout.LibraryRowGap;
+            float rowWidth = UITheme.Layout.LibraryPanelWidth - UITheme.Space16 * 2f;
             int shown = 0;
-            for (int i = 0; i < count && shown < 5; i++)
+            for (int i = 0; i < count && shown < 6; i++)
             {
                 var song = recent[i];
                 // 用 ReferenceEquals 判断，避免依赖 SongMetadata 是类还是结构体
@@ -584,32 +673,39 @@ namespace PianoTeacher3D.UI
                 bool missing = IsSourceMissing(song.SourcePath);
                 string title = string.IsNullOrEmpty(song.Title) ? "未命名曲目" : song.Title;
                 string meta = missing
-                    ? "! 文件缺失：可能已移动或删除，点击后需重新导入"
+                    ? "! 文件缺失：可能已移动或删除"
                     : $"{UITheme.FormatTime(song.DurationSeconds)} · {song.NoteCount} 音符 · " +
-                      $"{song.TrackCount} 轨道 · tempo 变化 {song.TempoChangeCount}";
+                      $"{song.TrackCount} 轨道";
 
                 string id = string.IsNullOrEmpty(song.SourcePath) ? song.Id : song.SourcePath;
                 string display = missing ? "! " + title : title;
 
                 var row = UITheme.CreateButton(_libraryList, display, Vector2.zero,
-                    new Vector2(500f, rowHeight), () => OpenRecent(id, title), UITheme.FontCaption,
+                    new Vector2(rowWidth, rowHeight), () => OpenRecent(id, title), UITheme.FontBody,
                     missing ? ButtonStyle.Ghost : ButtonStyle.Secondary,
                     missing ? "该曲目文件已不存在，点击后将提示重新导入" : "打开该曲目");
-                // 列表自上而下排列（Place 系列以左下角为原点，这里用顶部锚点逐行下移）
                 UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), 0f,
-                    shown * (rowHeight + gap), 520f, rowHeight);
+                    shown * (rowHeight + gap), rowWidth, rowHeight);
+
+                var rowImg = row.targetGraphic as Image;
+                if (rowImg != null)
+                {
+                    var sprite = UITheme.GetRoundedSprite(UITheme.RadiusMedium);
+                    if (sprite != null) { rowImg.sprite = sprite; rowImg.type = Image.Type.Sliced; }
+                    UITheme.SetOutline(rowImg, !missing, UITheme.Divider, 1f);
+                }
 
                 var label = UITheme.GetLabel(row);
                 if (label != null)
                 {
                     label.alignment = TextAnchor.MiddleLeft;
-                    UITheme.StretchAll(label.rectTransform, 12f, 190f, 0f, 0f);
+                    UITheme.StretchAll(label.rectTransform, UITheme.Space12, 190f, 0f, 0f);
                 }
 
-                var metaText = UITheme.CreateText(row.transform, meta, Vector2.zero, new Vector2(180f, rowHeight),
-                    UITheme.FontStatusLabel, missing ? UITheme.TextWarning : UITheme.TextSecondary,
-                    TextAnchor.MiddleRight);
-                UITheme.StretchAll(metaText.rectTransform, 320f, 12f, 0f, 0f);
+                var metaText = UIKit.Label(row.transform, meta, UITheme.FontBodySmall,
+                    missing ? UITheme.TextWarning : UITheme.TextSecondary,
+                    TextAnchor.MiddleRight, FontStyle.Normal, "Meta");
+                UITheme.StretchAll(metaText.rectTransform, 320f, UITheme.Space12, 0f, 0f);
 
                 shown++;
             }
@@ -647,25 +743,34 @@ namespace PianoTeacher3D.UI
 
         private void BuildHelpPanel()
         {
+            const float pad = UITheme.Space16;
+            float w = UITheme.Layout.HelpPanelWidth;
+            float h = UITheme.Layout.HelpPanelHeight;
+
             _helpPanel = UITheme.CreatePanel(_canvas.transform, "HelpPanel", Vector2.zero,
-                new Vector2(UITheme.Layout.HelpPanelWidth, UITheme.Layout.HelpPanelHeight),
-                UITheme.PanelBg, UITheme.RadiusLarge);
-            UITheme.PlaceCenter(_helpPanel, UITheme.Layout.HelpPanelWidth, UITheme.Layout.HelpPanelHeight);
+                new Vector2(w, h), UITheme.PanelBg, UITheme.RadiusLarge);
+            var panelBg = _helpPanel.GetComponent<Image>();
+            if (panelBg != null) UITheme.SetOutline(panelBg, true, UITheme.Divider, 1f);
+            UITheme.PlaceCenter(_helpPanel, w, h);
 
-            var title = UITheme.CreateText(_helpPanel, "帮助与快捷键", Vector2.zero, new Vector2(300f, 30f),
-                UITheme.FontSongTitle, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(title.rectTransform, 20f, 16f, 300f, 30f);
+            var title = UIKit.Label(_helpPanel, "帮助与快捷键", UITheme.FontSubtitle, UITheme.TextPrimary,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "HelpTitle");
+            UITheme.PlaceTopLeft(title.rectTransform, pad, pad, 300f, 24f);
 
-            var closeBtn = UITheme.CreateButton(_helpPanel, "关闭", Vector2.zero, new Vector2(80f, 28f),
-                () => ShowHelp(false), UITheme.FontCaption, ButtonStyle.Ghost, "关闭帮助面板");
-            UITheme.PlaceTopRight(closeBtn.GetComponent<RectTransform>(), 16f, 16f, 80f, 28f);
+            var closeBtn = UIKit.TextButton(_helpPanel, "关闭", 56f, 24f, () => ShowHelp(false),
+                UITheme.FontBodySmall, "关闭帮助面板");
+            UITheme.PlaceTopRight(closeBtn.GetComponent<RectTransform>(), pad, pad, 56f, 24f);
 
-            var body = UITheme.CreateText(_helpPanel,
+            var divider = UITheme.CreateDivider(_helpPanel, "Divider", Vector2.zero, new Vector2(w - pad * 2f, 1f));
+            UITheme.StretchTop(divider, pad, pad, pad + 32f, 1f);
+
+            var body = UIKit.Label(_helpPanel,
                 "快捷键（辅助入口，相同功能都能在界面上找到）\n" +
                 "　空格　播放 / 暂停\n" +
                 "　[　　重播（回到开头）\n" +
                 "　R　　重置视角到当前模式的标准构图\n" +
                 "　H　　切换琴键高亮提示（关闭 → 全部 → 发声 → 预提示）\n" +
+                "　T　　展示 / 教学模式\n" +
                 "　M　　节拍器开关\n" +
                 "　Tab　曲目分析面板\n" +
                 "　F1　　本帮助面板\n" +
@@ -674,46 +779,48 @@ namespace PianoTeacher3D.UI
                 "　手部特写：以当前练习手为中心，优先看清琴键与手指\n" +
                 "　全景：观察坐姿、双臂与完整键盘关系\n" +
                 "　自由观察：鼠标右键拖动旋转、滚轮缩放，R 回到标准构图\n\n" +
-                "说明\n" +
-                "　· 文本输入获得焦点时，全局快捷键不会抢按键\n" +
-                "　· 播放中切换角色 / 视角 / 分手 / 高亮不会重启曲目\n" +
-                "　· 当前速度、视角、练习手、循环状态始终显示在界面上，不依赖悬停提示",
-                Vector2.zero, new Vector2(560f, 300f), UITheme.FontCaption, UITheme.TextSecondary,
-                TextAnchor.UpperLeft);
+                "界面约定\n" +
+                "　· 每个 chip 直接写出当前值（如「循环：A-B」），不靠悬停猜状态\n" +
+                "　· 实心金色按钮 = 当前唯一主操作；其余控件挂起时才提亮\n" +
+                "　· 播放中切换角色 / 视角 / 分手 / 高亮不会重启曲目",
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.UpperLeft, FontStyle.Normal, "HelpBody");
             body.horizontalOverflow = HorizontalWrapMode.Wrap;
             body.verticalOverflow = VerticalWrapMode.Overflow;
-            UITheme.StretchAll(body.rectTransform, 20f, 20f, 16f, 56f);
+            UITheme.StretchAll(body.rectTransform, pad, pad, pad, pad + 44f);
 
             _helpPanel.gameObject.SetActive(false);
         }
 
         private void BuildConfirmPanel()
         {
+            const float pad = UITheme.Space16;
+            float w = UITheme.Layout.ConfirmPanelWidth;
+            float h = UITheme.Layout.ConfirmPanelHeight;
+
             _confirmPanel = UITheme.CreatePanel(_canvas.transform, "ConfirmPanel", Vector2.zero,
-                new Vector2(UITheme.Layout.ConfirmPanelWidth, UITheme.Layout.ConfirmPanelHeight),
-                UITheme.PanelBgRaised, UITheme.RadiusLarge);
-            UITheme.PlaceCenter(_confirmPanel, UITheme.Layout.ConfirmPanelWidth, UITheme.Layout.ConfirmPanelHeight);
+                new Vector2(w, h), UITheme.PanelBgRaised, UITheme.RadiusLarge);
+            var panelBg = _confirmPanel.GetComponent<Image>();
+            if (panelBg != null) UITheme.SetOutline(panelBg, true, UITheme.Divider, 1f);
+            UITheme.PlaceCenter(_confirmPanel, w, h);
 
-            _confirmTitle = UITheme.CreateText(_confirmPanel, "确认操作？", Vector2.zero, new Vector2(400f, 28f),
-                UITheme.FontAction, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(_confirmTitle.rectTransform, 20f, 16f, 400f, 28f);
+            _confirmTitle = UIKit.Label(_confirmPanel, "确认操作？", UITheme.FontSubtitle, UITheme.TextPrimary,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "ConfirmTitle");
+            UITheme.PlaceTopLeft(_confirmTitle.rectTransform, pad, pad, w - pad * 2f, 24f);
 
-            _confirmBody = UITheme.CreateText(_confirmPanel, "", Vector2.zero, new Vector2(400f, 64f),
-                UITheme.FontCaption, UITheme.TextSecondary, TextAnchor.UpperLeft);
+            _confirmBody = UIKit.Label(_confirmPanel, "", UITheme.FontBodySmall, UITheme.TextSecondary,
+                TextAnchor.UpperLeft, FontStyle.Normal, "ConfirmBody");
             _confirmBody.horizontalOverflow = HorizontalWrapMode.Wrap;
             _confirmBody.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.StretchAll(_confirmBody.rectTransform, 20f, 20f, 60f, 52f);
+            UITheme.StretchAll(_confirmBody.rectTransform, pad, pad, 72f, 56f);
 
-            _confirmCancelBtn = UITheme.CreateButton(_confirmPanel, "取消", Vector2.zero,
-                new Vector2(110f, UITheme.HeightSmall), CloseConfirm, UITheme.FontCaption,
-                ButtonStyle.Secondary, "取消并返回（Esc）");
-            UITheme.PlaceRight(_confirmCancelBtn.GetComponent<RectTransform>(), 20f + 110f + 8f, 16f,
-                110f, UITheme.HeightSmall);
+            _confirmCancelBtn = UIKit.SecondaryButton(_confirmPanel, "取消", new Vector2(96f, 40f),
+                CloseConfirm, "取消并返回（Esc）");
+            UITheme.PlaceRight(_confirmCancelBtn.GetComponent<RectTransform>(), pad + 108f + UITheme.Space12,
+                pad, 96f, 40f);
 
-            _confirmOkBtn = UITheme.CreateButton(_confirmPanel, "确认", Vector2.zero,
-                new Vector2(110f, UITheme.HeightSmall), ExecuteConfirm, UITheme.FontCaption,
-                ButtonStyle.Danger, "确认执行（不可撤销）");
-            UITheme.PlaceRight(_confirmOkBtn.GetComponent<RectTransform>(), 20f, 16f, 110f, UITheme.HeightSmall);
+            _confirmOkBtn = UITheme.CreateButton(_confirmPanel, "确认", Vector2.zero, new Vector2(108f, 40f),
+                ExecuteConfirm, UITheme.FontBodySmall, ButtonStyle.Danger, "确认执行（不可撤销）");
+            UITheme.PlaceRight(_confirmOkBtn.GetComponent<RectTransform>(), pad, pad, 108f, 40f);
 
             UITheme.ChainHorizontal(_confirmCancelBtn, _confirmOkBtn);
             _confirmPanel.gameObject.SetActive(false);

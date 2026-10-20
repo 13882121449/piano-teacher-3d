@@ -10,15 +10,14 @@ using PianoTeacher3D.Piano;
 namespace PianoTeacher3D.UI
 {
     /// <summary>
-    /// 教学主界面控制层（对应方案 3.1 分区 / 3.2 控件层级 / 3.4 交互规则，
-    /// 审查 2.1 三层控制结构、2.2 状态可见性与视觉层级、2.3 反馈分层）。
+    /// 教学主界面控制层（深色专业工作台布局）。
     /// <para>
-    /// 结构：
-    /// ① 顶栏（<see cref="UIStatusBar"/>：返回曲库 / 曲库 / 曲名·状态 / 保存状态·帮助 / 当前人物）
-    /// ② 3D 演奏区（只放轻量的视角标签与快捷键提示，不常驻大面板）
-    /// ③ 主播放栏（始终可见、固定位置：播放/暂停 + 进度 + 时间 + 重播 + 视角）
-    /// ④ 练习工具栏（可折叠：练习手 / 速度 / 高亮 / 循环 A-B / 节拍器 / 曲目分析 / 角色外观）
-    /// ⑤ 分析面板（按需展开、从右侧滑出，动作质量默认折叠在「开发诊断」区）
+    /// 结构（三层：底 = 3D 场景 → 面 = 面板 → 浮 = chip / 按钮）：
+    /// ① 顶栏（<see cref="UIStatusBar"/>：返回 / 曲名 / 状态 / 帮助 / 角色，单行 56 高）
+    /// ② 左上视角提示卡（220×88 玻璃卡，鼠标移出 2.5s 后淡到 0.45，不完全隐藏）
+    /// ③ 演奏区（画面中部**不放置**任何常驻面板）
+    /// ④ 底栏播放器（单块 132 高：进度行 + 控制行；主按钮是全屏唯一实心强调色）
+    /// ⑤ 分析面板（按需从右侧滑出）、空状态卡片（居中）
     /// </para>
     /// <para>
     /// 纯表现层：只调用 <see cref="LessonSessionController"/> 的公开接口与事件，
@@ -32,14 +31,17 @@ namespace PianoTeacher3D.UI
         private AvatarSelectionUI _avatarUI;
         private Canvas _canvas;
 
-        // ---- 3D 区浮层（轻量：视角标签 + 快捷键提示）----
-        private RectTransform _viewChip;
-        private Text _viewChipText;
-        private Text _viewHintText;
+        // ---- 左上提示卡 ----
+        private RectTransform _hintCard;
+        private CanvasGroup _hintGroup;
+        private Text _hintTitle;
+        private Text _hintLine2;
+        private Text _hintLine3;
+        private float _hintIdleSince = -1f;
+        private float _hintAlpha = 1f;
 
-        // ---- 主播放栏 ----
-        private RectTransform _mainBar;
-        private Text _mainSongText;
+        // ---- 底栏（播放器面板）----
+        private RectTransform _playerBar;
         private Text _timeText;
         private Text _totalText;
         private Slider _progress;
@@ -48,49 +50,35 @@ namespace PianoTeacher3D.UI
         private Button _playBtn;
         private Button _restartBtn;
         private UISegmentedControl _cameraSeg;
-        private RectTransform _chipGroup;
-        private Text _handChip;
-        private Text _speedChip;
-        private Text _loopChip;
-        private Text _progressHint;
 
-        // ---- 练习工具栏 ----
-        private RectTransform _toolbar;
-        private RectTransform _toolbarBody;
-        private Button _foldBtn;
-        private Text _toolbarTitle;
-        private Text _toolbarHint;
+        // ---- 底栏控制行：练习工具 chips ----
         private UISegmentedControl _handSeg;
-        private UISegmentedControl _speedSeg;
-        private UISegmentedControl _highlightSeg;
-        private UISegmentedControl _displaySeg;
-        private Text _handHint;
-        private Button _loopToggle;
+        private Button _speedChip;
+        private Button _loopChip;
         private RectTransform _loopRangeGroup;
-        private Text _loopRangeText;
-        private Text _loopOffHint;
         private Button _setABtn;
         private Button _setBBtn;
         private Button _clearLoopBtn;
-        private Button _metronomeBtn;
+        private Button _highlightChip;
+        private Button _metronomeChip;
         private Text _beatDots;
+        private Button _displayChip;
         private Button _analysisBtn;
-        private Button _avatarBtn;
+
+        // ---- 警告 / 空状态 ----
+        private RectTransform _handHintChip;
+        private Text _handHintText;
+        private RectTransform _emptyState;
 
         // ---- 分析面板 ----
         private RectTransform _analysisPanel;
         private Text _analysisText;
         private Text _suggestionText;
-        private Button _analysisCloseBtn;
         private Button _diagnosticsToggle;
         private RectTransform _diagnosticsBody;
         private Text _motionText;
 
-        // ---- 空状态 ----
-        private RectTransform _emptyState;
-        private Text _emptyBody;
-
-        // ---- 运行状态（只缓存展示所需的派生值，不持有业务真值）----
+        // ---- 运行状态（只缓存展示所需的派生值）----
         private bool _suppressSlider;
         private int _flashBeat = -1;
         private float _beatFlashUntil;
@@ -99,10 +87,7 @@ namespace PianoTeacher3D.UI
         private float _loopB;
         private float _currentTime;
         private float _totalTime;
-        private bool _folded;
-        private bool _foldTouched;
         private bool _compact;
-        private bool _showBarLeft = true;
         private bool _lastNarrow;
         private bool _lastCompact;
         private float _lastRefWidth = -1f;
@@ -112,10 +97,21 @@ namespace PianoTeacher3D.UI
         private float _loadingBlinkUntil;
         private int _loadingPhase;
 
+        // ---- 底栏控制行几何（全部为 4 的倍数，组内 8 / 组间 12）----
+        private const float HandWidth = 144f;
+        private const float SpeedWidth = 60f;
+        private const float LoopWidth = 68f;
+        private const float LoopRangeWidth = 140f;
+        private const float HighlightWidth = 88f;
+        private const float MetronomeWidth = 80f;
+        private const float BeatDotsWidth = 52f;
+        private const float DisplayWidth = 84f;
+        private const float AnalysisWidth = 68f;
+        private const float CameraWidth = 180f;
+
         private static readonly float[] SpeedOptions = { 0.5f, 1f, 1.5f };
         private static readonly string[] SpeedLabels = { "0.5×", "1.0×", "1.5×" };
         private static readonly string[] HandLabels = { "双手", "左手", "右手" };
-        private static readonly string[] HighlightLabels = { "关闭", "预提示", "发声", "全部" };
         private static readonly string[] CameraLabels = { "特写", "全景", "自由" };
 
         // ==================== 初始化 / 事件连线 ====================
@@ -183,6 +179,7 @@ namespace PianoTeacher3D.UI
 
             ApplyResponsiveLayoutIfNeeded();
             HandleShortcuts();
+            UpdateHintCardAlpha();
 
             // 拍点闪烁淡出（与播放状态无关，停播后也会自动清除）
             if (_flashBeat >= 0 && Time.unscaledTime > _beatFlashUntil)
@@ -199,7 +196,7 @@ namespace PianoTeacher3D.UI
                 UITheme.SetButtonLabel(_playBtn, "加载中" + new string('.', _loadingPhase));
             }
 
-            // 分析面板打开时按 4Hz 刷新动作质量（方案阶段五验收量化，不与学习操作混排）
+            // 分析面板打开时按 4Hz 刷新动作质量（不与学习操作混排）
             if (_analysisOpen && Time.unscaledTime - _lastMotionRefresh > 0.25f)
             {
                 _lastMotionRefresh = Time.unscaledTime;
@@ -225,7 +222,7 @@ namespace PianoTeacher3D.UI
                 if (Input.GetKeyDown(KeyCode.LeftBracket)) Restart();
                 if (Input.GetKeyDown(KeyCode.R)) _session.ResetCamera();
                 if (Input.GetKeyDown(KeyCode.H)) CycleHighlight();
-                if (Input.GetKeyDown(KeyCode.T)) _session.ToggleDisplayMode();   // 展示 / 教学 模式切换
+                if (Input.GetKeyDown(KeyCode.T)) _session.ToggleDisplayMode();
                 if (Input.GetKeyDown(KeyCode.M)) ToggleMetronome();
                 if (Input.GetKeyDown(KeyCode.F1) && _status != null) _status.ToggleHelp();
                 if (UITheme.ConsumeTab()) ToggleAnalysis();
@@ -233,6 +230,28 @@ namespace PianoTeacher3D.UI
 
             // Esc 只在没有浮层时收起本层的分析面板 / 角色面板
             if ((_status == null || !_status.HasOpenOverlay) && UITheme.ConsumeEscape()) CloseTopPanel();
+        }
+
+        /// <summary>
+        /// 左上提示卡的「自动让路」：鼠标移出 2.5s 后淡到 0.45（不隐藏），移入立即恢复 1.0。
+        /// 目的是让 3D 画面在不受打扰时更干净，同时保证新手随时找得到快捷键。
+        /// </summary>
+        private void UpdateHintCardAlpha()
+        {
+            if (_hintCard == null || _hintGroup == null) return;
+
+            bool over = RectTransformUtility.RectangleContainsScreenPoint(_hintCard, Input.mousePosition, null);
+            if (over) _hintIdleSince = -1f;
+            else if (_hintIdleSince < 0f) _hintIdleSince = Time.unscaledTime;
+
+            bool idle = !over && _hintIdleSince >= 0f &&
+                        Time.unscaledTime - _hintIdleSince >= UITheme.Layout.HintCardFadeDelay;
+            float target = idle ? UITheme.Layout.HintCardIdleAlpha : 1f;
+            if (Mathf.Approximately(_hintAlpha, target)) return;
+
+            _hintAlpha = Mathf.MoveTowards(_hintAlpha, target,
+                Time.unscaledDeltaTime * UITheme.Layout.HintCardFadeSpeed);
+            _hintGroup.alpha = _hintAlpha;
         }
 
         // ==================== 会话事件回调 ====================
@@ -246,9 +265,7 @@ namespace PianoTeacher3D.UI
             RefreshInteractable();
         }
 
-        /// <summary>
-        /// 兜底错误（<c>OnError</c>，string）：走轻量提示，保证不会只写进 Console（方案 8.3）。
-        /// </summary>
+        /// <summary>兜底错误（<c>OnError</c>，string）：走轻量提示，保证不会只写进 Console。</summary>
         private void OnErrorFallback(string message)
         {
             if (string.IsNullOrEmpty(message)) return;
@@ -308,7 +325,7 @@ namespace PianoTeacher3D.UI
         {
             if (_cameraSeg != null) _cameraSeg.SetSelectedIndex((int)mode);
             RefreshViewLabel(mode);
-            ApplyResponsiveLayout(); // 手部特写 → 主播放栏变矮并自动折叠练习工具
+            ApplyResponsiveLayout(); // 手部特写 → 底栏变矮（隐藏进度行），让出琴键与双手
         }
 
         private void OnPracticeHandChanged(PracticeHand hand)
@@ -319,38 +336,13 @@ namespace PianoTeacher3D.UI
         }
 
         /// <summary>
-        /// 显示模式变化：同步分段选择器；教学模式下手部不可见、高亮被固定为「仅发声」，
-        /// 因此把「高亮」分段控件置灰并给出原因（避免用户以为设置失效）。
+        /// 显示模式变化：同步 chip；教学模式下手部不可见、高亮被固定为「仅发声」，
+        /// 因此把「高亮」chip 置灰并给出原因（避免用户以为设置失效）。
         /// </summary>
         private void OnDisplayModeChanged(DisplayMode mode)
         {
-            if (_displaySeg != null) _displaySeg.SetSelectedIndex((int)mode, false);
-
-            bool teaching = mode == DisplayMode.Teaching;
-            if (_highlightSeg != null)
-            {
-                for (int i = 0; i < _highlightSeg.Count; i++)
-                {
-                    _highlightSeg.SetOptionEnabled(i, !teaching);
-                    if (teaching)
-                    {
-                        _highlightSeg.SetOptionTooltip(i,
-                            "教学模式固定为「仅高亮被按下的琴键」；切回展示模式后恢复你的选择");
-                    }
-                }
-                if (!teaching)
-                {
-                    // 展示模式：恢复各档说明，并把选中项同步为实际生效值
-                    _highlightSeg.SetOptionTooltip(0, "关闭琴键高亮提示");
-                    _highlightSeg.SetOptionTooltip(1, "预提示：提前标出即将按下的琴键（跟弹用）", "H");
-                    _highlightSeg.SetOptionTooltip(2, "发声：只高亮正在发声的琴键");
-                    _highlightSeg.SetOptionTooltip(3, "全部：预提示 + 发声");
-                }
-                _highlightSeg.SetSelectedIndex((int)_session.KeyHighlight, false);
-            }
-
-            RefreshViewLabel(_session.CameraMode);
             RefreshStateChips();
+            RefreshInteractable();   // 教学模式会锁死高亮 chip，必须立刻反映为禁用态
             if (_status != null)
             {
                 _status.ShowToast(mode == DisplayMode.Teaching
@@ -359,18 +351,14 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        private void OnHighlightModeChanged(HighlightMode mode)
-        {
-            if (_highlightSeg != null) _highlightSeg.SetSelectedIndex((int)mode);
-            RefreshStateChips();
-        }
+        private void OnHighlightModeChanged(HighlightMode mode) => RefreshStateChips();
 
         private void OnMetronomeToggled(bool enabled)
         {
             if (!enabled) _flashBeat = -1;
             RefreshBeatDots();
             RefreshStateChips();
-            RefreshInteractable(); // 同步开关文字与可用态（禁用时不会误变回可点击）
+            RefreshInteractable(); // 同步 chip 文案与可用态（禁用时不会误变回可点击）
         }
 
         private void OnMetronomeBeat(int beatInBar)
@@ -394,321 +382,313 @@ namespace PianoTeacher3D.UI
             UITheme.EnsureEventSystem();
             _canvas = UITheme.CreateCanvas(transform, "LessonControlsCanvas", UITheme.Layout.LessonCanvasOrder);
 
-            // 顶栏 + 错误/加载/提示反馈（独立画布，sortingOrder 更高，保证永远压在工具栏之上）
+            // 顶栏 + 错误/加载/提示反馈（独立画布，sortingOrder 更高，永远压在底栏之上）
             _status = gameObject.AddComponent<UIStatusBar>();
             _status.Initialize(_session, BackToLibrary, ToggleAvatarPanel);
 
-            BuildViewOverlay();
-            BuildMainBar();
-            BuildPracticeToolbar();
+            BuildHintCard();
+            BuildPlayerBar();
+            BuildHandHint();
             BuildAnalysisPanel();
             BuildEmptyState();
         }
 
-        // ---------- ① 3D 区域轻量浮层 ----------
+        // ---------- ② 左上视角提示卡（玻璃卡，不再把裸文字压在 3D 上）----------
 
-        private void BuildViewOverlay()
+        private void BuildHintCard()
         {
-            _viewChip = UITheme.CreatePanel(_canvas.transform, "ViewChip", Vector2.zero, new Vector2(210f, 30f),
-                UITheme.PanelBgDeep, UITheme.RadiusSmall);
-            UITheme.PlaceTopLeft(_viewChip, UITheme.Layout.ScreenMargin,
-                UITheme.Layout.ScreenMargin + UITheme.Layout.StatusBarHeight + UITheme.Space8, 210f, 30f);
-            var chipBg = _viewChip.GetComponent<Image>();
-            if (chipBg != null) chipBg.raycastTarget = false;
+            const float pad = UITheme.Space12;
+            float w = UITheme.Layout.HintCardWidth;
+            float h = UITheme.Layout.HintCardHeight;
 
-            _viewChipText = UITheme.CreateText(_viewChip, "视角：全景", Vector2.zero, new Vector2(198f, 28f),
-                UITheme.FontCaption, UITheme.TextPrimary, TextAnchor.MiddleLeft);
-            UITheme.StretchAll(_viewChipText.rectTransform, 10f, 10f, 0f, 0f);
+            _hintCard = UITheme.CreatePanel(_canvas.transform, "ViewHintCard", Vector2.zero, new Vector2(w, h),
+                UITheme.PanelBgGlass, UITheme.RadiusLarge);
+            var bg = _hintCard.GetComponent<Image>();
+            if (bg != null)
+            {
+                bg.raycastTarget = false;
+                UITheme.SetOutline(bg, true, UITheme.Divider, 1f);
+            }
+            _hintGroup = _hintCard.gameObject.AddComponent<CanvasGroup>();
+            _hintGroup.blocksRaycasts = false;
+            _hintGroup.interactable = false;
 
-            _viewHintText = UITheme.CreateText(_canvas.transform,
-                "空格 播放/暂停 · [ 重播 · M 节拍器 · T 展示/教学 · Tab 分析 · F1 帮助", Vector2.zero, new Vector2(560f, 22f),
-                UITheme.FontStatusLabel, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-            UITheme.PlaceTopLeft(_viewHintText.rectTransform, UITheme.Layout.ScreenMargin + 4f,
-                UITheme.Layout.ScreenMargin + UITheme.Layout.StatusBarHeight + UITheme.Space8 + 34f, 420f, 22f);
+            float top = UITheme.Layout.ScreenMargin + UITheme.Layout.StatusBarHeight + UITheme.Layout.HintCardTopGap;
+            UITheme.PlaceTopLeft(_hintCard, UITheme.Layout.ScreenMargin, top, w, h);
+
+            float inner = w - pad * 2f;
+            _hintTitle = UIKit.Label(_hintCard, "视角：全景", UITheme.FontBody, UITheme.TextPrimary,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "ViewTitle");
+            UITheme.PlaceTopLeft(_hintTitle.rectTransform, pad, pad, inner, 18f);
+
+            _hintLine2 = UIKit.Label(_hintCard, "空格 播放 / 暂停　·　[ 重播",
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "Hint2");
+            UITheme.PlaceTopLeft(_hintLine2.rectTransform, pad, pad + 22f, inner, 16f);
+
+            _hintLine3 = UIKit.Label(_hintCard, "M 节拍器　·　Tab 分析　·　F1 帮助",
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "Hint3");
+            UITheme.PlaceTopLeft(_hintLine3.rectTransform, pad, pad + 42f, inner, 16f);
         }
 
-        // ---------- ③ 主播放栏（始终可见、固定位置） ----------
+        // ---------- ③ 底栏播放器面板（单块，主次分明）----------
 
-        private void BuildMainBar()
+        private void BuildPlayerBar()
         {
-            _mainBar = UITheme.CreatePanel(_canvas.transform, "MainPlayBar", Vector2.zero,
+            _playerBar = UITheme.CreatePanel(_canvas.transform, "MainPlayBar", Vector2.zero,
                 new Vector2(UITheme.Layout.ReferenceResolution.x, UITheme.Layout.MainBarHeightNormal),
                 UITheme.PanelBg, UITheme.RadiusLarge);
+            var panelBg = _playerBar.GetComponent<Image>();
+            if (panelBg != null) UITheme.SetOutline(panelBg, true, UITheme.Divider, 1f);
 
-            // 进度区域：当前时间 ━━━ 总时长（+ A/B 标记）
-            _timeText = UITheme.CreateText(_mainBar, "00:00", Vector2.zero, new Vector2(76f, 24f),
-                UITheme.FontCaption, UITheme.TextPrimary, TextAnchor.MiddleLeft);
-            _totalText = UITheme.CreateText(_mainBar, "00:00", Vector2.zero, new Vector2(76f, 24f),
-                UITheme.FontCaption, UITheme.TextSecondary, TextAnchor.MiddleRight);
+            // ---- 进度行：当前时间 ━━━ 总时长 ----
+            _timeText = UIKit.Label(_playerBar, "00:00", UITheme.FontBodySmall, UITheme.TextSecondary,
+                TextAnchor.MiddleRight, FontStyle.Normal, "TimeCurrent");
+            _totalText = UIKit.Label(_playerBar, "00:00", UITheme.FontBodySmall, UITheme.TextSecondary,
+                TextAnchor.MiddleLeft, FontStyle.Normal, "TimeTotal");
 
-            _progress = UITheme.CreateSlider(_mainBar, "Progress", Vector2.zero, new Vector2(900f, 18f));
+            _progress = UIKit.ProgressBar(_playerBar, "Progress",
+                UITheme.Layout.ProgressBarHeight * 2f + UITheme.Space12);
             _progress.onValueChanged.AddListener(v =>
             {
                 if (!_suppressSlider) _session.SeekNormalized(v);
             });
-            _loopAMark = UITheme.CreateTrackMarker(_progress, UITheme.LoopStartColor, 3f);
-            _loopBMark = UITheme.CreateTrackMarker(_progress, UITheme.LoopEndColor, 3f);
+            _loopAMark = UITheme.CreateTrackMarker(_progress, UITheme.LoopStartColor, 2f);
+            _loopBMark = UITheme.CreateTrackMarker(_progress, UITheme.LoopEndColor, 2f);
             UITheme.SetTrackMarker(_loopAMark, 0f, false);
             UITheme.SetTrackMarker(_loopBMark, 0f, false);
 
-            _progressHint = UITheme.CreateText(_mainBar, "未加载曲目时无法播放", Vector2.zero, new Vector2(240f, 20f),
-                UITheme.FontStatusLabel, UITheme.TextWarning, TextAnchor.MiddleLeft);
-
-            // 主控制：曲名 / 状态标签 → 视角（分段）→ 重播 → 播放（唯一最强实心强调）
-            _mainSongText = UITheme.CreateText(_mainBar, "♪ 未加载曲目", Vector2.zero, new Vector2(300f, 26f),
-                UITheme.FontSmall, UITheme.TextPrimary, TextAnchor.MiddleLeft);
-
-            _chipGroup = UITheme.CreateRect(_mainBar, "StateChips", Vector2.zero, Vector2.zero, UITheme.Transparent);
-            _handChip = CreateChip(_chipGroup, "HandChip", 84f);
-            _speedChip = CreateChip(_chipGroup, "SpeedChip", 74f);
-            _loopChip = CreateChip(_chipGroup, "LoopChip", 78f);
-            PlaceChips();
-
-            _cameraSeg = UISegmentedControl.Create(_mainBar, "ViewSegmented", Vector2.zero,
-                new Vector2(216f, UITheme.HeightInput), CameraLabels, (int)_session.CameraMode, index =>
-                {
-                    _session.SetCameraMode((CameraMode)index);
-                    RefreshViewLabel((CameraMode)index);
-                }, UITheme.FontCaption);
-            _cameraSeg.SetOptionTooltip(0, "手部特写：优先看清琴键与手指");
-            _cameraSeg.SetOptionTooltip(1, "全景：观察坐姿、双臂与完整键盘关系");
-            _cameraSeg.SetOptionTooltip(2, "自由观察：右键拖动旋转、滚轮缩放，R 重置视角");
-
-            _restartBtn = UITheme.CreateButton(_mainBar, "重播", Vector2.zero, new Vector2(92f, UITheme.HeightButton),
-                Restart, UITheme.FontCaption, ButtonStyle.Secondary, "回到开头重新播放（不会改变速度与循环设置）", "[");
-            _playBtn = UITheme.CreateButton(_mainBar, "播放", Vector2.zero, new Vector2(140f, UITheme.HeightPrimary),
-                TogglePlay, UITheme.FontAction, ButtonStyle.Primary, "播放 / 暂停当前曲目", "空格");
-
-            UITheme.ChainHorizontal(_cameraSeg.GetSegment(0), _cameraSeg.GetSegment(1), _cameraSeg.GetSegment(2),
-                _restartBtn, _playBtn);
-        }
-
-        private Text CreateChip(Transform parent, string name, float width)
-        {
-            var panel = UITheme.CreatePanel(parent, name, Vector2.zero, new Vector2(width, 26f),
-                UITheme.PanelBgRaised, UITheme.RadiusSmall);
-            var img = panel.GetComponent<Image>();
-            if (img != null) img.raycastTarget = false;
-            var text = UITheme.CreateText(panel, "", Vector2.zero, new Vector2(width - 12f, 24f),
-                UITheme.FontStatusLabel, UITheme.TextPrimary);
-            UITheme.StretchAll(text.rectTransform, 6f, 6f, 0f, 0f);
-            return text;
-        }
-
-        private void PlaceChips()
-        {
-            if (_chipGroup == null) return;
-            UITheme.Place(_chipGroup, 328f, 18f, 264f, 26f);
-            UITheme.Place(_handChip.rectTransform.parent as RectTransform, 0f, 0f, 84f, 26f);
-            UITheme.Place(_speedChip.rectTransform.parent as RectTransform, 92f, 0f, 74f, 26f);
-            UITheme.Place(_loopChip.rectTransform.parent as RectTransform, 174f, 0f, 78f, 26f);
-        }
-
-        // ---------- ④ 练习工具栏（可折叠、按组归类） ----------
-
-        private void BuildPracticeToolbar()
-        {
-            _toolbar = UITheme.CreatePanel(_canvas.transform, "PracticeToolbar", Vector2.zero,
-                new Vector2(UITheme.Layout.ReferenceResolution.x, UITheme.Layout.ToolbarHeightExpanded),
-                UITheme.PanelBg, UITheme.RadiusLarge);
-
-            // 标题行：始终可见（折叠时就是「练习设置」入口，窄窗口不会失去入口）
-            _toolbarTitle = UITheme.CreateText(_toolbar, "练习工具", Vector2.zero, new Vector2(84f, 24f),
-                UITheme.FontCaption, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-
-            _toolbarHint = UITheme.CreateText(_toolbar, "", Vector2.zero, new Vector2(600f, 22f),
-                UITheme.FontStatusLabel, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-
-            _foldBtn = UITheme.CreateButton(_toolbar, "练习设置 ▾", Vector2.zero, new Vector2(112f, 26f),
-                ToggleFold, UITheme.FontCaption, ButtonStyle.Ghost,
-                "展开 / 收起练习设置（窄窗口与手部特写会自动收起）");
-
-            _toolbarBody = UITheme.CreateRect(_toolbar, "ToolbarBody", Vector2.zero, Vector2.zero,
-                UITheme.Transparent);
-            UITheme.StretchAll(_toolbarBody, 0f, 0f, 6f, 40f);
-
-            BuildToolbarRowA();
-            BuildToolbarRowB();
-        }
-
-        private void BuildToolbarRowA()
-        {
-            // 练习手：分段选择器直接显示当前项（方案 3.4 / 审查 2.1）
-            var handLabel = UITheme.CreateText(_toolbarBody, "练习手", Vector2.zero, new Vector2(56f, 22f),
-                UITheme.FontCaption, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-            UITheme.Place(handLabel.rectTransform, 12f, 55f, 56f, 22f);
-
-            _handSeg = UISegmentedControl.Create(_toolbarBody, "HandSegmented", Vector2.zero,
-                new Vector2(196f, UITheme.HeightInput), HandLabels, (int)_session.PracticeHand, index =>
+            // ---- 控制行（左）：练习工具 chips，分三组 ----
+            _handSeg = UIKit.Segmented(_playerBar, "HandSegmented", new Vector2(HandWidth, UITheme.HeightInput),
+                HandLabels, (int)_session.PracticeHand, index =>
                 {
                     _session.SetPracticeHand((PracticeHand)index);
                     RefreshHandHint();
                     RefreshStateChips();
-                }, UITheme.FontCaption);
-            UITheme.Place(_handSeg.Rect, 72f, 48f, 196f, UITheme.HeightInput);
+                });
             _handSeg.SetOptionTooltip(0, "双手练习：左右手声部都发声");
             _handSeg.SetOptionTooltip(1, "只练左手：右手声部静音");
             _handSeg.SetOptionTooltip(2, "只练右手：左手声部静音");
 
-            // 某手无音符时就近提示（审查 2.2C：不要只出现在远处状态栏）
-            _handHint = UITheme.CreateText(_toolbarBody, "", Vector2.zero, new Vector2(272f, 34f),
-                UITheme.FontStatusLabel, UITheme.TextWarning, TextAnchor.MiddleLeft);
-            _handHint.horizontalOverflow = HorizontalWrapMode.Wrap;
-            _handHint.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.Place(_handHint.rectTransform, 274f, 48f, 272f, 34f);
+            _speedChip = UIKit.Chip(_playerBar, "SpeedChip", SpeedWidth, CycleSpeed,
+                "速度：点击循环切换 0.5× / 1.0× / 1.5×");
 
-            // 速度：分段选择器替代循环切换按钮（方案 3.4）
-            var speedLabel = UITheme.CreateText(_toolbarBody, "速度", Vector2.zero, new Vector2(40f, 22f),
-                UITheme.FontCaption, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-            UITheme.Place(speedLabel.rectTransform, 556f, 55f, 40f, 22f);
-
-            _speedSeg = UISegmentedControl.Create(_toolbarBody, "SpeedSegmented", Vector2.zero,
-                new Vector2(180f, UITheme.HeightInput), SpeedLabels, IndexOfSpeed(_session.PlaybackSpeed), index =>
-                {
-                    _session.SetSpeed(SpeedOptions[index]);
-                    RefreshStateChips();
-                }, UITheme.FontCaption);
-            UITheme.Place(_speedSeg.Rect, 600f, 48f, 180f, UITheme.HeightInput);
-            _speedSeg.SetOptionTooltip(0, "0.5 倍速：慢练难点片段");
-            _speedSeg.SetOptionTooltip(1, "原速（1.0 倍速）");
-            _speedSeg.SetOptionTooltip(2, "1.5 倍速：熟悉后提速");
-
-            // 高亮提示：分段选择器（关闭 / 预提示 / 发声 / 全部）
-            var highlightLabel = UITheme.CreateText(_toolbarBody, "高亮", Vector2.zero, new Vector2(40f, 22f),
-                UITheme.FontCaption, UITheme.TextSecondary, TextAnchor.MiddleLeft);
-            UITheme.Place(highlightLabel.rectTransform, 794f, 55f, 40f, 22f);
-
-            _highlightSeg = UISegmentedControl.Create(_toolbarBody, "HighlightSegmented", Vector2.zero,
-                new Vector2(228f, UITheme.HeightInput), HighlightLabels, (int)_session.KeyHighlight, index =>
-                {
-                    _session.SetHighlightMode((HighlightMode)index);
-                    RefreshStateChips();
-                }, UITheme.FontCaption);
-            UITheme.Place(_highlightSeg.Rect, 838f, 48f, 228f, UITheme.HeightInput);
-            _highlightSeg.SetOptionTooltip(0, "关闭琴键高亮提示");
-            _highlightSeg.SetOptionTooltip(1, "预提示：提前标出即将按下的琴键（跟弹用）", "H");
-            _highlightSeg.SetOptionTooltip(2, "发声：只高亮正在发声的琴键");
-            _highlightSeg.SetOptionTooltip(3, "全部：预提示 + 发声（默认教学模式）");
-
-            // 循环开关（开关 + 状态文字，非颜色区分）
-            _loopToggle = UITheme.CreateToggleButton(_toolbarBody, "循环", Vector2.zero,
-                new Vector2(96f, UITheme.HeightInput), _session.IsLooping, ToggleLoop,
+            _loopChip = UIKit.Chip(_playerBar, "LoopChip", LoopWidth, ToggleLoop,
                 "循环播放：打开后播放到结尾自动回到开头，并可设置 A / B 片段");
-            UITheme.PlaceRight(_loopToggle.GetComponent<RectTransform>(), 12f, 48f, 96f, UITheme.HeightInput);
-        }
 
-        private void BuildToolbarRowB()
-        {
-            // 节拍器：开关 + 强弱拍视觉指示
-            _metronomeBtn = UITheme.CreateToggleButton(_toolbarBody, "节拍器", Vector2.zero,
-                new Vector2(112f, UITheme.HeightInput), _session.MetronomeEnabled, ToggleMetronome,
-                "节拍器开关（拍点跟随课程速度缩放）", "M");
-            UITheme.Place(_metronomeBtn.GetComponent<RectTransform>(), 12f, 6f, 112f, UITheme.HeightInput);
-
-            _beatDots = UITheme.CreateText(_toolbarBody, "", Vector2.zero, new Vector2(150f, 22f),
-                UITheme.FontSmall, UITheme.Accent, TextAnchor.MiddleLeft);
-            UITheme.Place(_beatDots.rectTransform, 130f, 13f, 150f, 22f);
-
-            // A-B 循环：启用循环后才出现（方案 3.2 / 审查 2.1）
-            _loopRangeGroup = UITheme.CreateRect(_toolbarBody, "LoopRange", Vector2.zero, Vector2.zero,
+            _loopRangeGroup = UITheme.CreateRect(_playerBar, "LoopRange", Vector2.zero, Vector2.zero,
                 UITheme.Transparent);
-            UITheme.Place(_loopRangeGroup, 288f, 6f, 542f, UITheme.HeightInput);
-
-            _setABtn = UITheme.CreateButton(_loopRangeGroup, "设置 A", Vector2.zero, new Vector2(92f, 32f),
-                SetLoopPointA, UITheme.FontCaption, ButtonStyle.Secondary,
-                "把当前播放位置记为循环起点 A");
-            UITheme.Place(_setABtn.GetComponent<RectTransform>(), 0f, 2f, 92f, 32f);
-
-            _setBBtn = UITheme.CreateButton(_loopRangeGroup, "设置 B", Vector2.zero, new Vector2(92f, 32f),
-                SetLoopPointB, UITheme.FontCaption, ButtonStyle.Secondary,
+            _setABtn = UITheme.CreateButton(_loopRangeGroup, "设 A", Vector2.zero, new Vector2(44f, 32f),
+                SetLoopPointA, UITheme.FontBodySmall, ButtonStyle.Ghost, "把当前播放位置记为循环起点 A");
+            _setBBtn = UITheme.CreateButton(_loopRangeGroup, "设 B", Vector2.zero, new Vector2(44f, 32f),
+                SetLoopPointB, UITheme.FontBodySmall, ButtonStyle.Ghost,
                 "把当前播放位置记为循环终点 B（必须晚于 A）");
-            UITheme.Place(_setBBtn.GetComponent<RectTransform>(), 100f, 2f, 92f, 32f);
-
-            _clearLoopBtn = UITheme.CreateButton(_loopRangeGroup, "清除 A-B", Vector2.zero, new Vector2(96f, 32f),
-                ClearLoopRange, UITheme.FontCaption, ButtonStyle.Ghost,
+            _clearLoopBtn = UITheme.CreateButton(_loopRangeGroup, "清除", Vector2.zero, new Vector2(44f, 32f),
+                ClearLoopRange, UITheme.FontBodySmall, ButtonStyle.Ghost,
                 "清除 A / B 标记，循环范围恢复为整曲");
-            UITheme.Place(_clearLoopBtn.GetComponent<RectTransform>(), 200f, 2f, 96f, 32f);
+            UITheme.Place(_setABtn.GetComponent<RectTransform>(), 0f, 0f, 44f, 32f);
+            UITheme.Place(_setBBtn.GetComponent<RectTransform>(), 48f, 0f, 44f, 32f);
+            UITheme.Place(_clearLoopBtn.GetComponent<RectTransform>(), 96f, 0f, 44f, 32f);
+            UITheme.ChainHorizontal(_setABtn, _setBBtn, _clearLoopBtn);
 
-            _loopRangeText = UITheme.CreateText(_loopRangeGroup, "", Vector2.zero, new Vector2(240f, 22f),
-                UITheme.FontStatusLabel, UITheme.TextPrimary, TextAnchor.MiddleLeft);
-            UITheme.Place(_loopRangeText.rectTransform, 304f, 13f, 240f, 22f);
+            _highlightChip = UIKit.Chip(_playerBar, "HighlightChip", HighlightWidth, CycleHighlight,
+                "琴键高亮：点击循环切换 关闭 / 预提示 / 发声 / 全部", "H");
+            _metronomeChip = UIKit.Chip(_playerBar, "MetronomeChip", MetronomeWidth, ToggleMetronome,
+                "节拍器开关（拍点跟随课程速度缩放）", "M");
 
-            // 循环关闭时的说明（就近解释，不留空白让人猜）
-            _loopOffHint = UITheme.CreateText(_toolbarBody, "循环已关闭：打开「循环」后可设置 A / B 片段",
-                Vector2.zero, new Vector2(420f, 22f), UITheme.FontStatusLabel, UITheme.TextSecondary,
-                TextAnchor.MiddleLeft);
-            UITheme.Place(_loopOffHint.rectTransform, 288f, 13f, 420f, 22f);
+            _beatDots = UIKit.Label(_playerBar, "", UITheme.FontBodySmall, UITheme.Accent,
+                TextAnchor.MiddleLeft, FontStyle.Normal, "BeatDots");
 
-            // 显示模式：展示（完整手部动画）/ 教学（隐藏手部，仅高亮被按下的琴键）
-            _displaySeg = UISegmentedControl.Create(_toolbarBody, "DisplayModeSegmented", Vector2.zero,
-                new Vector2(168f, UITheme.HeightInput), new[] { "展示", "教学" }, (int)_session.DisplayMode, index =>
-                {
-                    _session.SetDisplayMode((DisplayMode)index);
-                    RefreshStateChips();
-                }, UITheme.FontCaption);
-            UITheme.Place(_displaySeg.Rect, 838f, 6f, 168f, UITheme.HeightInput);
-            _displaySeg.SetOptionTooltip(0, "展示模式：完整手部动画与演奏动作（高亮提示按你的设置）", "T");
-            _displaySeg.SetOptionTooltip(1, "教学模式：隐藏手部动画，仅高亮被按下的琴键（左手冷蓝 · 右手暖橙）", "T");
-
-            // 低频工具：曲目分析 / 角色外观（弱化样式，且说明快捷键）
-            _analysisBtn = UITheme.CreateButton(_toolbarBody, "曲目分析", Vector2.zero, new Vector2(108f, 32f),
-                ToggleAnalysis, UITheme.FontCaption, ButtonStyle.Ghost,
+            _displayChip = UIKit.Chip(_playerBar, "DisplayChip", DisplayWidth, () => _session.ToggleDisplayMode(),
+                "展示 / 教学模式：教学模式下隐藏手部动画，只高亮被按下的琴键", "T");
+            _analysisBtn = UIKit.Chip(_playerBar, "CurAnalysis", AnalysisWidth, ToggleAnalysis,
                 "曲目分析：音符数、左右手比例、和弦、音域、跨度与练习建议", "Tab");
-            UITheme.PlaceRight(_analysisBtn.GetComponent<RectTransform>(), 128f, 8f, 108f, 32f);
+            // 保持既有对象名（PlayMode 截图用例按名字点击），同时文案给出完整语义
+            _analysisBtn.gameObject.name = "Btn_曲目分析";
+            _analysisBtn.name = "Btn_曲目分析";
+            UITheme.SetButtonLabel(_analysisBtn, "曲目分析");
 
-            _avatarBtn = UITheme.CreateButton(_toolbarBody, "角色 / 外观", Vector2.zero, new Vector2(108f, 32f),
-                ToggleAvatarPanel, UITheme.FontCaption, ButtonStyle.Ghost,
-                "角色 / 外观面板：切换角色不会改变播放进度");
-            UITheme.PlaceRight(_avatarBtn.GetComponent<RectTransform>(), 12f, 8f, 108f, 32f);
+            // ---- 控制行（右）：视角分段 → 重播 → 播放 / 暂停（唯一实心强调）----
+            _cameraSeg = UIKit.Segmented(_playerBar, "ViewSegmented", new Vector2(CameraWidth, UITheme.HeightInput),
+                CameraLabels, (int)_session.CameraMode, index =>
+                {
+                    _session.SetCameraMode((CameraMode)index);
+                    RefreshViewLabel((CameraMode)index);
+                });
+            _cameraSeg.SetOptionTooltip(0, "手部特写：优先看清琴键与手指");
+            _cameraSeg.SetOptionTooltip(1, "全景：观察坐姿、双臂与完整键盘关系");
+            _cameraSeg.SetOptionTooltip(2, "自由观察：右键拖动旋转、滚轮缩放，R 重置视角");
 
-            UITheme.ChainHorizontal(_metronomeBtn, _setABtn, _setBBtn, _clearLoopBtn, _analysisBtn, _avatarBtn);
+            _restartBtn = UIKit.IconButton(_playerBar, "Restart", UIIcon.Replay, UITheme.SizeIconButton,
+                Restart, "重播：回到开头（不改变速度与循环设置）", "[");
+
+            _playBtn = UIKit.PrimaryButton(_playerBar, "播放",
+                new Vector2(UITheme.Layout.PrimaryActionWidth, UITheme.HeightButton),
+                TogglePlay, "播放 / 暂停当前曲目", "空格");
+
+            UITheme.ChainHorizontal(_handSeg.GetSegment(0), _handSeg.GetSegment(1), _handSeg.GetSegment(2),
+                _speedChip, _loopChip, _highlightChip, _metronomeChip, _displayChip, _analysisBtn,
+                _cameraSeg.GetSegment(0), _cameraSeg.GetSegment(1), _cameraSeg.GetSegment(2),
+                _restartBtn, _playBtn);
         }
 
-        // ---------- ⑤ 分析面板（右侧滑出，动作质量默认折叠） ----------
+        /// <summary>底栏控制行布局：左侧 chips 从左往右、右侧主控从右往左，两侧不会互相挤压。</summary>
+        private void LayoutPlayerRows()
+        {
+            if (_playerBar == null) return;
+
+            float pad = UITheme.Layout.PlayerPadding;
+            float rowH = UITheme.Layout.PlayerControlRowHeight;
+            float chipH = UITheme.Layout.ChipHeight;
+            float controlY = pad + Mathf.Round((rowH - chipH) * 0.5f);   // 32 高控件在 40 行里居中
+
+            // ---- 进度行 ----
+            if (_compact)
+            {
+                _timeText.gameObject.SetActive(false);
+                _totalText.gameObject.SetActive(false);
+                _progress.gameObject.SetActive(false);
+            }
+            else
+            {
+                _timeText.gameObject.SetActive(true);
+                _totalText.gameObject.SetActive(true);
+                _progress.gameObject.SetActive(true);
+
+                float progressY = pad + rowH + UITheme.Layout.PlayerRowGap;
+                float rowCenter = progressY + UITheme.Layout.PlayerProgressRowHeight * 0.5f;
+                float sliderH = UITheme.Layout.ProgressBarHeight * 2f + UITheme.Space12;
+
+                UITheme.Place(_timeText.rectTransform, pad, progressY,
+                    UITheme.Layout.TimeLabelWidth, UITheme.Layout.PlayerProgressRowHeight);
+                UITheme.PlaceRight(_totalText.rectTransform, pad, progressY,
+                    UITheme.Layout.TimeLabelWidth, UITheme.Layout.PlayerProgressRowHeight);
+
+                float gap = UITheme.Space8;
+                float inset = pad + UITheme.Layout.TimeLabelWidth + gap;
+                UITheme.StretchX(_progress.GetComponent<RectTransform>(), inset, inset,
+                    rowCenter - sliderH * 0.5f, sliderH);
+            }
+
+            // ---- 控制行（左）：练习工具分三组 ----
+            bool narrow = _lastNarrow;
+            float x = pad;
+            PlaceRowItem(_handSeg.Rect, ref x, HandWidth, UITheme.Layout.ChipGapInner, controlY, chipH);
+            PlaceRowItem(_speedChip.GetComponent<RectTransform>(), ref x, SpeedWidth,
+                UITheme.Layout.ChipGapGroup, controlY, chipH);
+
+            PlaceRowItem(_loopChip.GetComponent<RectTransform>(), ref x, LoopWidth,
+                UITheme.Layout.ChipGapInner, controlY, chipH);
+            if (_loopRangeGroup.gameObject.activeSelf)
+            {
+                UITheme.Place(_loopRangeGroup, x, controlY, LoopRangeWidth, chipH);
+                x += LoopRangeWidth + UITheme.Layout.ChipGapInner;
+            }
+
+            PlaceRowItem(_highlightChip.GetComponent<RectTransform>(), ref x, HighlightWidth,
+                UITheme.Layout.ChipGapInner, controlY, chipH);
+            PlaceRowItem(_metronomeChip.GetComponent<RectTransform>(), ref x, MetronomeWidth,
+                UITheme.Layout.ChipGapInner, controlY, chipH);
+            if (_beatDots.gameObject.activeSelf)
+                PlaceRowItem(_beatDots.rectTransform, ref x, BeatDotsWidth, UITheme.Layout.ChipGapInner,
+                    controlY, chipH);
+
+            if (!narrow)
+            {
+                PlaceRowItem(_displayChip.GetComponent<RectTransform>(), ref x, DisplayWidth,
+                    UITheme.Layout.ChipGapGroup, controlY, chipH);
+                PlaceRowItem(_analysisBtn.GetComponent<RectTransform>(), ref x, AnalysisWidth,
+                    0f, controlY, chipH);
+            }
+
+            // ---- 控制行（右）：主按钮 → 重播 → 视角分段 ----
+            float rightY = pad + Mathf.Round((rowH - UITheme.HeightButton) * 0.5f);
+            float rx = pad;
+            UITheme.PlaceRight(_playBtn.GetComponent<RectTransform>(), rx, rightY,
+                UITheme.Layout.PrimaryActionWidth, UITheme.HeightButton);
+            rx += UITheme.Layout.PrimaryActionWidth + UITheme.Layout.ChipGapGroup;
+
+            UITheme.PlaceRight(_restartBtn.GetComponent<RectTransform>(), rx,
+                pad + Mathf.Round((rowH - UITheme.SizeIconButton) * 0.5f),
+                UITheme.SizeIconButton, UITheme.SizeIconButton);
+            rx += UITheme.SizeIconButton + UITheme.Layout.ChipGapGroup;
+
+            UITheme.PlaceRight(_cameraSeg.Rect, rx, controlY, CameraWidth, chipH);
+        }
+
+        private static void PlaceRowItem(RectTransform rt, ref float x, float width, float gapAfter,
+            float y, float height)
+        {
+            UITheme.Place(rt, x, y, width, height);
+            x += width + gapAfter;
+        }
+
+        // ---------- 就近警告：某只手在本曲没有音符 ----------
+
+        private void BuildHandHint()
+        {
+            _handHintChip = UITheme.CreatePanel(_canvas.transform, "HandHintChip", Vector2.zero,
+                new Vector2(UITheme.Layout.HintCardWidth, 28f),
+                UITheme.ErrorBannerColor(ErrorSeverity.Warning), UITheme.RadiusSmall);
+            var bg = _handHintChip.GetComponent<Image>();
+            if (bg != null) bg.raycastTarget = false;
+
+            _handHintText = UIKit.Label(_handHintChip, "", UITheme.FontBodySmall, UITheme.TextWarning,
+                TextAnchor.MiddleLeft, FontStyle.Normal, "HandHintText");
+            UITheme.StretchAll(_handHintText.rectTransform, UITheme.Space8, UITheme.Space8, 0f, 0f);
+            _handHintText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _handHintText.verticalOverflow = VerticalWrapMode.Truncate;
+
+            _handHintChip.gameObject.SetActive(false);
+        }
+
+        // ---------- ⑤ 分析面板（右侧滑出，动作质量默认折叠）----------
 
         private void BuildAnalysisPanel()
         {
+            const float pad = UITheme.Space16;
             _analysisPanel = UITheme.CreatePanel(_canvas.transform, "AnalysisPanel", Vector2.zero,
                 new Vector2(UITheme.Layout.AnalysisPanelWidth, 420f), UITheme.PanelBg, UITheme.RadiusLarge);
 
-            var title = UITheme.CreateText(_analysisPanel, "曲目分析", Vector2.zero, new Vector2(240f, 28f),
-                UITheme.FontSongTitle, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(title.rectTransform, 18f, 14f, 240f, 28f);
+            var title = UIKit.Label(_analysisPanel, "曲目分析", UITheme.FontSubtitle, UITheme.TextPrimary,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "AnalysisTitle");
+            UITheme.PlaceTopLeft(title.rectTransform, pad, UITheme.Space12, 240f, 24f);
 
-            _analysisCloseBtn = UITheme.CreateButton(_analysisPanel, "收起", Vector2.zero, new Vector2(72f, 28f),
-                () => ShowAnalysis(false), UITheme.FontCaption, ButtonStyle.Ghost, "收起分析面板");
-            UITheme.PlaceTopRight(_analysisCloseBtn.GetComponent<RectTransform>(), 14f, 14f, 72f, 28f);
+            var closeBtn = UITheme.CreateButton(_analysisPanel, "收起", Vector2.zero, new Vector2(56f, 24f),
+                () => ShowAnalysis(false), UITheme.FontBodySmall, ButtonStyle.Ghost, "收起分析面板");
+            UITheme.PlaceTopRight(closeBtn.GetComponent<RectTransform>(), pad, UITheme.Space12, 56f, 24f);
 
             var divider = UITheme.CreateDivider(_analysisPanel, "Divider", Vector2.zero, new Vector2(360f, 1f));
-            UITheme.StretchTop(divider, 18f, 18f, 50f, 1f);
+            UITheme.StretchTop(divider, pad, pad, 44f, 1f);
 
-            _analysisText = UITheme.CreateText(_analysisPanel, "", Vector2.zero, new Vector2(360f, 150f),
-                UITheme.FontCaption, UITheme.TextPrimary, TextAnchor.UpperLeft);
+            float inner = UITheme.Layout.AnalysisPanelWidth - pad * 2f;
+
+            _analysisText = UIKit.Label(_analysisPanel, "", UITheme.FontBodySmall, UITheme.TextPrimary,
+                TextAnchor.UpperLeft, FontStyle.Normal, "AnalysisBody");
             _analysisText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _analysisText.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.PlaceTopLeft(_analysisText.rectTransform, 18f, 60f, 360f, 150f);
+            UITheme.PlaceTopLeft(_analysisText.rectTransform, pad, 56f, inner, 150f);
 
-            _suggestionText = UITheme.CreateText(_analysisPanel, "", Vector2.zero, new Vector2(360f, 84f),
-                UITheme.FontCaption, UITheme.TextSecondary, TextAnchor.UpperLeft);
+            _suggestionText = UIKit.Label(_analysisPanel, "", UITheme.FontBodySmall, UITheme.TextSecondary,
+                TextAnchor.UpperLeft, FontStyle.Normal, "AnalysisSuggestion");
             _suggestionText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _suggestionText.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.PlaceTopLeft(_suggestionText.rectTransform, 18f, 216f, 360f, 84f);
+            UITheme.PlaceTopLeft(_suggestionText.rectTransform, pad, 214f, inner, 88f);
 
             var divider2 = UITheme.CreateDivider(_analysisPanel, "Divider2", Vector2.zero, new Vector2(360f, 1f));
-            UITheme.StretchTop(divider2, 18f, 18f, 306f, 1f);
+            UITheme.StretchTop(divider2, pad, pad, 308f, 1f);
 
             _diagnosticsToggle = UITheme.CreateToggleButton(_analysisPanel, "开发诊断", Vector2.zero,
-                new Vector2(140f, 28f), false, ToggleDiagnostics,
+                new Vector2(120f, 28f), false, ToggleDiagnostics,
                 "动作质量指标（命中率 / 最大帧位移 / 平滑度 / 双手协调）：开发与验收用，默认折叠",
-                null, UITheme.FontCaption);
-            UITheme.PlaceTopLeft(_diagnosticsToggle.GetComponent<RectTransform>(), 18f, 316f, 140f, 28f);
+                null, UITheme.FontBodySmall);
+            UITheme.PlaceTopLeft(_diagnosticsToggle.GetComponent<RectTransform>(), pad, 316f, 120f, 28f);
 
             _diagnosticsBody = UITheme.CreateRect(_analysisPanel, "DiagnosticsBody", Vector2.zero,
                 Vector2.zero, UITheme.Transparent);
-            UITheme.PlaceTopLeft(_diagnosticsBody, 18f, 350f, 360f, 56f);
+            UITheme.PlaceTopLeft(_diagnosticsBody, pad, 350f, inner, 56f);
 
-            _motionText = UITheme.CreateText(_diagnosticsBody, "", Vector2.zero, new Vector2(360f, 56f),
-                UITheme.FontStatusLabel, UITheme.TextSecondary, TextAnchor.UpperLeft);
+            _motionText = UIKit.Label(_diagnosticsBody, "", UITheme.FontBodySmall, UITheme.TextSecondary,
+                TextAnchor.UpperLeft, FontStyle.Normal, "MotionBody");
             _motionText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _motionText.verticalOverflow = VerticalWrapMode.Truncate;
             UITheme.StretchAll(_motionText.rectTransform, 0f, 0f, 0f, 0f);
@@ -718,36 +698,48 @@ namespace PianoTeacher3D.UI
             _analysisSlide = 0f;
         }
 
-        // ---------- 空状态（方案 8.2「没有可用曲目 → 空状态页 + 导入 MIDI / 播放示例曲」） ----------
+        // ---------- 空状态（居中卡片：图标 + 说明 + 行动按钮）----------
 
         private void BuildEmptyState()
         {
+            const float w = 480f;
+            const float h = 208f;
+
             _emptyState = UITheme.CreatePanel(_canvas.transform, "EmptyState", Vector2.zero,
-                new Vector2(480f, 168f), UITheme.PanelBgRaised, UITheme.RadiusLarge);
-            UITheme.PlaceCenter(_emptyState, 480f, 168f);
+                new Vector2(w, h), UITheme.PanelBgRaised, UITheme.RadiusLarge);
+            UITheme.PlaceCenter(_emptyState, w, h);
 
-            var title = UITheme.CreateText(_emptyState, "还没有可练习的曲目", Vector2.zero, new Vector2(432f, 28f),
-                UITheme.FontSongTitle, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.PlaceTopLeft(title.rectTransform, 24f, 18f, 432f, 28f);
+            // 图标：48 圆底 + 音符字形（纯装饰，不承担语义）
+            var icon = UITheme.CreatePanel(_emptyState, "Icon", Vector2.zero, new Vector2(48f, 48f),
+                UITheme.PanelBgDeep, 24);
+            UITheme.PlaceTopLeft(icon, (w - 48f) * 0.5f, UITheme.Space24, 48f, 48f);
+            var iconImg = icon.GetComponent<Image>();
+            if (iconImg != null) iconImg.raycastTarget = false;
+            var glyph = UIKit.Label(icon, "♪", UITheme.FontTitle, UITheme.Accent, TextAnchor.MiddleCenter,
+                FontStyle.Bold, "Glyph");
+            UITheme.StretchAll(glyph.rectTransform, 0f, 0f, 0f, 0f);
 
-            _emptyBody = UITheme.CreateText(_emptyState,
-                "导入本地 .mid / .midi 文件即可开始练习；也可以先播放内置示例曲，熟悉界面与视角。\n" +
-                "未加载曲目时播放、重播与循环按钮保持不可用，避免点了没反应。",
-                Vector2.zero, new Vector2(432f, 48f), UITheme.FontCaption, UITheme.TextSecondary,
-                TextAnchor.UpperLeft);
-            _emptyBody.horizontalOverflow = HorizontalWrapMode.Wrap;
-            _emptyBody.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.PlaceTopLeft(_emptyBody.rectTransform, 24f, 52f, 432f, 48f);
+            var title = UIKit.Label(_emptyState, "还没有可练习的曲目", UITheme.FontSubtitle,
+                UITheme.TextPrimary, TextAnchor.MiddleCenter, FontStyle.Bold, "EmptyTitle");
+            UITheme.PlaceTopLeft(title.rectTransform, UITheme.Space24, UITheme.Space24 + 48f + UITheme.Space8,
+                w - UITheme.Space24 * 2f, 20f);
 
-            var importBtn = UITheme.CreateButton(_emptyState, "导入 MIDI…", Vector2.zero, new Vector2(150f, 34f),
-                () => _session.ImportMidi(), UITheme.FontCaption, ButtonStyle.Primary,
-                "打开文件选择器导入本地 MIDI 文件");
-            UITheme.Place(importBtn.GetComponent<RectTransform>(), 24f, 12f, 150f, 34f);
+            var body = UIKit.Label(_emptyState,
+                "导入本地 .mid / .midi 即可开始练习，或先播放内置示例曲熟悉界面与视角。",
+                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.UpperCenter, FontStyle.Normal,
+                "EmptyBody");
+            body.horizontalOverflow = HorizontalWrapMode.Wrap;
+            body.verticalOverflow = VerticalWrapMode.Truncate;
+            UITheme.PlaceTopLeft(body.rectTransform, UITheme.Space24, 108f, w - UITheme.Space24 * 2f, 34f);
 
-            var sampleBtn = UITheme.CreateButton(_emptyState, "播放示例曲", Vector2.zero, new Vector2(150f, 34f),
-                PlaySampleSong, UITheme.FontCaption, ButtonStyle.Secondary,
-                "载入 StreamingAssets/Songs 中的第一首示例曲");
-            UITheme.Place(sampleBtn.GetComponent<RectTransform>(), 186f, 12f, 150f, 34f);
+            var importBtn = UIKit.PrimaryButton(_emptyState, "导入 MIDI…", new Vector2(148f, 40f),
+                () => _session.ImportMidi(), "打开文件选择器导入本地 MIDI 文件");
+            UITheme.Place(importBtn.GetComponent<RectTransform>(), UITheme.Space24, UITheme.Space16, 148f, 40f);
+
+            var sampleBtn = UIKit.SecondaryButton(_emptyState, "播放示例曲", new Vector2(148f, 40f),
+                PlaySampleSong, "载入 StreamingAssets/Songs 中的第一首示例曲");
+            UITheme.Place(sampleBtn.GetComponent<RectTransform>(), UITheme.Space24 + 148f + UITheme.Space12,
+                UITheme.Space16, 148f, 40f);
 
             UITheme.ChainHorizontal(importBtn, sampleBtn);
             _emptyState.gameObject.SetActive(false);
@@ -767,6 +759,15 @@ namespace PianoTeacher3D.UI
             if (_session.IsLoading) return;
             if (!UITheme.CanTriggerSongActions(_session.State, _session.HasSong)) return;
             _session.Restart();
+        }
+
+        private void CycleSpeed()
+        {
+            if (_session.IsLoading) return;
+            int index = IndexOfSpeed(_session.PlaybackSpeed);
+            int next = (index + 1) % SpeedOptions.Length;
+            _session.SetSpeed(SpeedOptions[next]);
+            RefreshStateChips();
         }
 
         private void ToggleLoop()
@@ -798,7 +799,7 @@ namespace PianoTeacher3D.UI
             else
             {
                 if (_status != null)
-                    _status.ShowToast($"已记录起点 A = {UITheme.FormatTime(_loopA)}。请把进度拖到片段结束处，再点「设置 B」。");
+                    _status.ShowToast($"已记录起点 A = {UITheme.FormatTime(_loopA)}。请把进度拖到片段结束处，再点「设 B」。");
             }
             RefreshLoopControls();
         }
@@ -840,12 +841,12 @@ namespace PianoTeacher3D.UI
             if (_session.IsLoading) return;
             _session.ToggleMetronome();
             RefreshBeatDots();
+            RefreshStateChips();
         }
 
         private void CycleHighlight()
         {
             _session.CycleHighlightMode();
-            if (_highlightSeg != null) _highlightSeg.SetSelectedIndex((int)_session.KeyHighlight);
             RefreshStateChips();
         }
 
@@ -865,9 +866,7 @@ namespace PianoTeacher3D.UI
                 RefreshAnalysisContent();
                 RefreshMotion();
             }
-            if (_analysisBtn != null)
-                UITheme.ApplyButtonState(_analysisBtn, show ? ButtonState.Selected : ButtonState.Default,
-                    ButtonStyle.Ghost);
+            if (_analysisBtn != null) UIKit.SetChip(_analysisBtn, "曲目分析", "", show, true);
         }
 
         private void AnimateAnalysisPanel()
@@ -891,13 +890,6 @@ namespace PianoTeacher3D.UI
             UITheme.SetToggleState(_diagnosticsToggle, "开发诊断", _diagnosticsOpen);
             if (_diagnosticsBody != null) _diagnosticsBody.gameObject.SetActive(_diagnosticsOpen);
             if (_diagnosticsOpen) RefreshMotion();
-        }
-
-        private void ToggleFold()
-        {
-            _folded = !_folded;
-            _foldTouched = true;
-            ApplyFoldState();
         }
 
         private void ToggleAvatarPanel()
@@ -948,7 +940,7 @@ namespace PianoTeacher3D.UI
                     return;
                 }
                 System.Array.Sort(files);
-                _session.LoadSongAsync(files[0]);   // 走可取消的分阶段加载（优化方案 §7-8）
+                _session.LoadSongAsync(files[0]);   // 走可取消的分阶段加载
             }
             catch (System.Exception ex)
             {
@@ -958,7 +950,7 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        // ==================== 响应式布局（方案 3.4 末条 / 15 章窗口缩放） ====================
+        // ==================== 响应式布局 ====================
 
         private void ApplyResponsiveLayoutIfNeeded()
         {
@@ -970,106 +962,56 @@ namespace PianoTeacher3D.UI
 
         /// <summary>
         /// 参考分辨率（1280×720）下的自适应：
-        /// 宽窗口（≥1180）展开练习工具；窄窗口自动折叠（不缩小主按钮）；
-        /// 手部特写压缩主播放栏高度并折叠练习工具，避免遮挡琴键与双手。
+        /// 宽窗口显示全部 chip；窄窗口按优先级收起「显示模式 → 曲目分析」，不缩小主按钮、不折行；
+        /// 手部特写隐藏进度行（底栏 132 → 72），把琴键与双手让出来。
         /// </summary>
         private void ApplyResponsiveLayout()
         {
             float refW = UITheme.GetReferenceWidth(_canvas);
             bool narrow = UITheme.IsNarrowReferenceWidth(refW);
-            bool closeup = _session != null && _session.CameraMode == CameraMode.Closeup;
-
-            // 档位变化时按规则自动折叠；用户手动展开/收起优先（直到档位再次变化）
-            if ((narrow != _lastNarrow || closeup != _lastCompact) && !_foldTouched)
-                _folded = UITheme.ShouldFoldPracticeTools(refW, closeup);
 
             _lastRefWidth = refW;
             _lastNarrow = narrow;
-            _lastCompact = closeup;
-            _compact = closeup;
+            _lastCompact = _session != null && _session.CameraMode == CameraMode.Closeup;
+            _compact = _lastCompact;
 
             float margin = UITheme.Layout.ScreenMargin;
-            float mainH = closeup ? UITheme.Layout.MainBarHeightCompact : UITheme.Layout.MainBarHeightNormal;
+            float barH = _compact ? UITheme.Layout.MainBarHeightCompact : UITheme.Layout.MainBarHeightNormal;
 
-            // ---- 主播放栏 ----
-            UITheme.StretchX(_mainBar, margin, margin, margin, mainH);
+            UITheme.StretchX(_playerBar, margin, margin, margin, barH);
 
-            float progressH = closeup
-                ? UITheme.Layout.ProgressRowHeightCompact
-                : UITheme.Layout.ProgressRowHeightNormal;
-            float progressY = mainH - progressH - (closeup ? 6f : 10f);
-            float timeW = 76f;
-            UITheme.Place(_timeText.rectTransform, 16f, progressY, timeW, progressH + 2f);
-            UITheme.PlaceRight(_totalText.rectTransform, 16f, progressY, timeW, progressH + 2f);
-            UITheme.StretchX(_progress.GetComponent<RectTransform>(), 16f + timeW + 8f, 16f + timeW + 8f,
-                progressY, progressH);
+            // 窄窗口：低频控件先让位（进度行与主按钮始终保留）
+            if (_displayChip != null) _displayChip.gameObject.SetActive(!narrow);
+            if (_analysisBtn != null) _analysisBtn.gameObject.SetActive(!narrow);
 
-            float ctrlH = closeup ? 38f : 48f;
-            float ctrlY = closeup ? 6f : 12f;
-            float secH = closeup ? 32f : 40f;
-            float secW = closeup ? 76f : 92f;
-            float playW = closeup ? 116f : 140f;
-            float segW = closeup ? 186f : 216f;
-
-            UITheme.PlaceRight(_playBtn.GetComponent<RectTransform>(), 16f, ctrlY, playW, ctrlH);
-            UITheme.PlaceRight(_restartBtn.GetComponent<RectTransform>(), 16f + playW + 8f,
-                ctrlY + (ctrlH - secH) * 0.5f, secW, secH);
-            UITheme.PlaceRight(_cameraSeg.Rect, 16f + playW + 8f + secW + 8f,
-                ctrlY + (ctrlH - UITheme.HeightInput) * 0.5f, segW, UITheme.HeightInput);
-
-            // 窄窗口 / 手部特写：曲名与状态标签已在顶栏与练习工具栏标题行可见，这里收起而不压缩按钮
-            _showBarLeft = !narrow && !closeup;
-            _mainSongText.gameObject.SetActive(_showBarLeft);
-            _chipGroup.gameObject.SetActive(_showBarLeft);
-            UITheme.Place(_mainSongText.rectTransform, 16f, ctrlY + (ctrlH - 26f) * 0.5f, 300f, 26f);
-            // 无曲目时的原因说明与曲名共用同一位置（互斥显示，就近解释为什么不点不动）
-            UITheme.Place(_progressHint.rectTransform, 16f, ctrlY + (ctrlH - 20f) * 0.5f, 300f, 20f);
-            if (_showBarLeft) PlaceChips();
-
-            // ---- 练习工具栏（主播放栏之上，固定顺序：进度 → 主控制 → 工具） ----
-            ApplyFoldState();
-
-            // ---- 3D 区浮层与空状态 ----
-            _viewHintText.gameObject.SetActive(!closeup);
-            RefreshSongAndState();
-
-            // ---- 顶栏自适应（隐藏「保存状态」并让曲名区变宽） ----
-            if (_status != null) _status.ApplyResponsiveLayout(refW);
-
+            LayoutPlayerRows();
+            LayoutHandHint();
             LayoutAnalysisPanel();
+
+            // 手部特写时提示卡让位给画面（快捷键仍可从帮助面板 F1 查到）
+            if (_hintCard != null) _hintCard.gameObject.SetActive(!_compact);
+
+            if (_status != null) _status.ApplyResponsiveLayout(refW);
+            RefreshSongAndState();
         }
 
-        private void ApplyFoldState()
+        /// <summary>就近警告（某只手没有音符）贴在底栏左上角，不压演奏区中心。</summary>
+        private void LayoutHandHint()
         {
+            if (_handHintChip == null) return;
             float margin = UITheme.Layout.ScreenMargin;
-            float mainH = _compact ? UITheme.Layout.MainBarHeightCompact : UITheme.Layout.MainBarHeightNormal;
-            float toolbarH = _folded ? UITheme.Layout.ToolbarHeightCollapsed : UITheme.Layout.ToolbarHeightExpanded;
-
-            UITheme.StretchX(_toolbar, margin, margin, margin + mainH + UITheme.Space8, toolbarH);
-
-            if (_toolbarTitle != null)
-                UITheme.PlaceTopLeft(_toolbarTitle.rectTransform, 12f, 6f, 84f, UITheme.Layout.ToolbarHeaderHeight);
-            UITheme.PlaceTopRight(_foldBtn.GetComponent<RectTransform>(), 12f, 5f, 112f, 26f);
-            if (_toolbarHint != null) UITheme.StretchX(_toolbarHint.rectTransform, 104f, 132f, toolbarH - 24f, 20f);
-
-            if (_toolbarBody != null)
-            {
-                bool visible = !_folded;
-                if (_toolbarBody.gameObject.activeSelf != visible) _toolbarBody.gameObject.SetActive(visible);
-            }
-            UITheme.SetButtonLabel(_foldBtn, _folded ? "练习设置 ▸" : "练习设置 ▾");
-            RefreshStateChips();
-            LayoutAnalysisPanel(); // 工具栏高度变化后，分析面板的可用高度同步更新
+            float barH = _compact ? UITheme.Layout.MainBarHeightCompact : UITheme.Layout.MainBarHeightNormal;
+            UITheme.Place(_handHintChip, margin, margin + barH + UITheme.Space8,
+                UITheme.Layout.HintCardWidth, 28f);
         }
 
         private void LayoutAnalysisPanel()
         {
             if (_analysisPanel == null) return;
             float margin = UITheme.Layout.ScreenMargin;
-            float mainH = _compact ? UITheme.Layout.MainBarHeightCompact : UITheme.Layout.MainBarHeightNormal;
-            float toolbarH = _folded ? UITheme.Layout.ToolbarHeightCollapsed : UITheme.Layout.ToolbarHeightExpanded;
+            float barH = _compact ? UITheme.Layout.MainBarHeightCompact : UITheme.Layout.MainBarHeightNormal;
             float top = margin + UITheme.Layout.StatusBarHeight + UITheme.Space8;
-            float bottom = margin + mainH + UITheme.Space8 + toolbarH + UITheme.Space8;
+            float bottom = margin + barH + UITheme.Space8;
             float slide = (1f - _analysisSlide) * UITheme.Layout.AnalysisPanelWidth;
             UITheme.StretchRightColumn(_analysisPanel, UITheme.Layout.AnalysisPanelWidth, top, bottom, margin, slide);
         }
@@ -1088,8 +1030,6 @@ namespace PianoTeacher3D.UI
             RefreshStateChips();
             if (_cameraSeg != null) _cameraSeg.SetSelectedIndex((int)_session.CameraMode);
             if (_handSeg != null) _handSeg.SetSelectedIndex((int)_session.PracticeHand);
-            if (_highlightSeg != null) _highlightSeg.SetSelectedIndex((int)_session.KeyHighlight);
-            if (_speedSeg != null) _speedSeg.SetSelectedIndex(IndexOfSpeed(_session.PlaybackSpeed));
             if (_status != null)
             {
                 _status.SetAvatarName(AvatarSelectionUI.GetAvatarName(_session.CurrentAvatarIndex));
@@ -1105,13 +1045,6 @@ namespace PianoTeacher3D.UI
             bool hasSong = _session.HasSong;
             var state = _session.State;
 
-            if (_mainSongText != null)
-            {
-                string name = hasSong ? _session.CurrentSongName : "未加载曲目";
-                _mainSongText.text = "♪ " + UITheme.Truncate(name, UITheme.Layout.MainBarSongNameMaxChars);
-                _mainSongText.color = hasSong ? UITheme.TextPrimary : UITheme.TextSecondary;
-            }
-
             if (_status != null)
                 _status.SetSong(_session.CurrentSongName, hasSong, state, _session.PlaybackState);
 
@@ -1119,17 +1052,6 @@ namespace PianoTeacher3D.UI
             bool showEmpty = !hasSong && (state == LessonState.NoSong || state == LessonState.Error);
             if (_emptyState != null && _emptyState.gameObject.activeSelf != showEmpty)
                 _emptyState.gameObject.SetActive(showEmpty);
-
-            if (_progressHint != null)
-            {
-                string reason = ExplainNoSong(state, hasSong);
-                _progressHint.text = reason;
-                bool show = !string.IsNullOrEmpty(reason) && _showBarLeft;
-                if (_progressHint.gameObject.activeSelf != show) _progressHint.gameObject.SetActive(show);
-                if (_mainSongText != null && _showBarLeft) _mainSongText.gameObject.SetActive(!show);
-            }
-
-            RefreshStateChips();
         }
 
         /// <summary>无曲目时说明「为什么不能播放、下一步做什么」（方案 8.3 / 审查 2.2C）。</summary>
@@ -1164,6 +1086,9 @@ namespace PianoTeacher3D.UI
             UITheme.ApplyButtonState(_playBtn,
                 playback == PlaybackState.Playing ? ButtonState.Selected : ButtonState.Default,
                 ButtonStyle.Primary);
+
+            var label = UITheme.GetLabel(_playBtn);
+            if (label != null) label.color = UITheme.TextOnAccent;
         }
 
         /// <summary>需要曲目的控件在无曲目 / 加载中统一呈禁用态并说明原因（防重复点击）。</summary>
@@ -1172,37 +1097,54 @@ namespace PianoTeacher3D.UI
             if (_session == null) return;
             bool canAct = UITheme.CanTriggerSongActions(_session.State, _session.HasSong);
             bool loading = _session.IsLoading;
-            string reason = "不可用：" + ExplainNoSong(_session.State, _session.HasSong);
 
             RefreshPlayButton(_session.PlaybackState);
 
-            if (_restartBtn != null)
-                UITheme.SetButtonEnabled(_restartBtn, canAct && !loading, reason, ButtonStyle.Secondary);
+            bool restartOk = canAct && !loading;
+            SetRestartEnabled(restartOk);
 
             if (_handSeg != null) _handSeg.Interactable = !loading && _session.HasSong;
-            if (_speedSeg != null) _speedSeg.Interactable = !loading;
-            if (_highlightSeg != null) _highlightSeg.Interactable = !loading;
             if (_cameraSeg != null) _cameraSeg.Interactable = true; // 视角随时可切，不改变时间轴
 
-            if (_loopToggle != null)
+            bool teaching = _session.DisplayMode == DisplayMode.Teaching;
+            if (_highlightChip != null)
             {
-                UITheme.SetButtonEnabled(_loopToggle, canAct && !loading,
-                    "不可用：" + ExplainNoSong(_session.State, false), ButtonStyle.Toggle);
-                UITheme.SetToggleState(_loopToggle, "循环", _session.IsLooping, canAct && !loading);
+                bool ok = !loading && canAct && !teaching;
+                if (!teaching)
+                {
+                    UITheme.SetButtonTooltip(_highlightChip,
+                        UITheme.ComposeTooltip("琴键高亮：点击循环切换 关闭 / 预提示 / 发声 / 全部", "H"));
+                }
+                else
+                {
+                    UITheme.SetButtonTooltip(_highlightChip,
+                        "教学模式固定为「仅高亮被按下的琴键」；切回展示模式后恢复你的选择");
+                }
+                UIKit.SetChip(_highlightChip, "高亮", UITheme.DescribeHighlight(_session.KeyHighlight),
+                    _session.KeyHighlight != HighlightMode.Off, ok);
             }
-            if (_setABtn != null)
-                UITheme.SetButtonEnabled(_setABtn, canAct, "不可用：先加载曲目并打开循环", ButtonStyle.Secondary);
-            if (_setBBtn != null)
-                UITheme.SetButtonEnabled(_setBBtn, canAct, "不可用：先加载曲目并打开循环", ButtonStyle.Secondary);
-            if (_clearLoopBtn != null)
-                UITheme.SetButtonEnabled(_clearLoopBtn, canAct, "不可用：先加载曲目", ButtonStyle.Ghost);
-            if (_metronomeBtn != null)
+
+            if (_metronomeChip != null)
             {
                 bool metronomeOk = !loading && (canAct || _session.MetronomeEnabled);
-                UITheme.SetButtonEnabled(_metronomeBtn, metronomeOk,
-                    "不可用：先加载曲目后再开启节拍器", ButtonStyle.Toggle);
-                UITheme.SetToggleState(_metronomeBtn, "节拍器", _session.MetronomeEnabled, metronomeOk);
+                UIKit.SetChip(_metronomeChip, "节拍器", _session.MetronomeEnabled ? "开" : "关",
+                    _session.MetronomeEnabled, metronomeOk);
             }
+
+            if (_displayChip != null)
+                UIKit.SetChip(_displayChip, "显示", teaching ? "教学" : "展示", teaching, !loading);
+
+            if (_loopChip != null)
+                UIKit.SetChip(_loopChip, "循环",
+                    _session.IsLooping ? (_loopB > _loopA + 0.2f ? "A-B" : "整曲") : "关",
+                    _session.IsLooping, canAct && !loading);
+
+            if (_setABtn != null)
+                UITheme.SetButtonEnabled(_setABtn, canAct, "不可用：先加载曲目并打开循环", ButtonStyle.Ghost);
+            if (_setBBtn != null)
+                UITheme.SetButtonEnabled(_setBBtn, canAct, "不可用：先加载曲目并打开循环", ButtonStyle.Ghost);
+            if (_clearLoopBtn != null)
+                UITheme.SetButtonEnabled(_clearLoopBtn, canAct, "不可用：先加载曲目", ButtonStyle.Ghost);
 
             // 进度条本身在无曲目时不可拖动
             if (_progress != null) _progress.interactable = canAct;
@@ -1212,23 +1154,29 @@ namespace PianoTeacher3D.UI
         {
             if (_session == null) return;
             bool looping = _session.IsLooping;
-            bool canAct = UITheme.CanTriggerSongActions(_session.State, _session.HasSong) && !_session.IsLoading;
-            UITheme.SetToggleState(_loopToggle, "循环", looping, canAct);
 
-            bool hasRange = _loopB > _loopA + 0.2f;
-            if (_loopRangeGroup != null && _loopRangeGroup.gameObject.activeSelf != (looping && !_session.IsLoading))
-                _loopRangeGroup.gameObject.SetActive(looping && !_session.IsLoading);
-            if (_loopOffHint != null && _loopOffHint.gameObject.activeSelf != !looping)
-                _loopOffHint.gameObject.SetActive(!looping);
-
-            if (_loopRangeText != null)
+            bool showRange = looping && !_session.IsLoading;
+            if (_loopRangeGroup != null && _loopRangeGroup.gameObject.activeSelf != showRange)
             {
-                _loopRangeText.text = hasRange
-                    ? $"A {UITheme.FormatTime(_loopA)} → B {UITheme.FormatTime(_loopB)}（{UITheme.FormatTime(Mathf.Max(0f, _loopB - _loopA))}）"
-                    : "整曲循环（可设置 A / B 收窄范围）";
+                _loopRangeGroup.gameObject.SetActive(showRange);
+                LayoutPlayerRows();   // A/B 组显隐会改变后续 chip 的横坐标
             }
+
             RefreshLoopMarks();
             RefreshStateChips();
+            RefreshInteractable();
+        }
+
+        /// <summary>重播按钮是纯图标按钮：禁用时同时把图标压暗（无文字可改）。</summary>
+        private void SetRestartEnabled(bool ok)
+        {
+            if (_restartBtn == null) return;
+            _restartBtn.interactable = ok;
+            var icon = _restartBtn.transform.Find("Icon");
+            if (icon != null) UIKit.SetIconColor(icon, ok ? UITheme.TextPrimary : UITheme.TextDisabled);
+            UITheme.SetButtonTooltip(_restartBtn, ok
+                ? UITheme.ComposeTooltip("重播：回到开头（不改变速度与循环设置）", "[")
+                : "不可用：先加载曲目后再重播");
         }
 
         private void RefreshLoopMarks()
@@ -1244,30 +1192,38 @@ namespace PianoTeacher3D.UI
             if (_beatDots == null) return;
             if (!_session.MetronomeEnabled)
             {
-                _beatDots.text = "";
+                if (_beatDots.gameObject.activeSelf) _beatDots.gameObject.SetActive(false);
+                LayoutPlayerRows();
                 return;
             }
 
-            int beats = Mathf.Max(1, _session.BeatsPerBar);
+            if (!_beatDots.gameObject.activeSelf)
+            {
+                _beatDots.gameObject.SetActive(true);
+                LayoutPlayerRows();
+            }
+
+            int beats = Mathf.Max(1, Mathf.Min(4, _session.BeatsPerBar));
             var sb = new StringBuilder(beats * 2);
             for (int i = 0; i < beats; i++)
             {
-                // 强拍（第 1 拍）用实心点、弱拍用空心点，闪烁拍同样为实心：不只靠颜色区分
+                // 强拍（第 1 拍）实心、弱拍空心；闪烁拍同样实心：不只靠颜色区分
                 char glyph = (i == _flashBeat || i == 0) ? '●' : '○';
-                sb.Append(glyph).Append(' ');
+                sb.Append(glyph);
             }
-            _beatDots.text = sb.ToString().TrimEnd();
-            _beatDots.color = _flashBeat >= 0 ? UITheme.Accent : UITheme.TextSecondary;
+            _beatDots.text = sb.ToString();
+            _beatDots.color = _flashBeat >= 0 ? UITheme.AccentBright : UITheme.TextSecondary;
         }
 
         private void RefreshHandHint()
         {
-            if (_handHint == null || _session == null) return;
+            if (_handHintText == null || _session == null) return;
             string hint = UITheme.HandEmptyHint(_session.PracticeHand, _session.Analysis);
-            _handHint.text = hint;
-            _handHint.gameObject.SetActive(!string.IsNullOrEmpty(hint));
+            bool show = !string.IsNullOrEmpty(hint);
+            _handHintText.text = hint;
+            if (_handHintChip.gameObject.activeSelf != show) _handHintChip.gameObject.SetActive(show);
 
-            // 该手没有音符时同时禁用对应选项，避免"点了没反应"
+            // 该手没有音符时同时禁用对应选项，避免「点了没反应」
             if (_handSeg != null)
             {
                 var analysis = _session.Analysis;
@@ -1279,41 +1235,28 @@ namespace PianoTeacher3D.UI
 
         private void RefreshViewLabel(CameraMode mode)
         {
-            if (_viewChipText != null)
-                _viewChipText.text = "视角：" + UITheme.DescribeCameraMode(mode);
+            if (_hintTitle != null)
+                _hintTitle.text = "视角：" + UITheme.DescribeCameraMode(mode);
 
-            if (_viewHintText != null)
-            {
-                _viewHintText.text = mode == CameraMode.Free
-                    ? "自由观察：右键拖动旋转 · 滚轮缩放 · R 重置视角"
-                    : "空格 播放/暂停 · [ 重播 · M 节拍器 · Tab 分析 · F1 帮助";
-            }
+            bool free = mode == CameraMode.Free;
+            if (_hintLine2 != null)
+                _hintLine2.text = free ? "右键拖动旋转　·　滚轮缩放" : "空格 播放 / 暂停　·　[ 重播";
+            if (_hintLine3 != null)
+                _hintLine3.text = free ? "R 重置视角　·　Tab 分析　·　F1 帮助" : "M 节拍器　·　Tab 分析　·　F1 帮助";
         }
 
-        /// <summary>主播放栏与工具栏上的只读状态标签（方案 3.4：每个状态都能直接读出）。</summary>
+        /// <summary>底栏与提示卡上的只读状态（每个状态都能直接读出，不依赖悬停）。</summary>
         private void RefreshStateChips()
         {
             if (_session == null) return;
 
-            if (_handChip != null)
-                _handChip.text = "手：" + UITheme.DescribePracticeHand(_session.PracticeHand);
             if (_speedChip != null)
-                _speedChip.text = $"速 {_session.PlaybackSpeed:0.0}×";
-            if (_loopChip != null)
-                _loopChip.text = _session.IsLooping
-                    ? (_loopB > _loopA + 0.2f ? "循环：A-B" : "循环：整曲")
-                    : "循环：关";
+                UIKit.SetChip(_speedChip, "速度", $"{_session.PlaybackSpeed:0.0}×", true, !_session.IsLoading);
 
-            if (_toolbarHint != null)
-            {
-                string range = _session.IsLooping
-                    ? (_loopB > _loopA + 0.2f ? $"A-B {UITheme.FormatTime(_loopA)}–{UITheme.FormatTime(_loopB)}" : "整曲")
-                    : "关";
-                _toolbarHint.text =
-                    $"{UITheme.DescribePracticeHand(_session.PracticeHand)} · {_session.PlaybackSpeed:0.0}× · " +
-                    $"循环 {range} · 高亮 {UITheme.DescribeHighlight(_session.KeyHighlight)} · " +
-                    $"节拍器 {(_session.MetronomeEnabled ? "开" : "关")} · 视角 {UITheme.DescribeCameraMode(_session.CameraMode)}";
-            }
+            if (_analysisBtn != null)
+                UIKit.SetChip(_analysisBtn, "曲目分析", "", _analysisOpen, true);
+
+            RefreshViewLabel(_session.CameraMode);
         }
 
         private void RefreshAnalysisContent()
@@ -1344,7 +1287,7 @@ namespace PianoTeacher3D.UI
             _suggestionText.text = sb.ToString();
         }
 
-        /// <summary>动作质量指标（开发诊断区，默认折叠；方案阶段五验收量化）。</summary>
+        /// <summary>动作质量指标（开发诊断区，默认折叠）。</summary>
         private void RefreshMotion()
         {
             if (_motionText == null || _session == null) return;

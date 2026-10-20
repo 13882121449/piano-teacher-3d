@@ -462,4 +462,174 @@ public class UIThemeTokenTests
         Assert.AreEqual(100, UITheme.Percent(2f));
         Assert.AreEqual(50, UITheme.Percent(0.5f));
     }
+
+    // ==================== 深色工作台重设计：栅格 / 圆角 / 版面占比 ====================
+
+    [Test]
+    public void SpacingTokens_SnapToFourPixelGrid()
+    {
+        var values = new[]
+        {
+            UITheme.Space4, UITheme.Space8, UITheme.Space12, UITheme.Space16, UITheme.Space24,
+            UITheme.Space32,
+            UITheme.Layout.ScreenMargin, UITheme.Layout.TopBarPadding,
+            UITheme.Layout.PlayerPadding, UITheme.Layout.PlayerRowGap,
+            UITheme.Layout.ChipGapInner, UITheme.Layout.ChipGapGroup,
+            UITheme.Layout.HintCardWidth, UITheme.Layout.HintCardHeight,
+            UITheme.Layout.SongCardWidth, UITheme.Layout.SongCardHeight, UITheme.Layout.SongCardGap,
+            UITheme.Layout.TimeLabelWidth, UITheme.Layout.PrimaryActionWidth,
+            UITheme.Layout.ProgressHandleSize, UITheme.Layout.TooltipPadX, UITheme.Layout.TooltipPadY
+        };
+        foreach (float v in values)
+            Assert.AreEqual(0f, Mathf.Repeat(v, 4f), 0.001f, $"间距 {v} 必须是 4 的倍数");
+    }
+
+    [Test]
+    public void ControlHeights_SnapToFourPixelGrid()
+    {
+        var heights = new[]
+        {
+            UITheme.HeightPrimary, UITheme.HeightButton, UITheme.HeightInput, UITheme.HeightSmall,
+            UITheme.SizeIconButton,
+            UITheme.Layout.StatusBarHeight, UITheme.Layout.MainBarHeightNormal,
+            UITheme.Layout.MainBarHeightCompact, UITheme.Layout.PlayerProgressRowHeight,
+            UITheme.Layout.PlayerControlRowHeight, UITheme.Layout.ChipHeight
+        };
+        foreach (float h in heights)
+            Assert.AreEqual(0f, Mathf.Repeat(h, 4f), 0.001f, $"控件高度 {h} 必须是 4 的倍数");
+    }
+
+    [Test]
+    public void RadiusScale_MatchesChipButtonPanelHierarchy()
+    {
+        // 进度条 3 < chip 8 < 按钮 10 < 面板 12：一套圆角只表达一套层级
+        Assert.Less(UITheme.RadiusBar, UITheme.RadiusSmall);
+        Assert.Less(UITheme.RadiusSmall, UITheme.RadiusMedium);
+        Assert.Less(UITheme.RadiusMedium, UITheme.RadiusLarge);
+        Assert.AreEqual(8, UITheme.RadiusSmall);
+        Assert.AreEqual(10, UITheme.RadiusMedium);
+        Assert.AreEqual(12, UITheme.RadiusLarge);
+        Assert.LessOrEqual(UITheme.RadiusLarge, 12, "面板圆角不应做成大圆角（工作台而非卡片风）");
+    }
+
+    [Test]
+    public void FontScale_UsesDocumentedSixSteps()
+    {
+        Assert.AreEqual(28, UITheme.FontPageTitle, "hero");
+        Assert.AreEqual(20, UITheme.FontTitle, "title");
+        Assert.AreEqual(15, UITheme.FontSubtitle, "subtitle");
+        Assert.AreEqual(13, UITheme.FontBody, "body");
+        Assert.AreEqual(12, UITheme.FontBodySmall, "body-small");
+        Assert.AreEqual(10, UITheme.FontCaption, "caption");
+
+        // 行高 = 字号 × 1.35（取整到整数像素）
+        foreach (int size in new[] { 10, 12, 13, 15, 20, 28 })
+        {
+            float line = UITheme.LineHeight(size);
+            Assert.GreaterOrEqual(line, size * 1.3f, $"{size} 号字的行高过小");
+            Assert.LessOrEqual(line, size * 1.4f, $"{size} 号字的行高过大");
+        }
+    }
+
+    [Test]
+    public void PlayerBar_OccupiesAtMostTwentyTwoPercentOfScreenHeight()
+    {
+        float refH = UITheme.Layout.ReferenceResolution.y;
+        float occupied = UITheme.Layout.ScreenMargin + UITheme.Layout.MainBarHeightNormal;
+        Assert.LessOrEqual(occupied / refH, 0.22f, "底栏（含外边距）不得超过屏高 22%");
+        Assert.LessOrEqual(occupied, 158f, "720 高参考分辨率下的硬上限");
+
+        // 左右各留 ≥16，播放区不会被两侧面板侵入
+        Assert.GreaterOrEqual(UITheme.Layout.ScreenMargin, 16f);
+    }
+
+    [Test]
+    public void PlayerBar_KeepsPlayAreaUncovered()
+    {
+        float refH = UITheme.Layout.ReferenceResolution.y;
+        float top = UITheme.Layout.ScreenMargin + UITheme.Layout.StatusBarHeight;
+        float bottom = UITheme.Layout.ScreenMargin + UITheme.Layout.MainBarHeightNormal;
+        float stage = refH - top - bottom;
+        Assert.GreaterOrEqual(stage, 480f, "顶栏 + 底栏之外必须留出 ≥480px 的演奏区");
+        Assert.GreaterOrEqual(stage / refH, 0.65f, "演奏区至少占屏高 65%");
+    }
+
+    [Test]
+    public void PlayerBar_InternalRowsAddUpExactly()
+    {
+        // 132 = 16 上内边距 + 44 进度行 + 16 行距 + 40 控制行 + 16 下内边距
+        float sum = UITheme.Layout.PlayerPadding + UITheme.Layout.PlayerProgressRowHeight +
+                    UITheme.Layout.PlayerRowGap + UITheme.Layout.PlayerControlRowHeight +
+                    UITheme.Layout.PlayerPadding;
+        Assert.AreEqual(UITheme.Layout.MainBarHeightNormal, sum, 0.001f,
+            "底栏高度必须由内部行高精确相加得出，不允许出现无法解释的留白");
+
+        // 紧凑态：隐藏进度行，只留控制行 + 上下内边距
+        float compact = UITheme.Layout.PlayerPadding * 2f + UITheme.Layout.PlayerControlRowHeight;
+        Assert.AreEqual(UITheme.Layout.MainBarHeightCompact, compact, 0.001f);
+    }
+
+    [Test]
+    public void TopBar_IsSingleRowAndVerticallyCentered()
+    {
+        Assert.AreEqual(56f, UITheme.Layout.StatusBarHeight, "顶栏固定 56 高（单行）");
+        float leftover = UITheme.Layout.StatusBarHeight - UITheme.SizeIconButton;
+        Assert.Greater(leftover, 0f);
+        Assert.AreEqual(0f, Mathf.Repeat(leftover * 0.5f, 4f), 0.001f, "32 高控件应能整像素垂直居中");
+
+        // 同高、同内边距：图标按钮与 chip 同高（32），间距 8
+        Assert.AreEqual(UITheme.SizeIconButton, UITheme.Layout.ChipHeight);
+        Assert.AreEqual(UITheme.HeightSmall, UITheme.Layout.ChipHeight);
+        Assert.AreEqual(8f, UITheme.Layout.ChipGapInner);
+    }
+
+    [Test]
+    public void HintCard_StaysSmallAndSemiTransparent()
+    {
+        Assert.LessOrEqual(UITheme.Layout.HintCardWidth, 240f, "提示卡只占左上角，不进入演奏区中心");
+        Assert.LessOrEqual(UITheme.Layout.HintCardHeight, 96f);
+        Assert.GreaterOrEqual(UITheme.Layout.HintCardFadeDelay, 2f, "移出后至少停留 2s 再淡出");
+        Assert.Greater(UITheme.Layout.HintCardIdleAlpha, 0.4f, "淡出后仍必须可读（不完全隐藏）");
+        Assert.Less(UITheme.Layout.HintCardIdleAlpha, 1f);
+
+        // 玻璃卡必须比面板更透，且比「淡出后的自己」更实
+        Assert.Less(UITheme.PanelBgGlass.a, UITheme.PanelBg.a);
+        Assert.Greater(UITheme.PanelBgGlass.a, UITheme.Layout.HintCardIdleAlpha);
+    }
+
+    [Test]
+    public void SongGrid_FitsAtLeastThreeColumnsAtReferenceWidth()
+    {
+        float avail = UITheme.Layout.ReferenceResolution.x - UITheme.Layout.ScreenMargin * 2f;
+        float gap = UITheme.Layout.SongCardGap;
+        int columns = Mathf.FloorToInt((avail + gap) / (UITheme.Layout.SongCardWidth + gap));
+        Assert.GreaterOrEqual(columns, 3, "1280 宽下曲库至少 3 列");
+        Assert.GreaterOrEqual(columns, UITheme.Layout.SongCardMinColumns);
+
+        // 卡片高度能容纳标题（15）+ 元信息（12）+ 上下 16 内边距
+        float content = UITheme.LineHeight(UITheme.FontSubtitle) + UITheme.LineHeight(UITheme.FontBodySmall) +
+                        UITheme.Space16 * 2f;
+        Assert.LessOrEqual(content, UITheme.Layout.SongCardHeight, "卡片高度必须容纳两行文字与内边距");
+    }
+
+    [Test]
+    public void ProgressAndChips_UseDocumentedGeometry()
+    {
+        Assert.AreEqual(6f, UITheme.Layout.ProgressBarHeight);
+        Assert.AreEqual(3, UITheme.RadiusBar);
+        Assert.AreEqual(12f, UITheme.Layout.ProgressHandleSize);
+        Assert.AreEqual(44f, UITheme.Layout.TimeLabelWidth);
+        Assert.AreEqual(96f, UITheme.Layout.PrimaryActionWidth);
+        Assert.AreEqual(UITheme.HeightButton, UITheme.Layout.PlayerControlRowHeight,
+            "主按钮与控制行同高（40），保证行内基线一致");
+    }
+
+    [Test]
+    public void GlassPanel_KeepsSecondaryTextReadable()
+    {
+        // 玻璃卡上仍有 12 号快捷说明，必须保持可读（≥3:1）
+        Assert.GreaterOrEqual(UITheme.ContrastRatio(UITheme.TextSecondary, UITheme.PanelBg), 3f);
+        Assert.Greater(UITheme.ContrastRatio(UITheme.TextPrimary, UITheme.PanelBgGlass), 4.5f);
+        Assert.Greater(UITheme.ContrastRatio(UITheme.TextSecondary, UITheme.PanelBgGlass), 3f);
+    }
 }

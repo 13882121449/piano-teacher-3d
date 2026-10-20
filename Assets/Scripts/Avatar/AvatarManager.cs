@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using PianoTeacher3D.Characters;
 using UnityEngine;
 
 namespace PianoTeacher3D.Avatar
@@ -101,17 +102,37 @@ namespace PianoTeacher3D.Avatar
         private bool _limbsVisible = true;
         private string _lastRigValidationMessage;
 
+        // ---- 角色库增量（方案 7.1 / 7.3）：外部角色以「视图」形式挂接，内置角色仍走 _rigs ----
+        private ICharacterView _currentView;
+        private CharacterProfile _currentProfile;
+        private CharacterSwitchService _switchService;
+        private AvatarDefinition _externalFallbackDefinition;
+
         /// <summary>运行时生成的网格（手部放样网格），场景销毁时统一释放，避免原生对象泄漏。</summary>
         private readonly List<Mesh> _runtimeMeshes = new List<Mesh>();
 
         /// <summary>全部角色定义（只读；索引与 <see cref="SwitchAvatar"/> 一致）。</summary>
         public IReadOnlyList<AvatarDefinition> Definitions => _definitions;
 
-        /// <summary>当前角色定义；未构建时为 null。</summary>
-        public AvatarDefinition CurrentDefinition =>
-            (_definitions.Count > 0 && _currentIndex >= 0 && _currentIndex < _definitions.Count)
-                ? _definitions[_currentIndex]
-                : null;
+        /// <summary>
+        /// 当前角色定义；未构建时为 null。
+        /// <para>
+        /// 外部激活角色（预制体视图）优先：返回它提供的 IK 参数兜底定义，
+        /// 因此 <c>HandIKController</c> 读取 <c>HandMetrics</c> 时不会拿到 null。
+        /// </para>
+        /// </summary>
+        public AvatarDefinition CurrentDefinition
+        {
+            get
+            {
+                var external = ExternalRigSource;
+                if (external != null) return external.Definition ?? EnsureExternalFallbackDefinition();
+
+                return (_definitions.Count > 0 && _currentIndex >= 0 && _currentIndex < _definitions.Count)
+                    ? _definitions[_currentIndex]
+                    : null;
+            }
+        }
 
         /// <summary>
         /// 最近一次构建的骨架校验问题描述；无问题时为 null（方案 5.2 中期「校验失败返回一条问题描述供上层上报 Warning」）。
@@ -132,22 +153,60 @@ namespace PianoTeacher3D.Avatar
 
         public event System.Action<int> OnAvatarChanged;
 
-        // 当前角色暴露给 HandIKController 的骨骼引用
-        public Transform LeftShoulder => _rigs[_currentIndex].LeftShoulder;
-        public Transform RightShoulder => _rigs[_currentIndex].RightShoulder;
-        public Transform LeftArm => _rigs[_currentIndex].LeftArm;
-        public Transform RightArm => _rigs[_currentIndex].RightArm;
+        /// <summary>当前角色视图（内置角色也有包装；未构建时为 null）。供角色库 UI 读取缩略图与支持槽位。</summary>
+        public ICharacterView CurrentView => _currentView;
+
+        /// <summary>当前角色的资料（内置角色通过 <see cref="SwitchAvatar"/> 切换时可能为 null）。</summary>
+        public CharacterProfile CurrentProfile => _currentProfile;
+
+        /// <summary>视图变化时触发（外部角色切换、或切回内置角色）。</summary>
+        public event System.Action<ICharacterView> OnCharacterViewChanged;
+
+        /// <summary>角色切换事务终结时触发（成功 / 回滚 / 取消）。</summary>
+        public event System.Action<CharacterSwitchResult> OnCharacterSwitchFinished;
+
+        /// <summary>
+        /// 外部激活角色提供的骨骼来源。
+        /// <para>
+        /// 内置角色的包装视图 <c>IsBuiltInBacked == true</c>，这里返回 null，
+        /// 于是所有骨骼属性继续走原有 <c>_rigs</c> 路径——这是「3 个内置角色行为逐位不变」的关键。
+        /// </para>
+        /// </summary>
+        private ICharacterRigSource ExternalRigSource
+        {
+            get
+            {
+                var source = _currentView as ICharacterRigSource;
+                return source != null && !source.IsBuiltInBacked ? source : null;
+            }
+        }
+
+        // 当前角色暴露给 HandIKController 的骨骼引用（外部角色存在时优先取它的骨骼）
+        public Transform LeftShoulder => ExternalRigSource != null ? ExternalRigSource.LeftShoulder : _rigs[_currentIndex].LeftShoulder;
+        public Transform RightShoulder => ExternalRigSource != null ? ExternalRigSource.RightShoulder : _rigs[_currentIndex].RightShoulder;
+        public Transform LeftArm => ExternalRigSource != null ? ExternalRigSource.LeftArm : _rigs[_currentIndex].LeftArm;
+        public Transform RightArm => ExternalRigSource != null ? ExternalRigSource.RightArm : _rigs[_currentIndex].RightArm;
         /// <summary>左前臂（肘 → 腕）。与 <see cref="LeftArm"/>（上臂）配合做两段解析 IK。</summary>
-        public Transform LeftForeArm => _rigs[_currentIndex].LeftForeArm;
-        public Transform RightForeArm => _rigs[_currentIndex].RightForeArm;
-        public Transform LeftElbow => _rigs[_currentIndex].LeftElbow;
-        public Transform RightElbow => _rigs[_currentIndex].RightElbow;
-        public IHandRig LeftHand => _rigs[_currentIndex].LeftHand;
-        public IHandRig RightHand => _rigs[_currentIndex].RightHand;
+        public Transform LeftForeArm => ExternalRigSource != null ? ExternalRigSource.LeftForeArm : _rigs[_currentIndex].LeftForeArm;
+        public Transform RightForeArm => ExternalRigSource != null ? ExternalRigSource.RightForeArm : _rigs[_currentIndex].RightForeArm;
+        public Transform LeftElbow => ExternalRigSource != null ? ExternalRigSource.LeftElbow : _rigs[_currentIndex].LeftElbow;
+        public Transform RightElbow => ExternalRigSource != null ? ExternalRigSource.RightElbow : _rigs[_currentIndex].RightElbow;
+        public IHandRig LeftHand => ExternalRigSource != null ? ExternalRigSource.LeftHand : _rigs[_currentIndex].LeftHand;
+        public IHandRig RightHand => ExternalRigSource != null ? ExternalRigSource.RightHand : _rigs[_currentIndex].RightHand;
 
         /// <summary>当前角色的标准 Humanoid 骨架（方案 4.1 / 3.2）。未构建时为 null。</summary>
-        public AvatarRigBuilder.Skeleton CurrentSkeleton =>
-            (_rigs != null && _currentIndex >= 0 && _currentIndex < _rigs.Count) ? _rigs[_currentIndex].Skeleton : null;
+        public AvatarRigBuilder.Skeleton CurrentSkeleton
+        {
+            get
+            {
+                var external = ExternalRigSource;
+                if (external != null) return external.Skeleton;
+
+                return (_rigs != null && _currentIndex >= 0 && _currentIndex < _rigs.Count)
+                    ? _rigs[_currentIndex].Skeleton
+                    : null;
+            }
+        }
 
         /// <summary>当前角色的骨架是否为 Unity 认可的合法 Humanoid。</summary>
         public bool HasHumanoidRig => CurrentSkeleton != null && CurrentSkeleton.IsHumanoid;
@@ -313,20 +372,72 @@ namespace PianoTeacher3D.Avatar
             Object.Destroy(rig.Root);
         }
 
-        /// <summary>切换角色：仅替换表现，不重置曲目/进度/摄像机（方案验收标准）。</summary>
+        /// <summary>
+        /// 切换角色：仅替换表现，不重置曲目/进度/摄像机（方案验收标准）。
+        /// <para>
+        /// 若当前是外部激活角色（预制体），先停用并释放它——否则两套模型会同时驱动同一双手。
+        /// 内置角色之间的切换路径与改造前完全一致（<see cref="SetBuiltInActive"/> 内部实现同一套操作）。
+        /// </para>
+        /// </summary>
         public void SwitchAvatar(int index)
         {
             index = Mathf.Clamp(index, 0, AvatarCount - 1);
-            if (index == _currentIndex) return;
 
-            _rigs[_currentIndex].Root.SetActive(false);
+            ReleaseExternalView();
+
+            if (index == _currentIndex)
+            {
+                EnsureBuiltInView();
+                return;
+            }
+
+            SetBuiltInActive(index, true);
+            EnsureBuiltInView();
+        }
+
+        /// <summary>
+        /// 显示 / 停用某个内置角色的根节点。停用用于角色切换事务的「锁状态」步骤，
+        /// 由 <c>ProceduralCharacterView</c> 调用；激活时会同步 <see cref="CurrentIndex"/>、套用四肢可见性并派发事件。
+        /// </summary>
+        public void SetBuiltInActive(int index, bool active)
+        {
+            if (_rigs == null || index < 0 || index >= _rigs.Count) return;
+
+            if (!active)
+            {
+                if (_rigs[index].Root != null) _rigs[index].Root.SetActive(false);
+                return;
+            }
+
+            bool changed = index != _currentIndex;
+            for (int i = 0; i < _rigs.Count; i++)
+            {
+                if (_rigs[i].Root == null) continue;
+                _rigs[i].Root.SetActive(i == index);
+            }
             _currentIndex = index;
-            _rigs[_currentIndex].Root.SetActive(true);
 
             // 新角色同样要套用当前的「手部/手臂可见性」（教学模式下切角色不能把手露出来）
-            ApplyLimbsVisibility(_currentIndex, _limbsVisible);
+            ApplyLimbsVisibility(index, _limbsVisible);
 
-            OnAvatarChanged?.Invoke(_currentIndex);
+            if (changed) OnAvatarChanged?.Invoke(index);
+        }
+
+        /// <summary>取指定内置角色的根节点（角色库 UI 与视图包装用）。索引越界返回 null。</summary>
+        public Transform GetAvatarRoot(int index) =>
+            (_rigs != null && index >= 0 && index < _rigs.Count && _rigs[index].Root != null)
+                ? _rigs[index].Root.transform
+                : null;
+
+        /// <summary>取指定内置角色绑定的 Animator（无 Humanoid 骨架时为 null）。</summary>
+        public Animator GetAnimator(int index) =>
+            (_rigs != null && index >= 0 && index < _rigs.Count) ? _rigs[index].Animator : null;
+
+        /// <summary>取指定内置角色的材质列表（整体色调外观槽用）。索引越界返回空列表。</summary>
+        public IReadOnlyList<Material> GetMaterials(int index)
+        {
+            if (_rigs != null && index >= 0 && index < _rigs.Count) return _rigs[index].Materials;
+            return System.Array.Empty<Material>();
         }
 
         /// <summary>
@@ -372,6 +483,124 @@ namespace PianoTeacher3D.Avatar
 
         public void SwitchNext() => SwitchAvatar((_currentIndex + 1) % AvatarCount);
 
+        // ==================== 角色库接线（方案 7.1 / 7.3，增量部分） ====================
+
+        /// <summary>
+        /// 按资料激活角色。
+        /// <para>
+        /// 程序化内置角色走<b>原有</b> <see cref="SwitchAvatar"/> 路径（不引入事务开销，行为与改造前一致）；
+        /// 预制体角色走 <see cref="CharacterSwitchService"/> 的 8 步事务（加载 → 校验 → 锁 → 激活 → 换引用 → 确认 → 卸载旧角色）。
+        /// 事务内含回滚：失败时旧角色保持可驱动，不会出现「两套骨架都停了」的空窗。
+        /// </para>
+        /// <para>
+        /// 本方法<b>不触碰</b>曲目、播放位置、速度、循环与音频——它只换表现层。
+        /// </para>
+        /// </summary>
+        public CharacterSwitchResult TryActivate(CharacterProfile profile)
+        {
+            string currentId = _currentView != null ? _currentView.CharacterId : string.Empty;
+
+            var valid = CharacterAssetValidator.ValidateProfile(profile);
+            if (!valid.Ok)
+                return new CharacterSwitchResult(CharacterSwitchState.RolledBack, valid.Message, currentId, currentId);
+
+            if (profile.Source == CharacterSource.ProceduralBuiltIn)
+                return ActivateBuiltIn(profile, currentId);
+
+            if (_currentView == null) EnsureBuiltInView();
+
+            var service = EnsureSwitchService();
+            service.SetCurrent(_currentView);   // 内置包装或上一个外部角色：事务回滚的锚点
+
+            if (!service.Request(profile)) return service.LastResult;
+            while (service.Tick()) { }          // 纯 C# 步进：无真实 IO，单帧内跑完
+
+            var result = service.LastResult;
+            if (result.Succeeded && service.CurrentView != null)
+            {
+                _currentView = service.CurrentView;
+                _currentProfile = profile;
+                OnCharacterViewChanged?.Invoke(_currentView);
+            }
+
+            OnCharacterSwitchFinished?.Invoke(result);
+            return result;
+        }
+
+        private CharacterSwitchResult ActivateBuiltIn(CharacterProfile profile, string currentId)
+        {
+            if (_currentView != null && string.Equals(_currentView.CharacterId, profile.CharacterId, System.StringComparison.Ordinal))
+                return new CharacterSwitchResult(CharacterSwitchState.Committed, null, currentId, currentId);
+
+            int index = Mathf.Clamp(profile.ProceduralIndex, 0, AvatarCount - 1);
+            ReleaseExternalView();
+            SetBuiltInActive(index, true);
+
+            var view = new ProceduralCharacterView(this, index, profile);
+            view.OnCharacterActivated();
+            _currentView = view;
+            _currentProfile = profile;
+            OnCharacterViewChanged?.Invoke(view);
+
+            var result = new CharacterSwitchResult(CharacterSwitchState.Committed, null, currentId, profile.CharacterId);
+            OnCharacterSwitchFinished?.Invoke(result);
+            return result;
+        }
+
+        /// <summary>停用并释放外部角色（切回内置角色时调用）。可重复调用。</summary>
+        private void ReleaseExternalView()
+        {
+            var source = _currentView as ICharacterRigSource;
+            if (source == null || source.IsBuiltInBacked) return;
+
+            var view = _currentView;
+            _currentView = null;
+            _currentProfile = null;
+
+            try { view.OnCharacterDeactivated(); }
+            catch (System.Exception e) { Debug.LogWarning("[AvatarManager] 停用外部角色失败：" + e.Message); }
+            try { view.DisposeCharacterResources(); }
+            catch (System.Exception e) { Debug.LogWarning("[AvatarManager] 释放外部角色资源失败：" + e.Message); }
+
+            OnCharacterViewChanged?.Invoke(null);
+        }
+
+        /// <summary>
+        /// 确保当前内置角色有一个包装视图（供角色库 UI 读取缩略图/风格/支持槽位）。
+        /// <para>
+        /// 两个必须区分的分支：
+        /// ① 当前是<b>外部激活角色</b> → 不动它（外部角色的生命周期由切换事务负责）；
+        /// ② 当前是<b>内置包装</b> → 必须校验包装里的索引与 <see cref="CurrentIndex"/> 一致。
+        ///    否则 <c>SwitchAvatar(0→1)</c> 后视图还停在索引 0，<c>CurrentView.CharacterId</c> 会报错角色，
+        ///    角色库卡片的选中态也会跟着错。
+        /// </para>
+        /// </summary>
+        private void EnsureBuiltInView()
+        {
+            var external = _currentView as ICharacterRigSource;
+            if (external != null && !external.IsBuiltInBacked) return;
+
+            if (_currentView is ProceduralCharacterView current && current.ProceduralIndex == _currentIndex) return;
+
+            _currentView = new ProceduralCharacterView(this, _currentIndex, null);
+            _currentProfile = null;
+            OnCharacterViewChanged?.Invoke(_currentView);
+        }
+
+        private CharacterSwitchService EnsureSwitchService()
+        {
+            if (_switchService != null) return _switchService;
+
+            _switchService = new CharacterSwitchService(new AvatarCharacterViewFactory(this));
+            return _switchService;
+        }
+
+        private AvatarDefinition EnsureExternalFallbackDefinition()
+        {
+            if (_externalFallbackDefinition == null) _externalFallbackDefinition = AvatarDefinition.CreateDefault();
+            return _externalFallbackDefinition;
+        }
+
         // ==================== 程序化人形构建（统一尺寸表，零外部模型资产） ====================
 
         private sealed class AvatarRig
@@ -395,6 +624,12 @@ namespace PianoTeacher3D.Avatar
 
             /// <summary>绑定 Humanoid Avatar 的 Animator（骨架有效时非 null）。</summary>
             public Animator Animator;
+
+            /// <summary>
+            /// 本角色创建的基础材质（皮肤/指甲/衣料/镶边/深色/头发）。
+            /// 仅用于「整体色调」外观槽；所有权仍归 AvatarManager（随场景卸载由 Unity 回收）。
+            /// </summary>
+            public readonly List<Material> Materials = new List<Material>();
 
             public bool HasHumanoidRig => Skeleton != null && Skeleton.IsHumanoid;
         }
@@ -430,6 +665,14 @@ namespace PianoTeacher3D.Avatar
             var trimMat = CreateMaterial(Color.Lerp(def.ClothColor, Color.black, 0.32f), 0.20f, 0f);
             var darkMat = CreateMaterial(def.DarkColor, 0.25f, 0f);
             var hairMat = CreateMaterial(def.HairColor, 0.22f, 0f);
+
+            // 登记基础材质，供「整体色调」外观槽（角色库 UI）使用；不改变任何渲染行为
+            if (skinMat != null) rig.Materials.Add(skinMat);
+            if (nailMat != null) rig.Materials.Add(nailMat);
+            if (clothMat != null) rig.Materials.Add(clothMat);
+            if (trimMat != null) rig.Materials.Add(trimMat);
+            if (darkMat != null) rig.Materials.Add(darkMat);
+            if (hairMat != null) rig.Materials.Add(hairMat);
 
             BuildStool(root.transform, s, darkMat, trimMat);
             BuildLegs(root.transform, s, clothMat, darkMat);
@@ -605,6 +848,14 @@ namespace PianoTeacher3D.Avatar
 
         private void OnDestroy()
         {
+            // 外部角色是 Instantiate 出来的实例，必须显式释放（内含材质实例）；内置角色随本对象销毁
+            ReleaseExternalView();
+            if (_switchService != null)
+            {
+                _switchService.Dispose();
+                _switchService = null;
+            }
+
             for (int i = 0; i < _runtimeMeshes.Count; i++)
             {
                 if (_runtimeMeshes[i] != null) Object.Destroy(_runtimeMeshes[i]);

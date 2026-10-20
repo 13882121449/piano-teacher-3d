@@ -6,6 +6,8 @@ using PianoTeacher3D.MIDI;
 using PianoTeacher3D.Piano;
 using PianoTeacher3D.Avatar;
 using PianoTeacher3D.CameraControl;
+using PianoTeacher3D.Characters;
+using PianoTeacher3D.Customization;
 
 namespace PianoTeacher3D.Core
 {
@@ -48,6 +50,9 @@ namespace PianoTeacher3D.Core
         // ==================== 服务（方案 9.1 / 9.2） ====================
         private readonly SongLibraryService _library = new SongLibraryService();
         private readonly UserPreferences _prefs = new UserPreferences();
+
+        /// <summary>照片外观管线（方案 9.2）；构造时不产生任何网络或用户数据写入。</summary>
+        private CharacterCustomizationService _customization;
 
         /// <summary>指法提供器（方案 5.3 / 10）：默认启发式，可被替换为人工编辑或模型推断。</summary>
         private readonly IFingeringProvider _fingering = new HeuristicFingeringProvider();
@@ -263,6 +268,9 @@ namespace PianoTeacher3D.Core
                 if (_loadJob.IsDone) CompleteLoadJob();
             }
 
+            // 照片外观任务：读图与生成都在主线程推进，取消与超时按注入时钟判定
+            _customization?.Tick(Time.unscaledTime);
+
             if (_timeline == null || _scheduler == null) return;
 
             float current = _timeline.CurrentTime;
@@ -449,6 +457,8 @@ namespace PianoTeacher3D.Core
             avatarRoot.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
             _avatar = avatarRoot.AddComponent<AvatarManager>();
             _avatar.BuildAvatars();
+            _avatar.OnCharacterViewChanged += OnCharacterViewChanged;
+            BuildCustomizationPipeline();
 
             // 8. 手部 IK + 手指姿态：两者共用同一份「手指 ↔ 音高」分配（方案 5.3 第二阶段），
             //    保证「弯下去的手指 == 指尖伸向该键的手指 == 真正按下该键的手指」三者严格一致。
@@ -1066,6 +1076,65 @@ namespace PianoTeacher3D.Core
 
             OnAvatarChanged?.Invoke(_avatar.CurrentIndex);
             if (!_suppressPrefsWrite) { _prefs.AvatarIndex = _avatar.CurrentIndex; MarkPrefsDirty(); }
+        }
+
+        // ==================== 角色档案切换与照片外观（方案 7.3 / 9.2） ====================
+
+        /// <summary>照片外观管线（UI 用它提交照片、预览与应用）。未装配时返回 null。</summary>
+        public CharacterCustomizationService Customization => _customization;
+
+        /// <summary>当前角色契约实例（可能为 null：内置角色初始化前）。</summary>
+        public ICharacterView CurrentCharacterView => _avatar != null ? _avatar.CurrentView : null;
+
+        /// <summary>
+        /// 按角色档案切换角色（方案 7.3 事务：加载 → 校验 → 激活 → 提交，失败保留原角色）。
+        /// 内置角色走 <see cref="AvatarManager"/> 的既有路径，外部预制品走切换事务。
+        /// </summary>
+        public CharacterSwitchResult ActivateCharacter(CharacterProfile profile)
+        {
+            if (_avatar == null)
+                return new CharacterSwitchResult(CharacterSwitchState.RolledBack,
+                    "角色系统尚未初始化。", string.Empty, string.Empty);
+
+            CharacterSwitchResult result = _avatar.TryActivate(profile);
+            if (result.Succeeded)
+            {
+                // 外部角色的骨骼引用换了：必须重新绑定手指姿态控制器，否则手指不跟谱
+                _fingerPose?.Initialize(_avatar.LeftHand, _avatar.RightHand);
+                _fingerPose?.ReleaseAll();
+                AfterAvatarChanged();
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 角色视图变更（内置互切 / 外部角色提交 / 切回内置 / 销毁）都走这里：
+        /// 外观管线必须重新绑定，否则应用过的照片外观会丢引用或泄漏纹理（方案 11.2）。
+        /// </summary>
+        private void OnCharacterViewChanged(ICharacterView view)
+        {
+            if (_customization != null) _customization.BindCharacter(view, out _);
+        }
+
+        /// <summary>装配照片外观管线。只创建内存对象，不联网、不写用户数据。</summary>
+        private void BuildCustomizationPipeline()
+        {
+            try
+            {
+                string root = Path.Combine(Application.persistentDataPath, "customization");
+                var storage = new AppearanceStorage(root);
+                var consent = new PrivacyConsentController(root);
+                var provider = new MockImageGenerationProvider(() => Time.unscaledTime);
+                _customization = new CharacterCustomizationService(storage, consent, provider);
+                _customization.BindCharacter(_avatar != null ? _avatar.CurrentView : null, out _);
+            }
+            catch (Exception ex)
+            {
+                // 外观管线失败不能拖垮演奏（方案 9.6）：只记录，不抛出
+                _customization = null;
+                Debug.LogWarning($"照片外观管线未启用：{ex.GetType().Name}");
+            }
         }
 
         /// <summary>当前角色是否持有效 Humanoid 骨架（供 UI / 诊断显示）。</summary>
