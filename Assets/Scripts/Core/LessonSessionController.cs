@@ -53,6 +53,7 @@ namespace PianoTeacher3D.Core
 
         /// <summary>照片外观管线（方案 9.2）；构造时不产生任何网络或用户数据写入。</summary>
         private CharacterCustomizationService _customization;
+        private PrivacyConsentController _consent;
 
         /// <summary>指法提供器（方案 5.3 / 10）：默认启发式，可被替换为人工编辑或模型推断。</summary>
         private readonly IFingeringProvider _fingering = new HeuristicFingeringProvider();
@@ -1083,6 +1084,9 @@ namespace PianoTeacher3D.Core
         /// <summary>照片外观管线（UI 用它提交照片、预览与应用）。未装配时返回 null。</summary>
         public CharacterCustomizationService Customization => _customization;
 
+        /// <summary>隐私同意控制器（照片面板在提交前必须拿到它）。未装配时返回 null。</summary>
+        public PrivacyConsentController PrivacyConsent => _consent;
+
         /// <summary>当前角色契约实例（可能为 null：内置角色初始化前）。</summary>
         public ICharacterView CurrentCharacterView => _avatar != null ? _avatar.CurrentView : null;
 
@@ -1133,9 +1137,9 @@ namespace PianoTeacher3D.Core
             {
                 string root = Path.Combine(Application.persistentDataPath, "customization");
                 var storage = new AppearanceStorage(root);
-                var consent = new PrivacyConsentController(root);
+                _consent = new PrivacyConsentController(root);
                 var provider = new MockImageGenerationProvider(() => Time.unscaledTime);
-                _customization = new CharacterCustomizationService(storage, consent, provider);
+                _customization = new CharacterCustomizationService(storage, _consent, provider);
                 _customization.BindCharacter(_avatar != null ? _avatar.CurrentView : null, out _);
             }
             catch (Exception ex)

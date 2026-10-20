@@ -362,6 +362,11 @@ namespace PianoTeacher3D.Avatar
                 _rigs.Add(rig);
             }
             _currentIndex = 0;
+
+            // 骨架就绪后立刻建立内置角色的视图包装，保证 CurrentView 从场景装配完成起就非 null。
+            // 之前是首次 SwitchAvatar 才惰性创建，导致启动阶段「照片外观绑定」「角色库高亮」
+            // 都拿到 null（CurrentCharacterView 为 null 已被 PlayMode 用例抓到）。
+            EnsureBuiltInView();
         }
 
         private static void DestroyRig(AvatarRig rig)

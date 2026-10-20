@@ -55,6 +55,8 @@ namespace PianoTeacher3D.UI
         private RectTransform _panel;
         private Text _currentText;
         private Text _licenseText;
+        private Button _photoButton;
+        private PhotoCustomizationPanel _photoPanel;
         private Sprite _whiteSprite;
         private Texture2D _whiteTexture;
 
@@ -170,6 +172,20 @@ namespace PianoTeacher3D.UI
 
             BuildCards();
 
+            // 照片外观入口（方案 12.2）：挂在角色库内，避免为低频操作占用常驻控件。
+            // 未装配外观管线时按钮仍显示但禁用——用户能看到能力存在，点下去不会报错。
+            bool hasCustomization = _session != null && _session.Customization != null
+                                    && _session.PrivacyConsent != null;
+            _photoButton = UITheme.CreateButton(_panel, "用照片定制外观…", Vector2.zero,
+                new Vector2(PanelWidth - 32f, 32f), OpenPhotoCustomizationPanel,
+                UITheme.FontSmall, ButtonStyle.Secondary,
+                hasCustomization
+                    ? "上传一张照片，生成当前角色的个性化外观（仅本机处理，不上传）"
+                    : "照片外观管线未启用（本地存储不可用）");
+            UITheme.PlaceTopLeft(_photoButton.GetComponent<RectTransform>(),
+                16f, CardTop + CardHeight + 8f, PanelWidth - 32f, 32f);
+            _photoButton.interactable = hasCustomization;
+
             _licenseText = UITheme.CreateText(_panel, string.Empty, Vector2.zero,
                 new Vector2(PanelWidth - 32f, 20f), UITheme.FontStatusLabel, UITheme.TextSecondary,
                 TextAnchor.MiddleLeft);
@@ -232,8 +248,55 @@ namespace PianoTeacher3D.UI
             if (_cards.Count > 0) UITheme.ChainHorizontal(_cards.ToArray());
         }
 
-        private Image CreateThumbnail(Transform parent, CharacterProfile profile)
+        /// <summary>
+        /// 打开照片定制面板（方案 9.2 的第一步：角色库 →「用照片定制外观」）。
+        /// 面板只在首次打开时创建，之后复用同一实例（预览与任务状态都不丢）。
+        /// </summary>
+        private void OpenPhotoCustomizationPanel()
         {
+            var service = _session != null ? _session.Customization : null;
+            var consent = _session != null ? _session.PrivacyConsent : null;
+            if (service == null || consent == null)
+            {
+                _photoButton.interactable = false;
+                return;
+            }
+
+            AppearanceSlot slot = ResolvePhotoSlot();
+
+            if (_photoPanel == null)
+            {
+                var go = new GameObject("PhotoCustomizationPanel");
+                go.transform.SetParent(transform, false);
+                _photoPanel = go.AddComponent<PhotoCustomizationPanel>();
+                _photoPanel.Initialize(service, consent, slot);
+            }
+            else
+            {
+                // 角色可能在两次打开之间被切换：槽位能力变了就跟着换
+                _photoPanel.SetSlot(slot, out _);
+            }
+
+            _photoPanel.ShowPanel(true);
+        }
+
+        /// <summary>
+        /// 按当前角色的**运行时能力**选外观槽位（方案 9.5：不兼容的槽位不给应用）。
+        /// 缩略图最安全（任何角色都支持），其次整体色调，最后才考虑贴图类槽位。
+        /// </summary>
+        private AppearanceSlot ResolvePhotoSlot()
+        {
+            var view = _session != null ? _session.CurrentCharacterView : null;
+            if (view == null) return AppearanceSlot.Thumbnail;
+
+            if (view.Supports(AppearanceSlot.Thumbnail)) return AppearanceSlot.Thumbnail;
+            if (view.Supports(AppearanceSlot.BodyTint)) return AppearanceSlot.BodyTint;
+            if (view.Supports(AppearanceSlot.FaceTexture)) return AppearanceSlot.FaceTexture;
+            if (view.Supports(AppearanceSlot.HeadMaterial)) return AppearanceSlot.HeadMaterial;
+            return AppearanceSlot.Thumbnail;
+        }
+
+        private Image CreateThumbnail(Transform parent, CharacterProfile profile)        {
             var go = new GameObject("Thumb");
             go.transform.SetParent(parent, false);
             var rt = go.AddComponent<RectTransform>();
