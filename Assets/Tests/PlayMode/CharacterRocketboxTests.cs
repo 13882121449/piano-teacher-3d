@@ -47,8 +47,14 @@ namespace PianoTeacher3D.Tests
 
             try
             {
+                // 资产现状（2026-10-20 实测）：仓库里只有 head 的两张贴图，
+                // body / opacity 材质没有主贴图 → 渲染出来是白模 + 白色发片碎片。
+                // 因此校验**必须**失败，且原因要指向缺失的贴图；这是刻意的门禁，
+                // 不是缺陷回退：宁可不让用户切过去，也不让他看到破面白模。
                 var validation = view.ValidateRig();
-                Assert.IsTrue(validation.Ok, "骨架校验失败：" + validation.Message);
+                Assert.IsFalse(validation.Ok, "贴图不全的角色不应通过校验（会被渲染成白模）");
+                StringAssert.Contains("主贴图", validation.Message,
+                    "失败原因应指向缺失的贴图，当前：" + validation.Message);
 
                 Assert.IsTrue(view.IsActivated == false, "未激活前 IsActivated 应为 false");
                 view.OnCharacterActivated();
@@ -276,6 +282,33 @@ namespace PianoTeacher3D.Tests
             }
 
             yield return null;
+        }
+
+        /// <summary>
+        /// 会话层门禁：资产不完整的角色必须被拒绝，且当前角色保持不变（方案 7.3 回滚）。
+        /// 这是用户实际会走到的路径——点了角色卡片就触发这一段。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Session_RejectsIncompleteCharacter_AndKeepsPrevious()
+        {
+            UnityEngine.SceneManagement.SceneManager.LoadScene("PianoLesson");
+            yield return null;
+            yield return null;
+
+            var session = Object.FindFirstObjectByType<PianoTeacher3D.Core.LessonSessionController>();
+            Assert.IsNotNull(session);
+
+            string before = session.CurrentCharacterView != null
+                ? session.CurrentCharacterView.CharacterId
+                : string.Empty;
+            Assert.IsNotEmpty(before, "场景装配完成后应已有当前角色");
+
+            var result = session.ActivateCharacter(_profile);
+
+            Assert.IsFalse(result.Succeeded, "资产不完整的角色不应切换成功");
+            StringAssert.Contains("主贴图", result.Error, "应给出可读原因，当前：" + result.Error);
+            Assert.AreEqual(before, session.CurrentCharacterView.CharacterId,
+                "切换失败后必须保留原角色");
         }
 
         private static void AssertHand(RocketboxHandRig hand, string label)

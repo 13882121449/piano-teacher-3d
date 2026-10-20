@@ -103,12 +103,61 @@ namespace PianoTeacher3D.Characters
                 if (!avatar.isValid) return CharacterValidation.Fail("角色的 Humanoid Avatar 无效（骨骼映射不完整）。");
                 if (!avatar.isHuman) return CharacterValidation.Fail("角色的 Avatar 不是 Humanoid 类型。");
 
+                var materials = ValidateMaterials(root);
+                if (!materials.Ok) return materials;
+
                 return ValidateHandSkeleton(root, requiredBoneNames ?? BuildBipedHandBoneNames());
             }
             catch (Exception e)
             {
                 return CharacterValidation.Fail("角色预制体校验异常：" + e.Message);
             }
+        }
+
+        /// <summary>
+        /// 材质贴图完整性（方案 7.1「必要的材质、纹理…齐全」）。
+        ///
+        /// <para>
+        /// 只用纯色材质的导入模型会被渲染成白模：身体没有 <c>_MainTex</c>、
+        /// 头发/睫毛用的透明材质没有 alpha 贴图 → 从侧面看就是一片白色尖片（实测现象）。
+        /// 这类角色**不能**进角色库，否则用户切过去只会看到一个白人和一堆碎片。
+        /// 程序化内置角色的材质本来就是纯色，不走这条校验。
+        /// </para>
+        /// </summary>
+        public static CharacterValidation ValidateMaterials(GameObject root)
+        {
+            if (root == null) return CharacterValidation.Fail("角色预制体为空。");
+
+            var smrs = root.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            if (smrs == null || smrs.Length == 0)
+                return CharacterValidation.Fail("角色没有任何蒙皮网格（SkinnedMeshRenderer）。");
+
+            for (int s = 0; s < smrs.Length; s++)
+            {
+                var smr = smrs[s];
+                if (smr == null) continue;
+
+                var materials = smr.sharedMaterials;
+                if (materials == null || materials.Length == 0)
+                    return CharacterValidation.Fail($"网格「{smr.name}」没有材质。");
+
+                for (int m = 0; m < materials.Length; m++)
+                {
+                    var mat = materials[m];
+                    if (mat == null)
+                        return CharacterValidation.Fail($"网格「{smr.name}」第 {m} 个材质为空（材质丢失）。");
+
+                    bool hasMainTexture = mat.HasProperty("_MainTex") && mat.mainTexture != null;
+                    if (!hasMainTexture)
+                    {
+                        return CharacterValidation.Fail(
+                            $"材质「{mat.name}」缺少主贴图：模型会渲染成白模。" +
+                            "请补齐该角色的贴图文件（身体 / 头部 / 透明层），或换用资产完整的角色。");
+                    }
+                }
+            }
+
+            return CharacterValidation.Pass;
         }
 
         /// <summary>

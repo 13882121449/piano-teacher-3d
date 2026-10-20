@@ -35,7 +35,7 @@ namespace PianoTeacher3D.UI
 
         // 面板尺寸：4 张卡片一行（4 × 108 + 3 × 8 = 456），加左右各 16 的内边距
         private const float PanelWidth = 488f;
-        private const float PanelHeight = 300f;
+        private const float PanelHeight = 324f;   // 多出 24：允许「切换失败原因」换行显示两行
         private const float CardWidth = 108f;
         private const float CardHeight = 132f;
         private const float CardGap = 8f;
@@ -186,10 +186,13 @@ namespace PianoTeacher3D.UI
                 16f, CardTop + CardHeight + 8f, PanelWidth - 32f, 32f);
             _photoButton.interactable = hasCustomization;
 
+            // 许可 / 失败原因：允许换行两行，避免长原因（例如资产缺贴图）溢出面板造成视觉错位
             _licenseText = UITheme.CreateText(_panel, string.Empty, Vector2.zero,
-                new Vector2(PanelWidth - 32f, 20f), UITheme.FontStatusLabel, UITheme.TextSecondary,
-                TextAnchor.MiddleLeft);
-            UITheme.PlaceTopLeft(_licenseText.rectTransform, 16f, PanelHeight - 30f, PanelWidth - 32f, 20f);
+                new Vector2(PanelWidth - 32f, 36f), UITheme.FontStatusLabel, UITheme.TextSecondary,
+                TextAnchor.UpperLeft);
+            _licenseText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _licenseText.verticalOverflow = VerticalWrapMode.Truncate;
+            UITheme.PlaceTopLeft(_licenseText.rectTransform, 16f, PanelHeight - 42f, PanelWidth - 32f, 36f);
 
             _panel.gameObject.SetActive(false);
 
@@ -246,6 +249,14 @@ namespace PianoTeacher3D.UI
             }
 
             if (_cards.Count > 0) UITheme.ChainHorizontal(_cards.ToArray());
+        }
+
+        /// <summary>面板里只放前 <paramref name="max"/> 个字符，完整原因进日志，避免文本溢出。</summary>
+        private static string Truncate(string text, int max)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length <= max) return text ?? string.Empty;
+            Debug.LogWarning("[AvatarSelectionUI] " + text);
+            return text.Substring(0, max) + "…";
         }
 
         /// <summary>
@@ -370,10 +381,24 @@ namespace PianoTeacher3D.UI
                 return;
             }
 
-            // 外部角色：走切换事务（含校验与回滚），失败时旧角色保持可驱动
+            // 外部角色：走切换事务（含校验与回滚），失败时旧角色保持可驱动。
+            // 失败原因必须显示出来：资产不全（例如缺贴图）时如果只是静默不切换，
+            // 用户只会觉得「点了没反应」，反而更困惑。
             if (_avatarManager == null) return;
-            _avatarManager.TryActivate(profile);
-            Highlight(CurrentCharacterId());
+            var result = _avatarManager.TryActivate(profile);
+
+            if (result.Succeeded)
+            {
+                Highlight(CurrentCharacterId());
+                return;
+            }
+
+            Highlight(CurrentCharacterId());   // 高亮保持在实际生效的角色上
+            if (_licenseText != null)
+            {
+                _licenseText.text = "切换失败：" + Truncate(result.Error, 72);
+                _licenseText.color = UITheme.TextError;
+            }
         }
 
         private void Highlight(string activeCharacterId)
