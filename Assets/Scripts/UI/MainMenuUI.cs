@@ -162,9 +162,17 @@ namespace PianoTeacher3D.UI
             {
                 int col = i % columns;
                 int row = i / columns;
-                var card = UIKit.Card(_content, Path.GetFileNameWithoutExtension(songs[i]),
-                    DescribeSongMeta(songs[i]), new Vector2(cardW, cardH),
-                    () => LoadLesson(songs[i]), $"开始学习《{Path.GetFileNameWithoutExtension(songs[i])}》");
+
+                // 逐次迭代复制到局部变量再进闭包：for 的循环变量是**共享**的，
+                // 直接写 () => LoadLesson(songs[i]) 会让所有卡片共用同一个 i，
+                // 点击时 i 已等于 shown → ArgumentOutOfRangeException（实测崩溃栈见 BuildLibrarySection）。
+                // foreach 的迭代变量才有逐次捕获语义，for 必须自己复制。
+                string songPath = songs[i];
+                string songName = Path.GetFileNameWithoutExtension(songPath);
+
+                var card = UIKit.Card(_content, songName,
+                    DescribeSongMeta(songPath), new Vector2(cardW, cardH),
+                    () => LoadLesson(songPath), $"开始学习《{songName}》");
                 UITheme.PlaceTopLeft(card.GetComponent<RectTransform>(),
                     leftOffset + col * (cardW + gap), GridTopGap + row * (cardH + gap), cardW, cardH);
             }
