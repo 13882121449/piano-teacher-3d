@@ -1115,6 +1115,15 @@ namespace PianoTeacher3D.Core
         private void OnCharacterViewChanged(ICharacterView view)
         {
             if (_customization != null) _customization.BindCharacter(view, out _);
+
+            // 手指关节轴随角色切换：程序化角色用默认「局部 X 轴」，导入骨架用推导出的铰链轴。
+            // 不切换的话，Biped 手指会被拧成麻花而不是弯曲（见 IFingerJointAxes 注释）。
+            if (_fingerPose != null)
+            {
+                _fingerPose.JointAxes = view is ICharacterJointAxesProvider provider
+                    ? provider.JointAxes
+                    : DefaultFingerJointAxes.Instance;
+            }
         }
 
         /// <summary>装配照片外观管线。只创建内存对象，不联网、不写用户数据。</summary>

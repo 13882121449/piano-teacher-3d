@@ -25,7 +25,7 @@ namespace PianoTeacher3D.Characters
     /// ③ 手臂 IK 会直接改骨骼 Transform，蒙皮模型上的视觉效果未验证。
     /// </para>
     /// </summary>
-    public sealed class RocketboxCharacterView : ICharacterView, ICharacterRigSource
+    public sealed class RocketboxCharacterView : ICharacterView, ICharacterRigSource, ICharacterJointAxesProvider
     {
         private readonly CharacterProfile _profile;
         private readonly CharacterResourceScope _scope;
@@ -37,6 +37,9 @@ namespace PianoTeacher3D.Characters
         private readonly RocketboxHandRig _leftHand;
         private readonly RocketboxHandRig _rightHand;
         private readonly string _handError;
+
+        /// <summary>由绑定姿态推导的手指关节轴策略（左右手合一；推导失败时退回默认策略）。</summary>
+        private IFingerJointAxes _jointAxes = DefaultFingerJointAxes.Instance;
 
         private readonly List<Renderer> _renderers = new List<Renderer>();
         private readonly List<Material> _ownMaterials = new List<Material>();
@@ -134,6 +137,7 @@ namespace PianoTeacher3D.Characters
             var view = new RocketboxCharacterView(profile, scope, root, animator, skeleton,
                 left, right, handError, poseSettings, definition);
             view.CollectRenderers();
+            view.BuildJointAxes();
 
             if (left == null || right == null)
             {
@@ -164,6 +168,47 @@ namespace PianoTeacher3D.Characters
         public RocketboxHandRig RocketboxLeftHand => _leftHand;
 
         public RocketboxHandRig RocketboxRightHand => _rightHand;
+
+        /// <summary>手指关节轴策略（左右手合一）。推导失败时返回默认策略，演奏层无需分支。</summary>
+        public IFingerJointAxes JointAxes => _jointAxes;
+
+        /// <summary>
+        /// 用绑定姿态推导铰链轴。必须在坐姿应用**之前**取到手背法线：
+        /// 站姿 T-Pose 下手背朝向是确定的，摆成坐姿后再算会被手臂旋转污染。
+        /// </summary>
+        private void BuildJointAxes()
+        {
+            if (_leftHand == null || _rightHand == null) return;
+
+            var axes = new ImportedFingerJointAxes();
+            bool leftOk = axes.AddHand(_leftHand, WorldBackNormal(_leftHand), out string leftError);
+            bool rightOk = axes.AddHand(_rightHand, WorldBackNormal(_rightHand), out string rightError);
+
+            if (!leftOk && !rightOk)
+            {
+                _jointAxes = DefaultFingerJointAxes.Instance;
+                Debug.LogWarning($"角色「{CharacterId}」手指轴推导失败，退回默认轴：" +
+                                 $"{leftError} / {rightError}");
+                return;
+            }
+
+            _jointAxes = axes;
+
+            if (!leftOk) Debug.LogWarning($"角色「{CharacterId}」左手轴推导失败：{leftError}");
+            if (!rightOk) Debug.LogWarning($"角色「{CharacterId}」右手轴推导失败：{rightError}");
+        }
+
+        /// <summary>
+        /// <see cref="RocketboxHandRig.BackNormal"/> 是**腕骨局部空间**的向量
+        /// （在 <c>DeriveCanonicalBasis</c> 里用 <c>Wrist.InverseTransformPoint</c> 推出，
+        /// 配套的 <c>CanonicalToWrist</c> 也印证了这一点）。铰链轴推导需要世界向量，
+        /// 直接拿局部向量当世界用会让整只手指的弯曲平面偏转约 90°（实测指尖只横移 1–3 mm）。
+        /// </summary>
+        private static Vector3 WorldBackNormal(RocketboxHandRig hand)
+        {
+            if (hand == null) return Vector3.up;
+            return hand.Wrist != null ? hand.Wrist.rotation * hand.BackNormal : hand.BackNormal;
+        }
 
         /// <summary>
         /// 槽位准入判据（外观应用器只认它，不认资料声明）。

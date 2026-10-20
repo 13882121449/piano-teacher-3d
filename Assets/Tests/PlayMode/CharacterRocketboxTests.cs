@@ -189,6 +189,95 @@ namespace PianoTeacher3D.Tests
             yield return null;
         }
 
+        /// <summary>
+        /// 真实 Biped 骨骼上的轴推导验证：给每根手指的 MCP 施加 30° 弯曲，
+        /// 指尖必须朝**掌心**（−手背法线）移动，而不是横移或抬起。
+        /// <para>
+        /// 这是「新角色能不能弹」的核心断言：改造前 FingerPoseController 假设骨骼局部 +X 是弯曲轴，
+        /// Biped 骨架套用后指尖会横移/上抬，手指像在抽筋而不是按琴键。
+        /// </para>
+        /// </summary>
+        [UnityTest]
+        public IEnumerator JointAxes_CurlMovesRealFingertipsTowardPalm()
+        {
+            var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);
+            Assert.IsNotNull(view, "角色实例化失败：" + error);
+
+            try
+            {
+                var axes = view.JointAxes;
+                Assert.IsNotNull(axes, "角色应提供关节轴策略");
+                Assert.IsTrue(axes is ImportedFingerJointAxes, "导入角色应使用推导轴，而不是默认局部 X 轴");
+
+                var imported = (ImportedFingerJointAxes)axes;
+                Assert.GreaterOrEqual(imported.JointCount, 27,
+                    $"双手至少应有 27 个关节登记铰链轴（实测 {imported.JointCount}）");
+                Assert.AreEqual(10, imported.FingerCount, "左右手各 5 指的指根瞄准数据都应登记");
+
+                RocketboxHandRig[] hands = { view.RocketboxLeftHand, view.RocketboxRightHand };
+                string[] labels = { "左手", "右手" };
+
+                for (int h = 0; h < hands.Length; h++)
+                {
+                    RocketboxHandRig hand = hands[h];
+                    // BackNormal 是腕骨局部空间的向量，掌心朝向要转到世界再比较
+                    Vector3 palmDirection = -(hand.Wrist.rotation * hand.BackNormal);
+
+                    for (int f = 0; f < RocketboxHandRig.FingersPerHand; f++)
+                    {
+                        Assert.IsTrue(hand.TryGetJoints(f, out Transform proximal, out _, out _));
+                        Transform tip = hand.GetFingertip(f);
+                        Assert.IsNotNull(tip);
+
+                        Vector3 before = tip.position;
+                        Quaternion original = proximal.localRotation;
+
+                        proximal.localRotation = axes.CurlLocalRotation(proximal, 0, 30f);
+                        Vector3 after = tip.position;
+
+                        Vector3 motion = after - before;
+                        Assert.Greater(motion.magnitude, 0.002f,
+                            $"{labels[h]}第 {f} 指弯曲 30° 后指尖几乎没动（{motion.magnitude * 1000f:0.#} mm）");
+                        Assert.Less(Vector3.Dot(motion, palmDirection), 0f,
+                            $"{labels[h]}第 {f} 指弯曲方向错误：指尖没有朝掌心移动" +
+                            $"（dot={Vector3.Dot(motion, palmDirection) * 1000f:0.##} mm）");
+
+                        proximal.localRotation = original;
+                    }
+                }
+            }
+            finally
+            {
+                view.DisposeCharacterResources();
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
+        /// 演奏层默认策略必须与改造前逐位一致——否则程序化角色的 460 条用例会集体漂移。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator DefaultAxes_EqualLegacyEulerRotation()
+        {
+            var axes = PianoTeacher3D.Avatar.DefaultFingerJointAxes.Instance;
+
+            var go = new GameObject("Joint");
+            try
+            {
+                go.transform.localRotation = Quaternion.Euler(12f, 8f, -4f);   // 非单位绑定姿态
+                Assert.AreEqual(Quaternion.Euler(30f, 0f, 0f),
+                    axes.CurlLocalRotation(go.transform, 0, 30f),
+                    "默认策略必须忽略绑定姿态，直接返回 Euler(deg,0,0)（与改造前一致）");
+            }
+            finally
+            {
+                Object.Destroy(go);
+            }
+
+            yield return null;
+        }
+
         private static void AssertHand(RocketboxHandRig hand, string label)
         {
             Assert.IsNotNull(hand, label + " rig 为空");

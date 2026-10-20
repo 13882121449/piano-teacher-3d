@@ -107,7 +107,7 @@
 <!-- SECTION:resource-load:BEGIN -->
 ### 资源加载采样（方案 11.4「资源加载耗时和失败率采样」）
 
-- 时间：2026-10-20 13:49:57
+- 时间：2026-10-20 20:34:24
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -115,11 +115,11 @@
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
 - 曲目目录：`StreamingAssets/Songs`；曲目数：1
-- 最慢单曲：20.0 ms；失败数：0
+- 最慢单曲：18.1 ms；失败数：0
 
 | 曲目 | 加载耗时 (ms) | 结果 |
 |---|---|---|
-| demo.mid | 20.0 | 成功 |
+| demo.mid | 18.1 | 成功 |
 
 **口径说明**：耗时用 `System.Diagnostics.Stopwatch` 包裹 `LessonSessionController.LoadSong`，包含校验 + 解析 + 一次性提交；示例曲为毫秒级，5 秒上限只用于捕获卡死，不代表目标设备上的加载性能。
 <!-- SECTION:resource-load:END -->

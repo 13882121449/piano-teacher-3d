@@ -64,6 +64,12 @@ namespace PianoTeacher3D.Avatar
         /// <summary>无目标时的自然弯曲总量（度）。</summary>
         public float RestCurlDegrees = 26f;
 
+        /// <summary>
+        /// 关节轴策略：默认「绕骨骼局部 X 轴弯曲」（程序化手部，行为与改造前逐位一致）。
+        /// 导入的 Biped/Humanoid 骨架由角色视图提供由绑定姿态推导的铰链轴。
+        /// </summary>
+        public IFingerJointAxes JointAxes { get; set; } = DefaultFingerJointAxes.Instance;
+
         /// <summary>接近阶段只形成部分手型（总弯曲的相对比例）。</summary>
         [Range(0.1f, 1f)] public float ApproachCurlScale = 0.62f;
 
@@ -392,9 +398,7 @@ namespace PianoTeacher3D.Avatar
             Transform chain = finger.childCount > 0 ? finger.GetChild(0) : null;
             if (aim && chain != null && aimDirection.sqrMagnitude > 1e-8f)
             {
-                Quaternion desiredChainWorld = Quaternion.LookRotation(aimDirection, aimUp);
-                Quaternion rootWorld = desiredChainWorld * Quaternion.Inverse(chain.localRotation);
-                Quaternion localTarget = Quaternion.Inverse(finger.parent.rotation) * rootWorld;
+                Quaternion localTarget = JointAxes.RootAimLocalRotation(finger, aimDirection, aimUp);
                 finger.localRotation = Quaternion.Slerp(finger.localRotation, localTarget, Time.deltaTime * SlerpSpeed);
             }
             else
@@ -414,17 +418,18 @@ namespace PianoTeacher3D.Avatar
             }
 
             // ---- 关节角：逐关节限幅并插值 ----
-            ApplyJoint(proximal, angles[0] * Mathf.Rad2Deg, MaxMcpDegrees);
-            ApplyJoint(intermediate, angles[1] * Mathf.Rad2Deg, MaxPipDegrees);
-            ApplyJoint(distal, angles[2] * Mathf.Rad2Deg, MaxDipDegrees);
+            ApplyJoint(proximal, 0, angles[0] * Mathf.Rad2Deg, MaxMcpDegrees);
+            ApplyJoint(intermediate, 1, angles[1] * Mathf.Rad2Deg, MaxPipDegrees);
+            ApplyJoint(distal, 2, angles[2] * Mathf.Rad2Deg, MaxDipDegrees);
 
             if (hasTarget) RecordReachIssue(distance, l0 + l1 + l2, angles);
         }
 
-        private void ApplyJoint(Transform joint, float degrees, float maxDegrees)
+        private void ApplyJoint(Transform joint, int jointIndex, float degrees, float maxDegrees)
         {
             if (joint == null) return;
-            var target = Quaternion.Euler(Mathf.Clamp(degrees, 0f, maxDegrees), 0f, 0f);   // 绕 X：正角 = 指尖下压
+            // 弯曲轴由策略决定：程序化手部绕局部 X（与改造前一致），导入骨架绕推导出的铰链轴
+            var target = JointAxes.CurlLocalRotation(joint, jointIndex, Mathf.Clamp(degrees, 0f, maxDegrees));
             joint.localRotation = Quaternion.Slerp(joint.localRotation, target,
                 Time.deltaTime * JointSlerpSpeed);
         }
@@ -466,11 +471,11 @@ namespace PianoTeacher3D.Avatar
                     if (joint == null) continue;
 
                     // 先把当前关节角写回，保证指尖位置反映本轮求解结果
-                    joint.localRotation = Quaternion.Euler(angles[j] * Mathf.Rad2Deg, 0f, 0f);
+                    joint.localRotation = JointAxes.CurlLocalRotation(joint, j, angles[j] * Mathf.Rad2Deg);
 
                     Vector3 jointPos = joint.position;
                     Vector3 tip = distal.TransformPoint(0f, 0f, l2);
-                    Vector3 axis = joint.rotation * Vector3.right;
+                    Vector3 axis = JointAxes.WorldCurlAxis(joint, j);
 
                     Vector3 a = Vector3.ProjectOnPlane(tip - jointPos, axis);
                     Vector3 b = Vector3.ProjectOnPlane(target - jointPos, axis);
