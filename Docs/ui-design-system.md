@@ -46,15 +46,20 @@
 
 | 令牌 | 值 | 用途 |
 |---|---|---|
-| `FontPageTitle` | 34 | 页面标题（主菜单 / 空状态） |
-| `FontTitle` | 24 | 区块标题 |
-| `FontSongTitle` | 22 | 面板内曲目标题 |
-| `FontAction` | 20 | 主操作按钮 |
-| `FontButton` | 18 | 普通按钮 |
-| `FontBody` | 16 | 正文 |
-| `FontSmall` | 15 | 辅助说明 |
-| `FontCaption` | 13 | 分段项 / 小按钮 / 辅助说明 |
-| `FontStatusLabel` | 13 | 状态标签（顶栏状态、模式标签） |
+| `FontPageTitle` | 28 | 页面标题（主菜单 / 空状态） |
+| `FontTitle` | 20 | 区块标题 |
+| `FontSongTitle` | 20 | 面板内曲目标题 |
+| `FontSubtitle` | 15 | 副标题 / 卡片主文本 |
+| `FontAction` | 15 | 主操作按钮 |
+| `FontButton` | 15 | 普通按钮 |
+| `FontBody` | 13 | 正文（控制行、表单） |
+| `FontBodySmall` | 12 | 次级正文 |
+| `FontSmall` | 12 | 辅助说明 |
+| `FontCaption` | 10 | 分段项 / 小按钮 / 卡片元信息 |
+| `FontStatusLabel` | 10 | 状态标签（顶栏状态、模式标签） |
+
+> 行高统一为 `字号 × LineHeightRatio(1.35)`，取整用 `UITheme.LineHeight(size)`。
+> 字号只有 10 / 12 / 13 / 15 / 20 / 28 六档，禁止在 UI 脚本里写裸数字。
 
 ### 1.3 间距等级（4 · 8 · 12 · 16 · 24）
 
@@ -70,9 +75,10 @@
 
 | 令牌 | 值 | 用途 |
 |---|---|---|
-| `RadiusSmall` | 8 | 小型输入 / 标签 / 分段项 |
-| `RadiusMedium` | 14 | 中型按钮 / 卡片 |
-| `RadiusLarge` | 22 | 大型面板 |
+| `RadiusSmall` | 8 | 小型输入 / 标签 / 分段项 / chip |
+| `RadiusMedium` | 10 | 中型按钮 / 卡片 |
+| `RadiusLarge` | 12 | 大型面板 |
+| `RadiusBar` | 3 | 进度条轨道与填充 |
 
 ### 1.5 控件高度
 
@@ -80,18 +86,23 @@
 |---|---|---|
 | `HeightPrimary` | 48 | 主按钮（播放 / 暂停） |
 | `HeightButton` | 40 | 普通按钮 |
-| `HeightInput` | 36 | 输入 / 分段选择器 / 滑块行 |
-| `HeightSmall` | 32 | 小按钮 / 状态标签 |
+| `HeightInput` | 32 | 输入 / 分段选择器 |
+| `HeightSmall` | 32 | 小按钮 / 状态标签 / chip |
+| `SizeIconButton` | 32 | 图标按钮（返回 / 帮助 / 重播），正方形 |
 
 ### 1.6 布局令牌（参考分辨率 1280×720）
 
 | 令牌 | 值 | 说明 |
 |---|---|---|
 | `Layout.ReferenceResolution` | 1280 × 720 | 与 `CanvasScaler.referenceResolution` 一致；`matchWidthOrHeight = 1`（匹配高度，窄窗优先折叠而非压缩按钮） |
-| `Layout.ScreenMargin` | 12 | 屏幕四周统一外边距 |
-| `Layout.StatusBarHeight` | 44 | 顶栏高度 |
-| `Layout.MainBarHeightNormal` | 92 | 主播放栏常规高度 |
-| `Layout.MainBarHeightCompact` | 60 | 主播放栏紧凑高度（手部特写：尽量矮，避免遮挡琴键与双手） |
+| `Layout.ScreenMargin` | 16 | 屏幕四周统一外边距 |
+| `Layout.StatusBarHeight` | 56 | 顶栏高度（单行：返回 / 曲目 / 状态 / 帮助 / 角色） |
+| `Layout.MainBarHeightNormal` | 132 | 播放器面板高度（进度行 44 + 行距 16 + 控制行 40 + 上下内边距 32） |
+| `Layout.MainBarHeightCompact` | 72 | 手部特写时的高度（隐藏进度行） |
+| `Layout.ProgressBarHeight` | 6 | 进度条轨道高度（圆角 3） |
+| `Layout.ChipHeight` | 32 | 底栏 chip / 分段控件高度 |
+| `Layout.HintCardWidth` / `Height` | 220 / 88 | 左上提示卡（玻璃底，移出 2.5s 淡到 0.45） |
+| `Layout.SongCardWidth` / `Height` | 240 / 96 | 曲库卡片 |
 | `Layout.ToolbarHeightExpanded` | 124 | 练习工具栏展开高度（标题行 + 两行控件） |
 | `Layout.ToolbarHeightCollapsed` | 36 | 练习工具栏折叠高度（仅标题行，入口不丢失） |
 | `Layout.ToolbarHeaderHeight` | 28 | 工具栏标题行高度 |
@@ -214,7 +225,7 @@
 | `Layout.WideWidthThreshold` | **1180** | `≥ 1180` 时顶栏显示「保存状态」等次要状态位（其余情况下隐藏，把宽度让给曲名与状态标签） |
 | 手部特写（`CameraMode.Closeup`） | — | 主播放栏压缩为紧凑高度；练习工具栏自动折叠；隐藏 3D 区快捷键提示（避免遮挡琴键） |
 | `ShouldFoldPracticeTools(refW, closeup)` | — | `refW < 1100` **或** 手部特写 → 折叠 |
-| `Layout.MainBarHeightNormal / Compact` | **92 / 60** | 常规 / 特写紧凑高度 |
+| `Layout.MainBarHeightNormal / Compact` | **132 / 72** | 常规 / 特写紧凑高度（占屏 ≤22%，由 `PlayerBar_OccupiesAtMostTwentyTwoPercentOfScreenHeight` 守护） |
 | `Layout.ToolbarHeightExpanded / Collapsed` | **124 / 36** | 展开 / 折叠高度 |
 | `Layout.ProgressRowHeightNormal / Compact` | 18 / 14 | 进度条行高 |
 | 分析面板 | — | 从右侧滑出（`StretchRightColumn`），宽 420；与角色面板**互斥**打开，避免互相遮挡 |

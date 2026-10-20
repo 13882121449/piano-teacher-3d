@@ -1118,7 +1118,15 @@ namespace PianoTeacher3D.Core
         /// </summary>
         private void OnCharacterViewChanged(ICharacterView view)
         {
-            if (_customization != null) _customization.BindCharacter(view, out _);
+            if (_customization != null)
+            {
+                _customization.BindCharacter(view, out _);
+
+                // A→B→A 与重启后恢复：切到某个角色时，把它上次**用户确认过**的外观读回来。
+                // 只读本地 result.png + appearance.json，不重新生成、不联网；
+                // 没保存过 / 槽位不兼容时静默失败（当前外观保持不变），不打扰用户。
+                if (view != null) _customization.TryRestoreStoredAppearance(out _);
+            }
 
             // 手指关节轴随角色切换：程序化角色用默认「局部 X 轴」，导入骨架用推导出的铰链轴。
             // 不切换的话，Biped 手指会被拧成麻花而不是弯曲（见 IFingerJointAxes 注释）。
