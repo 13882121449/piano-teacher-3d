@@ -39,6 +39,7 @@ namespace PianoTeacher3D.Tests.PlayMode
         private const float BaselineLargeMotion = 0.95f;
 
         private LessonSessionController _session;
+        private HandIKController _handIK;
 
         [UnitySetUp]
         public IEnumerator SetUp()
@@ -47,6 +48,7 @@ namespace PianoTeacher3D.Tests.PlayMode
             yield return null;
             yield return null;
             _session = Object.FindFirstObjectByType<LessonSessionController>();
+            _handIK = Object.FindFirstObjectByType<HandIKController>();
             Assert.IsNotNull(_session, "PianoLesson 场景应包含 LessonSessionController");
         }
 
@@ -109,6 +111,18 @@ namespace PianoTeacher3D.Tests.PlayMode
                           $"掌穿模={report.PalmPenetrationFrames} " +
                           $"命中率={report.HitRate * 100f:0.#}% 样本={report.TargetSamples}");
                 Debug.Log($"[BENCH] song={Path.GetFileNameWithoutExtension(file)} full {report.ToLogString()}");
+
+                // 批次 2.1 归因：把「哪一类失败」也打印出来（未分配 / 缺按压点 / 超可达范围）
+                if (_handIK != null)
+                {
+                    int total = _handIK.FingertipTargetSampleCount;
+                    int unassigned = _handIK.UnassignedFingertipSamples;
+                    int missingTouch = _handIK.MissingKeyTouchSamples;
+                    int unreachable = _handIK.UnreachableTargetSamples;
+                    Debug.Log($"[BENCH-DIAG] song={Path.GetFileNameWithoutExtension(file)} " +
+                              $"目标样本={total} 未分配={Pct(unassigned, total)} 缺按压点={Pct(missingTouch, total)} " +
+                              $"超可达范围={Pct(unreachable, total)}");
+                }
             }
         }
 
@@ -131,8 +145,10 @@ namespace PianoTeacher3D.Tests.PlayMode
             }
         }
 
-        private static void AssertGroup(string song, string group, float rate, int samples, float baseline)
-        {
+        private static string Pct(int part, int total)
+            => total > 0 ? $"{part}（{part * 100f / total:0.#}%）" : "0（样本 0）";
+
+        private static void AssertGroup(string song, string group, float rate, int samples, float baseline)        {
             if (samples == 0) return; // 该曲不含此类帧：不计入（与「样本 0」口径一致）
             Assert.GreaterOrEqual(rate, baseline - GroupGateMargin,
                 $"{song} 的「{group}」命中率 {rate * 100f:0.#}% 低于基线 {baseline * 100f:0.#}% −3pp（样本 {samples}）");

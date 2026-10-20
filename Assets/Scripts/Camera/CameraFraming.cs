@@ -180,6 +180,17 @@ namespace PianoTeacher3D.CameraControl
         /// <summary>单手练习时主手在取景框 X 宽度中的最小占比 (0,1]，用于"以主手为主并尽量保留另一只手可见性"。</summary>
         public float PrimaryShare;
 
+        /// <summary>
+        /// 俯角上限（度）：躯干进入特写画面时向上抬角的搜索上限（接触方案批次 3.2）。
+        /// 高于 <see cref="ViewPitch"/>，仅在必要时使用。
+        /// </summary>
+        public float ViewPitchMax;
+
+        /// <summary>
+        /// 躯干避让余量（0..1，视口归一化坐标）：躯干包围盒中心必须落在「视口内缩该比例」之外才算不遮挡。
+        /// </summary>
+        public float TorsoMargin;
+
         /// <summary>默认参数（与 <c>CameraModeController</c> 的 Inspector 默认值保持一致）。</summary>
         public static CloseupFramingTuning Default()
         {
@@ -196,7 +207,9 @@ namespace PianoTeacher3D.CameraControl
                 BottomUiInset = 0.02f,
                 ViewPitch = 34f,
                 ViewYaw = 0f,
-                PrimaryShare = 0.7f
+                PrimaryShare = 0.7f,
+                ViewPitchMax = 70f,
+                TorsoMargin = 0.02f
             };
         }
     }
@@ -725,8 +738,56 @@ namespace PianoTeacher3D.CameraControl
             in Bounds keyBounds, bool hasKeyBounds, PracticeHand hand, in CloseupFramingTuning tuning,
             float aspect, out CameraTarget target)
         {
+            return ComputeCloseupTarget(left, right, keyBounds, hasKeyBounds, hand, tuning, aspect,
+                default, false, out target);
+        }
+
+        /// <summary>
+        /// 世界点是否落在该取景目标的视口内。
+        /// <para><paramref name="margin01"/> 为视口内缩比例（0 = 整幅画面），用于「躯干中心不得靠边」的判据。</para>
+        /// </summary>
+        public static bool IsPointInViewport(Vector3 point, in CameraTarget target, float aspect, float margin01 = 0f)
+        {
+            Vector3 back = target.Direction.sqrMagnitude > 1e-8f ? target.Direction.normalized : Vector3.forward;
+            Vector3 cameraPosition = target.Focus + back * target.Distance;
+            BuildBasis(back, out _, out Vector3 right, out Vector3 up);
+            Vector3 forward = -back;
+
+            Vector3 v = point - cameraPosition;
+            float depth = Vector3.Dot(v, forward);
+            if (depth <= MinDepth) return false; // 在相机后面（或贴在镜头上）：不算入画
+
+            float tanV = Mathf.Tan(Mathf.Max(target.FieldOfView, 1f) * 0.5f * Mathf.Deg2Rad);
+            float tanH = tanV * Mathf.Max(aspect, MinAspect);
+            float nx = Mathf.Abs(Vector3.Dot(v, right)) / (depth * tanH);
+            float ny = Mathf.Abs(Vector3.Dot(v, up)) / (depth * tanV);
+            float limit = 1f - Mathf.Clamp01(margin01);
+            return nx <= limit && ny <= limit;
+        }
+
+        /// <summary>躯干包围盒中心是否在视口内（批次 3.3 的断言口径）。</summary>
+        public static bool IsTorsoCenterInViewport(in Bounds torsoBounds, in CameraTarget target, float aspect, float margin01 = 0f)
+        {
+            return IsPointInViewport(torsoBounds.center, target, aspect, margin01);
+        }
+
+        /// <summary>
+        /// 手部特写取景目标（含躯干避让，接触方案批次 3）。
+        /// <para>
+        /// 先按方案 4.2 求「手部 ∪ 琴键」构图；若躯干包围盒中心落入视口，则在两组候选里挑：
+        /// <b>A</b> 沿视线后移（上限 <see cref="CloseupFramingTuning.MaxDistance"/>）、
+        /// <b>B</b> 抬高俯角（<see cref="CloseupFramingTuning.ViewPitch"/> → <see cref="CloseupFramingTuning.ViewPitchMax"/>）。
+        /// 只接受「躯干中心已出画」的候选，并按方案 3.2 取手部占屏（<c>Radius / Distance</c>）更大者；
+        /// 两组都不满足时退回占屏更大的候选，由调用方与断言如实暴露。
+        /// </para>
+        /// </summary>
+        public static bool ComputeCloseupTarget(in HandRegion left, in HandRegion right,
+            in Bounds keyBounds, bool hasKeyBounds, PracticeHand hand, in CloseupFramingTuning tuning,
+            float aspect, in Bounds torsoBounds, bool hasTorsoBounds, out CameraTarget target)
+        {
             target = default;
-            if (!TryCombineCloseupRegion(left, right, keyBounds, hasKeyBounds, hand, tuning, out Bounds region)) return false;
+            if (!TryCombineCloseupRegion(left, right, keyBounds, hasKeyBounds, hand, tuning, out Bounds region))
+                return false;
 
             Vector3 focus = FocusWithVerticalLimit(region, tuning);
             Vector3 back = DirectionFromAngles(tuning.ViewYaw, tuning.ViewPitch);
@@ -734,6 +795,46 @@ namespace PianoTeacher3D.CameraControl
                 tuning.MinDistance, tuning.MaxDistance, tuning.FrameMargin, aspect, out float distance, out float fov);
 
             target = CameraTarget.Create(focus, CoverRadius(region, focus), back, distance, fov);
+
+            // 没有躯干信息，或躯干中心本来就在画面外：保持原构图（绝大多数帧走这里，零额外成本）
+            if (!hasTorsoBounds) return true;
+            if (!IsTorsoCenterInViewport(torsoBounds, target, aspect)) return true;
+
+            float bestCoverage = -1f;
+            CameraTarget bestClear = default;
+            bool hasClear = false;
+            float fallbackCoverage = -1f;
+            CameraTarget fallback = target;
+
+            float margin = Mathf.Max(0f, tuning.TorsoMargin);
+            float maxDistance = Mathf.Max(tuning.MaxDistance, distance);
+
+            // 候选 A：沿视线后移（步长 0.1 m），只在距离上限内搜索
+            for (float d = distance; d <= maxDistance + 1e-3f; d += 0.1f)
+            {
+                var candidate = CameraTarget.Create(focus, target.Radius, back, d, fov);
+                float coverage = candidate.Radius / Mathf.Max(candidate.Distance, 0.01f);
+                if (coverage > fallbackCoverage) { fallbackCoverage = coverage; fallback = candidate; }
+                if (IsTorsoCenterInViewport(torsoBounds, candidate, aspect, margin)) continue;
+                if (coverage > bestCoverage) { bestCoverage = coverage; bestClear = candidate; hasClear = true; }
+            }
+
+            // 候选 B：抬高俯角（每次 +5°，上限 ViewPitchMax）
+            float pitchMax = Mathf.Max(tuning.ViewPitch, tuning.ViewPitchMax);
+            for (float pitch = tuning.ViewPitch + 5f; pitch <= pitchMax + 1e-3f; pitch += 5f)
+            {
+                Vector3 steeper = DirectionFromAngles(tuning.ViewYaw, pitch);
+                SolveFraming(region, focus, steeper, tuning.BaseFov, tuning.MaxFov,
+                    tuning.MinDistance, tuning.MaxDistance, tuning.FrameMargin, aspect,
+                    out float d, out float f);
+                var candidate = CameraTarget.Create(focus, target.Radius, steeper, d, f);
+                float coverage = candidate.Radius / Mathf.Max(candidate.Distance, 0.01f);
+                if (coverage > fallbackCoverage) { fallbackCoverage = coverage; fallback = candidate; }
+                if (IsTorsoCenterInViewport(torsoBounds, candidate, aspect, margin)) continue;
+                if (coverage > bestCoverage) { bestCoverage = coverage; bestClear = candidate; hasClear = true; }
+            }
+
+            target = hasClear ? bestClear : fallback;
             return true;
         }
 

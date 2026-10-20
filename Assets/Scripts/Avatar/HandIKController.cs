@@ -110,6 +110,9 @@ namespace PianoTeacher3D.Avatar
         private Piano.PianoKeyMap _keyMap;
         private readonly HashSet<int> _pressed = new();
 
+        /// <summary>按下音符的时值（秒）：供和弦成形时长自适应（接触方案批次 2.5）。</summary>
+        private readonly Dictionary<int, float> _pressedDurations = new();
+
         private float _currentTime;              // 由控制器每帧传入的统一时间轴时间
         private float _lastNoteTime = float.NaN;
         private float _avgNoteGap = 0.4f;        // 指数平滑的音符平均间隔
@@ -163,6 +166,26 @@ namespace PianoTeacher3D.Avatar
 
         // ---- 关节限位增量（来自 PoseIssueSource） ----
         private int _lastJointLimitCount;
+
+        // ---- 接触失败的归因计数（接触方案批次 2.1「先诊断」）----
+        // 三类失败必须分开数，否则「键亮着但手指没到」永远只能靠猜：
+        // (a) 指法未分配；(b) 该音高没有建按压点；(c) 有目标但超出可达范围。
+        private int _fingertipTargetSamples;
+        private int _unassignedFingertipSamples;
+        private int _missingKeyTouchSamples;
+        private int _unreachableTargetSamples;
+
+        /// <summary>(a) 按下的音没有被指法分配到的样本数（分母见 <see cref="FingertipTargetSampleCount"/>）。</summary>
+        public int UnassignedFingertipSamples => _unassignedFingertipSamples;
+
+        /// <summary>(b) 音高在按压点表里缺失的样本数。</summary>
+        public int MissingKeyTouchSamples => _missingKeyTouchSamples;
+
+        /// <summary>(c) 目标点超出姿态允许范围的样本数（按 <see cref="TryGetPoseLimits"/> 的包围盒判定）。</summary>
+        public int UnreachableTargetSamples => _unreachableTargetSamples;
+
+        /// <summary>参与归因统计的指尖目标样本总数（三类失败 + 正常）。</summary>
+        public int FingertipTargetSampleCount => _fingertipTargetSamples;
 
         /// <summary>一个琴键的可复用按压目标点（键面前半段 + 该键真实键面高度）。</summary>
         private readonly struct KeyTouchPoint
@@ -270,7 +293,11 @@ namespace PianoTeacher3D.Avatar
 
         public void OnNoteOn(MIDI.MidiNoteEvent e)
         {
-            if (Piano.PianoKeyMap.IsInRange(e.Pitch)) _pressed.Add(e.Pitch);
+            if (Piano.PianoKeyMap.IsInRange(e.Pitch))
+            {
+                _pressed.Add(e.Pitch);
+                if (e.Duration > 0f) _pressedDurations[e.Pitch] = e.Duration;
+            }
 
             if (!float.IsNaN(_lastNoteTime))
             {
@@ -280,7 +307,11 @@ namespace PianoTeacher3D.Avatar
             _lastNoteTime = _currentTime;
         }
 
-        public void OnNoteOff(MIDI.MidiNoteEvent e) => _pressed.Remove(e.Pitch);
+        public void OnNoteOff(MIDI.MidiNoteEvent e)
+        {
+            _pressed.Remove(e.Pitch);
+            _pressedDurations.Remove(e.Pitch);
+        }
 
         /// <summary>
         /// 由会话层每帧推入「该手即将到来、此刻尚未按下的音高」（无则 -1）。
@@ -297,6 +328,7 @@ namespace PianoTeacher3D.Avatar
         public void ReleaseAll()
         {
             _pressed.Clear();
+            _pressedDurations.Clear();
             _lastNoteTime = float.NaN;   // 复位间隔统计，避免 Seek 后沿用旧节奏
             _avgNoteGap = 0.4f;
             _upcomingLeftPitch = -1;     // 复位预置目标，避免停止/切曲后手继续移向旧音符
@@ -323,6 +355,26 @@ namespace PianoTeacher3D.Avatar
             _hasPrevWrist = false;
             _transitionFrame = false;
             _lastJointLimitCount = PoseIssueSource != null ? PoseIssueSource.JointLimitClampCount : 0;
+            _fingertipTargetSamples = 0;
+            _unassignedFingertipSamples = 0;
+            _missingKeyTouchSamples = 0;
+            _unreachableTargetSamples = 0;
+        }
+
+        /// <summary>
+        /// 目标点是否落在姿态允许范围内（含少量余量）。
+        /// <para>
+        /// 用于把「IK 解不到」从「指法没分配」里分离出来（批次 2.1 的 (c) 类）；
+        /// 未建立范围时一律视为可达，避免误报。
+        /// </para>
+        /// </summary>
+        private bool IsWithinPoseLimits(Vector3 point)
+        {
+            if (!_hasLimits) return true;
+            const float margin = 0.02f;
+            return point.x >= _limits.MinX - margin && point.x <= _limits.MaxX + margin
+                && point.y >= _limits.MinY - margin && point.y <= _limits.MaxY + margin
+                && point.z >= _limits.MinZ - margin && point.z <= _limits.MaxZ + margin;
         }
 
         /// <summary>生成动作质量报告（方案阶段五验收量化）。</summary>
@@ -445,7 +497,10 @@ namespace PianoTeacher3D.Avatar
 
             var hand = leftHand ? _avatar.LeftHand : _avatar.RightHand;
             var shoulder = leftHand ? _avatar.LeftShoulder : _avatar.RightShoulder;
-            var arm = leftHand ? _avatar.LeftArm : _avatar.RightArm;
+            // 两段手臂：上臂 + 前臂 + 肘球（改造前是单段胶囊，见 AvatarManager.BuildArm）
+            var upperArm = leftHand ? _avatar.LeftArm : _avatar.RightArm;
+            var foreArm = leftHand ? _avatar.LeftForeArm : _avatar.RightForeArm;
+            var elbow = leftHand ? _avatar.LeftElbow : _avatar.RightElbow;
 
             // 跨手位移分组判定（对比上一帧原始目标）
             if (leftHand ? _leftHadPrevTarget : _rightHadPrevTarget)
@@ -470,7 +525,7 @@ namespace PianoTeacher3D.Avatar
                 _rightHadPrevTarget = true;
             }
 
-            if (hand == null || shoulder == null || arm == null) return;
+            if (hand == null || shoulder == null || upperArm == null) return;
 
             var current = hand.Wrist.position;
             var target = ApplyGlideLift(current, LimitTargetRate(leftHand, rawTarget));
@@ -491,7 +546,7 @@ namespace PianoTeacher3D.Avatar
             }
 
             hand.Wrist.position = next;
-            StretchArm(shoulder, arm, hand.Wrist);
+            StretchArm(shoulder, upperArm, foreArm, elbow, hand.Wrist, leftHand);
 
             if (EnableWristOrientation) ApplyWristOrientation(hand, leftHand, def);
 
@@ -566,6 +621,16 @@ namespace PianoTeacher3D.Avatar
                 has[f] = true;
             }
 
+            // 归因统计（批次 2.1）：每个「按下的音」计入一次样本，按三类失败分别计数
+            for (int i = 0; i < _pitchScratch.Count; i++)
+            {
+                int pitch = _pitchScratch[i];
+                _fingertipTargetSamples++;
+                if (Assignment.GetFinger(leftHand, pitch) < 0) _unassignedFingertipSamples++;
+                if (!_keyTouches.TryGetValue(pitch, out var touch)) { _missingKeyTouchSamples++; continue; }
+                if (!IsWithinPoseLimits(touch.Press)) _unreachableTargetSamples++;
+            }
+
             // 兜底：极端情况下（提供器没能给出分配）仍保证「按下的音都有指尖指向」，
             // 否则会出现"键亮了但没有手指按"的空档。
             for (int i = 0; i < _pitchScratch.Count; i++)
@@ -585,11 +650,24 @@ namespace PianoTeacher3D.Avatar
                 has[free] = true;
             }
 
-            // 和弦（≥2 个音）成形过渡：从手型上方在 ChordFormationSeconds 内下压到键面。
+            // 和弦（≥2 个音）成形过渡：从手型上方在「自适应后的成形时长」内下压到键面。
+            // 批次 2.5：短音符（16 分、快速和弦）上固定 0.10 s 常走不完，起音瞬间仍悬空；
+            // 因此把成形时长压到当前和弦最短音符时值的 40%（上限仍是 ChordFormationSeconds）。
             // 注意：blend 是跨帧累积量，因此这里只清「是否有目标」标志，不清 blend（否则过渡永远走不完）。
             bool chord = _pitchScratch.Count >= 2;
             var blend = leftHand ? _leftFingerBlend : _rightFingerBlend;
-            float rate = ChordFormationSeconds > 1e-4f ? Time.deltaTime / ChordFormationSeconds : 1f;
+            float formation = ChordFormationSeconds;
+            if (chord)
+            {
+                float shortest = float.MaxValue;
+                for (int i = 0; i < _pitchScratch.Count; i++)
+                {
+                    if (_pressedDurations.TryGetValue(_pitchScratch[i], out float dur) && dur > 0f && dur < shortest)
+                        shortest = dur;
+                }
+                if (shortest < float.MaxValue) formation = Mathf.Min(formation, shortest * 0.4f);
+            }
+            float rate = formation > 1e-4f ? Time.deltaTime / formation : 1f;
             for (int f = 0; f < 5; f++)
             {
                 if (!has[f])
@@ -1040,14 +1118,69 @@ namespace PianoTeacher3D.Avatar
         /// <summary>无目标时的手位（<paramref name="side"/>：左手 +1 = 世界 +X，右手 −1）。</summary>
         private Vector3 DefaultHandPos(float side) => new Vector3(side * 0.30f, HandHeight, 0.10f);
 
-        private static void StretchArm(Transform shoulder, Transform arm, Transform wrist)
+        /// <summary>
+        /// 两段解析 IK：把「肩 → 腕」分解为「上臂 + 前臂」，肘位置由余弦定理求出。
+        /// <para>
+        /// 设 d = |SW|、L1/L2 为上臂/前臂长、u = SW 的单位向量，则肘在 SW 上的投影
+        /// a = (L1² − L2² + d²) / 2d、垂距 h = √(L1² − a²)，肘 E = S + u·a + v·h。
+        /// v 由 hint（身体外侧 + 下方）正交化得到，决定肘朝哪边弯 —— 坐姿弹奏时
+        /// 大臂自然下垂、肘略向后外，前臂前伸落到键盘上。
+        /// </para>
+        /// <para>
+        /// 软拉伸：当 d 超过 L1+L2（大跨度换位）时按比例放大两段长度，保证仍能触键，
+        /// 不引入「够不到」的硬失败，避免破坏既有动作断言。
+        /// </para>
+        /// </summary>
+        private static void StretchArm(Transform shoulder, Transform upper, Transform fore, Transform elbow,
+            Transform wrist, bool leftHand)
         {
-            var delta = wrist.position - shoulder.position;
-            if (delta.sqrMagnitude < 1e-6f) return;
-            arm.position = shoulder.position + delta * 0.5f;
-            arm.up = delta.normalized;
-            var s = arm.localScale;
-            arm.localScale = new Vector3(s.x, delta.magnitude * 0.5f, s.z);
+            if (shoulder == null || upper == null || wrist == null) return;
+
+            Vector3 S = shoulder.position;
+            Vector3 W = wrist.position;
+            Vector3 sw = W - S;
+            float d = sw.magnitude;
+            if (d < 1e-5f) return;
+
+            float l1 = AvatarBodyMetrics.UpperArmLength;
+            float l2 = AvatarBodyMetrics.LowerArmLength;
+            float maxReach = l1 + l2;
+            if (d > maxReach * 0.999f)
+            {
+                float k = d / (maxReach * 0.999f);
+                l1 *= k;
+                l2 *= k;
+            }
+
+            Vector3 u = sw / d;
+            float a = (l1 * l1 - l2 * l2 + d * d) / (2f * d);
+            float hSq = l1 * l1 - a * a;
+            float h = hSq > 0f ? Mathf.Sqrt(hSq) : 0f;
+
+            // 世界坐标下角色左手在 +X（整体绕 Y 旋转 180°）；肘朝身体外侧、略向下。
+            float sideSign = leftHand ? 1f : -1f;
+            Vector3 hint = new Vector3(sideSign * 0.85f, -0.55f, 0.10f);
+            Vector3 v = hint - u * Vector3.Dot(hint, u);
+            if (v.sqrMagnitude < 1e-6f) v = Vector3.Cross(u, Vector3.forward);
+            v.Normalize();
+
+            Vector3 E = S + u * a + v * h;
+
+            PlaceSegment(upper, S, E);
+            if (fore != null) PlaceSegment(fore, E, W);
+            if (elbow != null) elbow.position = E;
+        }
+
+        /// <summary>把一根胶囊摆到 a→b：中点定位、up 对齐方向、按长度设置 y 缩放（胶囊原始高度为 2）。</summary>
+        private static void PlaceSegment(Transform seg, Vector3 a, Vector3 b)
+        {
+            Vector3 delta = b - a;
+            float len = delta.magnitude;
+            if (len < 1e-5f) return;
+            seg.position = a + delta * 0.5f;
+            seg.up = delta / len;
+            var sc = seg.localScale;
+            seg.localScale = new Vector3(sc.x, len * 0.5f, sc.z);
         }
     }
 }

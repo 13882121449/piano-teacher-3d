@@ -68,13 +68,18 @@ namespace PianoTeacher3D.Piano
 
         // —— 轮廓光：从左侧后方打过（正向计算所得来光方向 ≈ (-0.55, +0.55, -0.63)），
         //    与主光 (+X,+Y,-Z)、补光 (-X,+Y,+Z) 构成三个互不重叠的来光方向；弱、无阴影 ——
+        //    强度由 0.15 提升到 0.28：0.15 勾不出手臂与肩线，人物像"贴"在背景上；
+        //    球体拼装的五官本身没有结构，只能靠边缘光把体积"描"出来。
+        //    上界受既有约束「轮廓光必须弱于补光（0.30）」限制，故取 0.28 而非更高。
         private static readonly Color RimColor = new Color(0.86f, 0.89f, 0.99f);
-        private const float RimIntensity = 0.15f;
+        private const float RimIntensity = 0.28f;
         private static readonly Vector3 RimEuler = new Vector3(33f, 41f, 0f);
 
         // —— 键盘上方点光：保留既有作用（提升琴键与手部可读性），位置 / 范围 / 强度与基线一致 ——
+        //    强度由 1.1 降到 0.78：该灯位于人物头顶正上方，过强会把鼻梁、眼窝、下颌的阴影全部抹平，
+        //    脸变成一个没有起伏的亮块。降低后仍足以照亮琴键与手部。
         private static readonly Color KeyLightColor = new Color(1f, 0.97f, 0.92f);
-        private const float KeyLightIntensity = 1.1f;
+        private const float KeyLightIntensity = 0.78f;
         private const float KeyLightRange = 2.4f;
         private static readonly Vector3 KeyLightLocalPosition = new Vector3(0f, 1.65f, 0.35f);
 

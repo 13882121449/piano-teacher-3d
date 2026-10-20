@@ -80,6 +80,14 @@ namespace PianoTeacher3D.CameraControl
         // 从几何上排除头部遮挡；同时保留足够宽度以容纳大跨度双手（审查 3.2 观察标准）。
         public float CloseupViewPitch = 60f;
         public float CloseupViewYaw = 0f;
+        // 躯干避让（接触方案批次 3）：躯干中心落在视口内时，允许抬角到该上限再取「手部占屏更大」的候选
+        public float CloseupViewPitchMax = 70f;
+        public float CloseupTorsoMargin = 0.02f;
+
+        /// <summary>
+        /// 特写躯干避让开关（接触方案批次 3 的回滚点）：关闭后行为与改动前完全一致。
+        /// </summary>
+        public bool CloseupTorsoAvoidance = true;
         public float CloseupPrimaryShare = 0.7f;      // 单手练习时主手的最小宽度占比
         public float CloseupKeyPredictSeconds = 0.12f; // 「即将发生的琴键」轻量预测时间（方案 4.2.3）
         public float CloseupMaxPredictSpeed = 2.5f;   // 预测速度上限（米/秒），抑制跳变
@@ -457,8 +465,10 @@ namespace PianoTeacher3D.CameraControl
             }
 
             var tuning = BuildCloseupTuning();
+            Bounds torsoBounds = default;
+            bool hasTorso = CloseupTorsoAvoidance && _avatar != null && _avatar.TryGetTorsoBounds(out torsoBounds);
             if (!FramingPolicy.ComputeCloseupTarget(left, right, keyBounds, hasKeyBounds, _practiceHand, tuning,
-                    Aspect, out CameraTarget target))
+                    Aspect, torsoBounds, hasTorso, out CameraTarget target))
             {
                 return false;
             }
@@ -611,8 +621,10 @@ namespace PianoTeacher3D.CameraControl
             bool hasKeyBounds = TryGetActiveKeySpanBounds(out Bounds keyBounds);
             if (!left.Valid && !right.Valid && !hasKeyBounds) return false;
 
+            Bounds torsoBounds = default;
+            bool hasTorso = CloseupTorsoAvoidance && _avatar != null && _avatar.TryGetTorsoBounds(out torsoBounds);
             return FramingPolicy.ComputeCloseupTarget(left, right, keyBounds, hasKeyBounds, _practiceHand,
-                BuildCloseupTuning(), Aspect, out target);
+                BuildCloseupTuning(), Aspect, torsoBounds, hasTorso, out target);
         }
 
         // ==================== 手部范围采样与琴键范围 ====================
@@ -861,7 +873,9 @@ namespace PianoTeacher3D.CameraControl
                 BottomUiInset = CloseupBottomUiInset,
                 ViewPitch = CloseupViewPitch,
                 ViewYaw = CloseupViewYaw,
-                PrimaryShare = CloseupPrimaryShare
+                PrimaryShare = CloseupPrimaryShare,
+                ViewPitchMax = CloseupViewPitchMax,
+                TorsoMargin = CloseupTorsoMargin
             };
         }
 

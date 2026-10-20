@@ -1142,6 +1142,54 @@ namespace PianoTeacher3D.Tests.PlayMode
                 AssertAvatarBoundsInViewport(string.Format("3.2-9 {0}", avatarName));
             }
         }
+
+        // ==================================================================
+        // 接触方案批次 3.3：特写构图不得让躯干入画（躯干包围盒中心必须出画）
+        // ==================================================================
+        [UnityTest]
+        public IEnumerator Closeup_TorsoCenterStaysOutOfViewport_OnAllHandModes()
+        {
+            RequireSong();
+            var handModes = new[] { PracticeHand.Both, PracticeHand.LeftOnly, PracticeHand.RightOnly };
+
+            foreach (var handMode in handModes)
+            {
+                _session.SetPracticeHand(handMode);
+                _session.SetCameraMode(CameraMode.Closeup);
+                _session.Seek(0f);
+                _session.Play();
+                yield return new WaitForSeconds(0.5f);
+                _session.Pause();
+                yield return WaitCameraConverged(240);
+                Assert.GreaterOrEqual(_convergeFrames, 0,
+                    string.Format("躯干避让·{0}：特写相机未在预算内收敛。{1}", handMode, Diag()));
+
+                Assert.IsTrue(_avatar.TryGetTorsoBounds(out Bounds torso),
+                    string.Format("躯干避让·{0}：拿不到躯干包围盒，断言失效。{1}", handMode, Diag()));
+
+                Vector3 vp = _cam.WorldToViewportPoint(torso.center);
+                bool outside = vp.z <= 0f || vp.x < 0f || vp.x > 1f || vp.y < 0f || vp.y > 1f;
+
+                // 取证：关闭避让（= 改动前行为）复测一次，把前后视口位置都记进日志，
+                // 避免「本来就出画」被误当成修复效果（方案风险 5：结论必须可归因）。
+                _camera.CloseupTorsoAvoidance = false;
+                yield return WaitCameraConverged(240);
+                Vector3 vpBefore = _cam.WorldToViewportPoint(torso.center);
+                bool outsideBefore = vpBefore.z <= 0f || vpBefore.x < 0f || vpBefore.x > 1f || vpBefore.y < 0f || vpBefore.y > 1f;
+                Debug.Log(string.Format(
+                    "[TORSO] {0}: 避让前 viewport=({1:F3},{2:F3}) z={3:F3} 出画={4} → 避让后 viewport=({5:F3},{6:F3}) z={7:F3} 出画={8}",
+                    handMode, vpBefore.x, vpBefore.y, vpBefore.z, outsideBefore, vp.x, vp.y, vp.z, outside));
+                _camera.CloseupTorsoAvoidance = true;
+                yield return WaitCameraConverged(240);
+
+                Assert.IsTrue(outside,
+                    string.Format("躯干避让·{0}：躯干中心仍在视口内（viewport=({1:F3},{2:F3}), z={3:F3}）。{4}",
+                        handMode, vp.x, vp.y, vp.z, Diag()));
+
+                // 避让不能以「手出画」为代价：活动手仍必须在安全视口内
+                AssertPracticeHandVisible(string.Format("3.3 躯干避让·{0}", handMode));
+            }
+        }
     }
 
     /// <summary>

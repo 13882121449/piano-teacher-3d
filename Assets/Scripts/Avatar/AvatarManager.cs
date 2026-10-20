@@ -137,6 +137,11 @@ namespace PianoTeacher3D.Avatar
         public Transform RightShoulder => _rigs[_currentIndex].RightShoulder;
         public Transform LeftArm => _rigs[_currentIndex].LeftArm;
         public Transform RightArm => _rigs[_currentIndex].RightArm;
+        /// <summary>左前臂（肘 → 腕）。与 <see cref="LeftArm"/>（上臂）配合做两段解析 IK。</summary>
+        public Transform LeftForeArm => _rigs[_currentIndex].LeftForeArm;
+        public Transform RightForeArm => _rigs[_currentIndex].RightForeArm;
+        public Transform LeftElbow => _rigs[_currentIndex].LeftElbow;
+        public Transform RightElbow => _rigs[_currentIndex].RightElbow;
         public IHandRig LeftHand => _rigs[_currentIndex].LeftHand;
         public IHandRig RightHand => _rigs[_currentIndex].RightHand;
 
@@ -150,6 +155,54 @@ namespace PianoTeacher3D.Avatar
         /// <summary>取指定角色的骨架（测试与调试用）。索引越界返回 null。</summary>
         public AvatarRigBuilder.Skeleton GetSkeleton(int index) =>
             (_rigs != null && index >= 0 && index < _rigs.Count) ? _rigs[index].Skeleton : null;
+
+        /// <summary>
+        /// 当前角色的躯干包围盒（髋 → 颈 + 双肩，外扩体积）。
+        /// <para>
+        /// 供相机特写做「负空间」判断（接触方案批次 3.1）：骨骼点连线本身很细，
+        /// 因此按固定余量外扩成体块；不含手臂与头，避免把抬手的正常动作误判成遮挡。
+        /// </para>
+        /// </summary>
+        public bool TryGetTorsoBounds(out Bounds bounds)
+        {
+            bounds = default;
+            var skeleton = CurrentSkeleton;
+            if (skeleton == null || skeleton.Hips == null) return false;
+
+            bool any = false;
+            Vector3 min = Vector3.zero;
+            Vector3 max = Vector3.zero;
+
+            Encapsulate(skeleton.Hips);
+            Encapsulate(skeleton.Spine);
+            Encapsulate(skeleton.Chest);
+            Encapsulate(skeleton.UpperChest);
+            Encapsulate(skeleton.Neck);
+            Encapsulate(skeleton.LeftShoulder);
+            Encapsulate(skeleton.RightShoulder);
+
+            if (!any) return false;
+
+            bounds.SetMinMax(min, max);
+            // 骨骼点没有体积：按胸廓厚度/高度外扩，得到「看得见会挡画」的体块
+            bounds.Expand(new Vector3(0.10f, 0.05f, 0.10f));
+            return true;
+
+            void Encapsulate(Transform t)
+            {
+                if (t == null) return;
+                Vector3 p = t.position;
+                if (!any)
+                {
+                    min = p;
+                    max = p;
+                    any = true;
+                    return;
+                }
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+            }
+        }
 
         // ==================== 角色定义（方案 5.2 中期 / 9.2 配置与内容分离） ====================
 
@@ -299,6 +352,10 @@ namespace PianoTeacher3D.Avatar
 
             SetActive(rig.LeftArm, visible);
             SetActive(rig.RightArm, visible);
+            SetActive(rig.LeftForeArm, visible);
+            SetActive(rig.RightForeArm, visible);
+            SetActive(rig.LeftElbow, visible);
+            SetActive(rig.RightElbow, visible);
             if (rig.LeftHand != null) SetActive(rig.LeftHand.Wrist, visible);
             if (rig.RightHand != null) SetActive(rig.RightHand.Wrist, visible);
 
@@ -324,6 +381,12 @@ namespace PianoTeacher3D.Avatar
             public Transform RightShoulder;
             public Transform LeftArm;
             public Transform RightArm;
+            /// <summary>前臂（肘 → 腕）。与 <see cref="LeftArm"/>（上臂）配合做两段解析 IK。</summary>
+            public Transform LeftForeArm;
+            public Transform RightForeArm;
+            /// <summary>肘球：遮住上臂与前臂的接缝，跟随两段 IK 求出的肘位置。</summary>
+            public Transform LeftElbow;
+            public Transform RightElbow;
             public IHandRig LeftHand;
             public IHandRig RightHand;
 
@@ -357,12 +420,16 @@ namespace PianoTeacher3D.Avatar
             rig.Animator = AttachHumanoidAnimator(rig.Skeleton);
             if (rig.Skeleton != null) def.Avatar = rig.Skeleton.Avatar;
 
-            var skinMat = CreateMaterial(def.SkinColor, 0.28f, 0f);         // 皮肤：略低 smoothness、无金属度
-            var nailMat = CreateMaterial(Color.Lerp(def.SkinColor, Color.white, 0.35f), 0.42f, 0f);
+            // 皮肤：调低 smoothness 是去塑料感的关键 —— 真人皮肤几乎不产生锐利镜面反射，
+            // 0.28 会在颧骨与鼻尖留下明显高光斑（塑料积木感的主要来源）；0.12 接近哑光、仍保留微弱光泽。
+            // 再掺入 7% 暖红模拟皮下毛细血管透光（Built-in Standard 无 SSS 时的廉价替代）。
+            var skinBase = Color.Lerp(def.SkinColor, new Color(0.86f, 0.42f, 0.38f), 0.07f);
+            var skinMat = CreateMaterial(skinBase, 0.12f, 0f);
+            var nailMat = CreateMaterial(Color.Lerp(def.SkinColor, Color.white, 0.35f), 0.22f, 0f);
             var clothMat = CreateMaterial(def.ClothColor, 0.15f, 0f);
             var trimMat = CreateMaterial(Color.Lerp(def.ClothColor, Color.black, 0.32f), 0.20f, 0f);
             var darkMat = CreateMaterial(def.DarkColor, 0.25f, 0f);
-            var hairMat = CreateMaterial(def.HairColor, 0.35f, 0f);
+            var hairMat = CreateMaterial(def.HairColor, 0.22f, 0f);
 
             BuildStool(root.transform, s, darkMat, trimMat);
             BuildLegs(root.transform, s, clothMat, darkMat);
@@ -372,7 +439,6 @@ namespace PianoTeacher3D.Avatar
 
             var lArm = BuildArm(root.transform, "LeftArm", leftHand: true, s, skinMat, clothMat, trimMat);
             var rArm = BuildArm(root.transform, "RightArm", leftHand: false, s, skinMat, clothMat, trimMat);
-
             // 【左右约定】位置与手性（chirality）是两件事，必须分开给：
             // ① 位置：左手在局部 −X（整体绕 Y 旋转 180° 后面向 −Z，局部 −X → 世界 +X = 角色真正的左手侧 = 低音侧）；
             // ② 手性：拇指朝身体中线 —— 左手在局部 −X 侧，内侧 = +X；右手在 +X 侧，内侧 = −X。
@@ -383,8 +449,12 @@ namespace PianoTeacher3D.Avatar
             rig.Root = root;
             rig.LeftShoulder = shoulders.L;
             rig.RightShoulder = shoulders.R;
-            rig.LeftArm = lArm;
-            rig.RightArm = rArm;
+            rig.LeftArm = lArm.Upper;
+            rig.LeftForeArm = lArm.Fore;
+            rig.LeftElbow = lArm.Elbow;
+            rig.RightArm = rArm.Upper;
+            rig.RightForeArm = rArm.Fore;
+            rig.RightElbow = rArm.Elbow;
             rig.LeftHand = lHand;
             rig.RightHand = rHand;
             return rig;
@@ -702,10 +772,10 @@ namespace PianoTeacher3D.Avatar
                 new Vector3(0f, headY, 0f),
                 new Vector3(headR * 1.84f * cheek, headR * 2.02f, headR * 1.94f), skinMat);
 
-            // 下颌 / 下巴过渡（消除「球体下缘」的突兀感）
+            // 下颌 / 下巴过渡：更宽、更扁、略靠前 —— 让正面看得到下颌线，而不是"球体下缘"
             CreatePart(PrimitiveType.Sphere, root, "Jaw",
-                new Vector3(0f, headY - headR * 0.70f, headR * 0.10f),
-                new Vector3(headR * 1.42f * cheek, headR * 0.86f, headR * 1.56f), skinMat);
+                new Vector3(0f, headY - headR * 0.72f, headR * 0.13f),
+                new Vector3(headR * 1.50f * cheek, headR * 0.80f, headR * 1.62f), skinMat);
 
             // 耳朵
             for (int side = -1; side <= 1; side += 2)
@@ -739,6 +809,41 @@ namespace PianoTeacher3D.Avatar
                     new Vector3(side * eyeX, eyeY + headR * 0.30f, headR * 0.84f),
                     new Vector3(headR * 0.38f, headR * 0.08f, headR * 0.12f), darkMat);
                 brow.localRotation = Quaternion.Euler(0f, 0f, side * -7f);
+            }
+
+            // ---- 眼周结构：先铺眼窝暗部，再压上下眼睑 ----
+            // 目的：消除「两颗完整球贴在球面上」的观感。眼窝比眼白大一圈且略暗，
+            // 在眼白四周形成一圈凹陷阴影；上下眼睑用皮肤色压住眼白边缘，使眼睛呈杏仁形而非正圆。
+            var socketMat = CreateMaterial(Color.Lerp(def.SkinColor, Color.black, 0.18f), 0.08f, 0f);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                CreatePart(PrimitiveType.Sphere, root, $"EyeSocket_{side}",
+                    new Vector3(side * eyeX, eyeY + headR * 0.01f, headR * 0.78f),
+                    new Vector3(headR * 0.46f, headR * 0.34f, headR * 0.16f), socketMat);
+
+                CreatePart(PrimitiveType.Sphere, root, $"UpperLid_{side}",
+                    new Vector3(side * eyeX, eyeY + headR * 0.095f, headR * 0.86f),
+                    new Vector3(headR * 0.34f, headR * 0.13f, headR * 0.15f), skinMat);
+
+                CreatePart(PrimitiveType.Sphere, root, $"LowerLid_{side}",
+                    new Vector3(side * eyeX, eyeY - headR * 0.085f, headR * 0.855f),
+                    new Vector3(headR * 0.30f, headR * 0.07f, headR * 0.13f), skinMat);
+            }
+
+            // ---- 颧骨：面部中段唯一的横向隆起。缺了它，脸就是一个椭球 ----
+            for (int side = -1; side <= 1; side += 2)
+            {
+                CreatePart(PrimitiveType.Sphere, root, $"Cheekbone_{side}",
+                    new Vector3(side * headR * 0.50f * cheek, headY - headR * 0.10f, headR * 0.54f),
+                    new Vector3(headR * 0.34f, headR * 0.26f, headR * 0.30f), skinMat);
+            }
+
+            // ---- 鼻翼：鼻头两侧的小球，让鼻子有「面」而不是一个光锥 ----
+            for (int side = -1; side <= 1; side += 2)
+            {
+                CreatePart(PrimitiveType.Sphere, root, $"Nostril_{side}",
+                    new Vector3(side * headR * 0.105f, headY - headR * 0.225f, headR * 0.90f),
+                    new Vector3(headR * 0.105f, headR * 0.085f, headR * 0.10f), skinMat);
             }
 
             // 嘴（轻微的一笔，不做写实口型）
@@ -832,26 +937,44 @@ namespace PianoTeacher3D.Avatar
         }
 
         /// <summary>
-        /// 手臂：单段胶囊（由 HandIKController.StretchArm 逐帧拉伸肩→腕，无肘部接缝），
-        /// 叠加「袖口 + 袖筒」两个沿臂轴对齐的服装子体块 —— 它们只沿臂轴被等比拉伸，
-        /// 因此袖子长度始终与手臂长度成比例，不会失真。
+        /// 手臂：<b>上臂（衣料）+ 前臂（裸露皮肤）+ 肘球</b> 的三段结构，由
+        /// <see cref="HandIKController.StretchArm"/> 按两段解析 IK 逐帧摆位（肩 → 肘 → 腕）。
+        /// <para>
+        /// 改造前是「单段胶囊从肩一直拉到腕」：整条手臂永远是直线，没有肘关节。
+        /// 与已经做好三段指节的手放在一起，会出现「精密的手 + 面条一样的手臂」的割裂感。
+        /// 改成两段后，肘部由余弦定理求出、朝向由「外下方」hint 决定，
+        /// 符合坐姿弹奏时「大臂自然下垂、前臂前伸」的真实姿态。
+        /// </para>
+        /// <para>
+        /// 不生成袖子子物体：子物体会被父级的非均匀缩放（x = 半径、y = 半长）压扁，
+        /// 因此直接把上臂本体设为衣料色，视觉上等同「卷起袖子的衬衫」。
+        /// </para>
         /// </summary>
-        private static Transform BuildArm(Transform root, string name, bool leftHand, float s,
+        private static (Transform Upper, Transform Fore, Transform Elbow) BuildArm(
+            Transform root, string name, bool leftHand, float s,
             Material skinMat, Material clothMat, Material trimMat)
         {
-            var arm = CreatePart(PrimitiveType.Capsule, root, name,
-                new Vector3((leftHand ? -1f : 1f) * 0.20f * s, 0.90f * s, 0.10f * s),
-                new Vector3(AvatarBodyMetrics.ArmRadius * s, 0.28f * s, AvatarBodyMetrics.ArmRadius * s), skinMat);
+            float side = leftHand ? -1f : 1f;
+            float upperR = AvatarBodyMetrics.ArmRadius * 1.10f;   // ≈40 mm，接近成人上臂半径
+            float foreR = AvatarBodyMetrics.ArmRadius * 0.90f;    // ≈32 mm，前臂略细
+            float upperLen = AvatarBodyMetrics.UpperArmLength;
+            float foreLen = AvatarBodyMetrics.LowerArmLength;
 
-            // 袖筒（覆盖上臂到肘部，服装独立可见层）：局部尺寸经父级 x/y 缩放换算后≈ 33 mm 半径
-            CreatePart(PrimitiveType.Capsule, arm, "Sleeve",
-                new Vector3(0f, -0.55f, 0f), new Vector3(1.25f, 0.55f, 1.25f), clothMat);
+            // 初始摆位只是占位；位置 / 朝向 / 长度每帧由 StretchArm 的两段 IK 覆盖。
+            var upper = CreatePart(PrimitiveType.Capsule, root, name,
+                new Vector3(side * 0.20f * s, 0.86f * s, 0.06f * s),
+                new Vector3(upperR * s, upperLen * 0.5f * s, upperR * s), clothMat);
 
-            // 袖口（比袖筒略粗，形成收口的层次）
-            CreatePart(PrimitiveType.Capsule, arm, "Cuff",
-                new Vector3(0f, -0.03f, 0f), new Vector3(1.42f, 0.075f, 1.42f), trimMat);
+            var fore = CreatePart(PrimitiveType.Capsule, root, name + "Forearm",
+                new Vector3(side * 0.21f * s, 0.70f * s, 0.10f * s),
+                new Vector3(foreR * s, foreLen * 0.5f * s, foreR * s), skinMat);
 
-            return arm;
+            // 肘球：独立节点（不做前臂子物体，避免父级非均匀缩放把球压扁）
+            var elbow = CreatePart(PrimitiveType.Sphere, root, name + "Elbow",
+                new Vector3(side * 0.205f * s, 0.80f * s, 0.08f * s),
+                Vector3.one * (foreR * 2.20f * s), skinMat);
+
+            return (upper, fore, elbow);
         }
 
         // ==================== 构建辅助 ====================

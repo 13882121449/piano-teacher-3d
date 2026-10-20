@@ -47,3 +47,6 @@ InitTestScene*.unity*
 
 # Python 缓存
 __pycache__/
+
+# 会话工作目录（不进版本库）
+.workbuddy/
