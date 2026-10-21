@@ -156,6 +156,24 @@ namespace PianoTeacher3D.Avatar
         /// <summary>当前角色视图（内置角色也有包装；未构建时为 null）。供角色库 UI 读取缩略图与支持槽位。</summary>
         public ICharacterView CurrentView => _currentView;
 
+        /// <summary>
+        /// 当前角色适用的手臂解算策略。
+        /// 内置程序化角色用胶囊式（平移 + 拉伸视觉胶囊，与改造前一致）；
+        /// 外部蒙皮角色必须用纯旋转式——否则会拉伸骨骼、让前臂与手断开、破坏蒙皮，
+        /// 表现为「人物破面 + 手不跟键」。
+        /// </summary>
+        public IArmChainSolver ArmSolver
+        {
+            get
+            {
+                var source = _currentView as ICharacterRigSource;
+                bool skinned = source != null && !source.IsBuiltInBacked;
+                return skinned
+                    ? (IArmChainSolver)RotationalArmChainSolver.Instance
+                    : CapsuleArmChainSolver.Instance;
+            }
+        }
+
         /// <summary>当前角色的资料（内置角色通过 <see cref="SwitchAvatar"/> 切换时可能为 null）。</summary>
         public CharacterProfile CurrentProfile => _currentProfile;
 

@@ -468,6 +468,7 @@ namespace PianoTeacher3D.Core
 
             _handIK = gameObject.AddComponent<HandIKController>();
             _handIK.Initialize(_avatar, _keyMap);
+            _handIK.ArmSolver = _avatar.ArmSolver;
             _handIK.Assignment = _fingerAssignment;
 
             _fingerPose = gameObject.AddComponent<FingerPoseController>();
@@ -1127,6 +1128,9 @@ namespace PianoTeacher3D.Core
                 // 没保存过 / 槽位不兼容时静默失败（当前外观保持不变），不打扰用户。
                 if (view != null) _customization.TryRestoreStoredAppearance(out _);
             }
+
+            // 手臂解算方式随角色切换：蒙皮角色只允许旋转（见 IArmChainSolver 注释）
+            if (_handIK != null && _avatar != null) _handIK.ArmSolver = _avatar.ArmSolver;
 
             // 手指关节轴随角色切换：程序化角色用默认「局部 X 轴」，导入骨架用推导出的铰链轴。
             // 不切换的话，Biped 手指会被拧成麻花而不是弯曲（见 IFingerJointAxes 注释）。

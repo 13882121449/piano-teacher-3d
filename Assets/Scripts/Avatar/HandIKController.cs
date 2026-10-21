@@ -41,6 +41,12 @@ namespace PianoTeacher3D.Avatar
         /// </summary>
         public float HandDepth = 0.232f;
 
+        /// <summary>
+        /// 手臂解算策略。默认 <see cref="CapsuleArmChainSolver"/>（程序化胶囊，行为与改造前逐位一致）；
+        /// 蒙皮角色必须换成 <see cref="RotationalArmChainSolver"/>，否则会拉伸骨骼、破坏蒙皮。
+        /// </summary>
+        public IArmChainSolver ArmSolver { get; set; } = CapsuleArmChainSolver.Instance;
+
         [Header("移动（过渡动作与自适应速度）")]
         public float MoveSpeed = 12f;        // 基准移动平滑速度
         public float MinSpeedScale = 0.55f;  // 长间隔（稀疏片段）速度倍率下限
@@ -545,8 +551,8 @@ namespace PianoTeacher3D.Avatar
                 next = HandPoseValidator.Clamp(next, _limits);
             }
 
-            hand.Wrist.position = next;
-            StretchArm(shoulder, upperArm, foreArm, elbow, hand.Wrist, leftHand);
+            // 手臂解算交给策略：程序化角色平移+拉伸胶囊；蒙皮角色只旋转骨骼（不写 position/scale）
+            ArmSolver.Solve(shoulder, upperArm, foreArm, elbow, hand.Wrist, next, leftHand);
 
             if (EnableWristOrientation) ApplyWristOrientation(hand, leftHand, def);
 
@@ -1117,70 +1123,5 @@ namespace PianoTeacher3D.Avatar
 
         /// <summary>无目标时的手位（<paramref name="side"/>：左手 +1 = 世界 +X，右手 −1）。</summary>
         private Vector3 DefaultHandPos(float side) => new Vector3(side * 0.30f, HandHeight, 0.10f);
-
-        /// <summary>
-        /// 两段解析 IK：把「肩 → 腕」分解为「上臂 + 前臂」，肘位置由余弦定理求出。
-        /// <para>
-        /// 设 d = |SW|、L1/L2 为上臂/前臂长、u = SW 的单位向量，则肘在 SW 上的投影
-        /// a = (L1² − L2² + d²) / 2d、垂距 h = √(L1² − a²)，肘 E = S + u·a + v·h。
-        /// v 由 hint（身体外侧 + 下方）正交化得到，决定肘朝哪边弯 —— 坐姿弹奏时
-        /// 大臂自然下垂、肘略向后外，前臂前伸落到键盘上。
-        /// </para>
-        /// <para>
-        /// 软拉伸：当 d 超过 L1+L2（大跨度换位）时按比例放大两段长度，保证仍能触键，
-        /// 不引入「够不到」的硬失败，避免破坏既有动作断言。
-        /// </para>
-        /// </summary>
-        private static void StretchArm(Transform shoulder, Transform upper, Transform fore, Transform elbow,
-            Transform wrist, bool leftHand)
-        {
-            if (shoulder == null || upper == null || wrist == null) return;
-
-            Vector3 S = shoulder.position;
-            Vector3 W = wrist.position;
-            Vector3 sw = W - S;
-            float d = sw.magnitude;
-            if (d < 1e-5f) return;
-
-            float l1 = AvatarBodyMetrics.UpperArmLength;
-            float l2 = AvatarBodyMetrics.LowerArmLength;
-            float maxReach = l1 + l2;
-            if (d > maxReach * 0.999f)
-            {
-                float k = d / (maxReach * 0.999f);
-                l1 *= k;
-                l2 *= k;
-            }
-
-            Vector3 u = sw / d;
-            float a = (l1 * l1 - l2 * l2 + d * d) / (2f * d);
-            float hSq = l1 * l1 - a * a;
-            float h = hSq > 0f ? Mathf.Sqrt(hSq) : 0f;
-
-            // 世界坐标下角色左手在 +X（整体绕 Y 旋转 180°）；肘朝身体外侧、略向下。
-            float sideSign = leftHand ? 1f : -1f;
-            Vector3 hint = new Vector3(sideSign * 0.85f, -0.55f, 0.10f);
-            Vector3 v = hint - u * Vector3.Dot(hint, u);
-            if (v.sqrMagnitude < 1e-6f) v = Vector3.Cross(u, Vector3.forward);
-            v.Normalize();
-
-            Vector3 E = S + u * a + v * h;
-
-            PlaceSegment(upper, S, E);
-            if (fore != null) PlaceSegment(fore, E, W);
-            if (elbow != null) elbow.position = E;
-        }
-
-        /// <summary>把一根胶囊摆到 a→b：中点定位、up 对齐方向、按长度设置 y 缩放（胶囊原始高度为 2）。</summary>
-        private static void PlaceSegment(Transform seg, Vector3 a, Vector3 b)
-        {
-            Vector3 delta = b - a;
-            float len = delta.magnitude;
-            if (len < 1e-5f) return;
-            seg.position = a + delta * 0.5f;
-            seg.up = delta / len;
-            var sc = seg.localScale;
-            seg.localScale = new Vector3(sc.x, len * 0.5f, sc.z);
-        }
     }
 }
