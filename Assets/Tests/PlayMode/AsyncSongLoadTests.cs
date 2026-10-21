@@ -18,7 +18,10 @@ namespace PianoTeacher3D.Tests.PlayMode
     /// </summary>
     public class AsyncSongLoadTests
     {
-        private const float WaitTimeoutSeconds = 8f;
+        // 8 s 在全量跑（120+ 用例、批处理无图形）时会偶发超时：单跑该 fixture 稳定 4/4 通过，
+        // 说明是机器负载下的时序抖动而非产品卡死。放宽到 20 s 只影响「多久判定卡死」，
+        // 断言本身仍然是「必须结束」——不掩盖真正的死锁（死锁会一直不结束）。
+        private const float WaitTimeoutSeconds = 20f;
 
         private LessonSessionController _session;
         private string _demoPath;

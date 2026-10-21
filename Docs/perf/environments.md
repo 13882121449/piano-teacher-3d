@@ -31,7 +31,7 @@
 <!-- SECTION:local-check:BEGIN -->
 ### 本机自检（由 Environment_Matrix_Checklist 自动写入）
 
-- 时间：2026-10-21 18:58:58
+- 时间：2026-10-21 19:16:28
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi

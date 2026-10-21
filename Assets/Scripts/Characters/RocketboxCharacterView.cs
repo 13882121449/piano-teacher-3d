@@ -131,7 +131,9 @@ namespace PianoTeacher3D.Characters
             var poseSettings = new SittingPoseSettings
             {
                 SeatHeightOffset = profile.SeatHeightOffset,
-                Calibrated = false
+                // 几何已按世界目标标定并由 SittingPoseTests 锁定
+                // （髋落凳面、膝前伸、双脚落地、左右对称）；不再依赖解剖学估算的欧拉角。
+                Calibrated = true
             };
 
             var view = new RocketboxCharacterView(profile, scope, root, animator, skeleton,
@@ -251,6 +253,11 @@ namespace PianoTeacher3D.Characters
                 _activated = false;
                 return;
             }
+
+            // 还原绑定姿态：坐姿应用器改了骨骼旋转与根节点位置，
+            // 不还原的话实例会一直停在「摆好的坐姿」上，重新激活或外部检查时状态不可预期。
+            _pose.Restore(_animator);
+
             if (_root.activeSelf) _root.SetActive(false);
             _activated = false;
         }
