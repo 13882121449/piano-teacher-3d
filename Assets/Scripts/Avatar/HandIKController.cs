@@ -157,6 +157,11 @@ namespace PianoTeacher3D.Avatar
         private readonly float[] _leftFingerBlend = new float[5];
         private readonly float[] _rightFingerBlend = new float[5];
         private readonly List<int> _pitchScratch = new();
+
+        // 每手一份「当前按下的音高」缓存：RefreshAssignment 每帧算一次，
+        // UpdateFingertipTargets 直接复用，避免同一帧对 _pressed 做四次哈希遍历。
+        private readonly List<int> _leftPitches = new();
+        private readonly List<int> _rightPitches = new();
         private bool _leftHadPrevTarget, _rightHadPrevTarget;
 
         // ---- 帧级分组/抽查标记 ----
@@ -407,9 +412,15 @@ namespace PianoTeacher3D.Avatar
 
         private void RefreshAssignment(bool leftHand)
         {
-            CollectHandPitches(leftHand);
-            _pitchScratch.Sort();
-            Assignment.Refresh(leftHand, _pitchScratch, _currentTime, Time.frameCount);
+            // 一手一份缓存：收集 + 排序只做一次，UpdateFingertipTargets 直接复用结果。
+            var pitches = leftHand ? _leftPitches : _rightPitches;
+            pitches.Clear();
+            foreach (var pitch in _pressed)
+            {
+                if (MIDI.PianoNoteFilter.IsLeftHand(pitch) == leftHand) pitches.Add(pitch);
+            }
+            pitches.Sort();
+            Assignment.Refresh(leftHand, pitches, _currentTime, Time.frameCount);
         }
 
         /// <summary>
@@ -601,8 +612,9 @@ namespace PianoTeacher3D.Avatar
             if (!EnableFingertipMetrics) return;
             if (hand == null || hand.Fingers == null) return;
 
-            CollectHandPitches(leftHand);
-            if (_pitchScratch.Count == 0) return;
+            // 复用 RefreshAssignment 本帧已经算好的「该手按下的音高」（已排序），不再重复遍历 _pressed。
+            var pitches = leftHand ? _leftPitches : _rightPitches;
+            if (pitches.Count == 0) return;
 
             int fingerCount = Mathf.Min(hand.Fingers.Count, 5);
             if (fingerCount == 0) return;
@@ -628,9 +640,9 @@ namespace PianoTeacher3D.Avatar
             }
 
             // 归因统计（批次 2.1）：每个「按下的音」计入一次样本，按三类失败分别计数
-            for (int i = 0; i < _pitchScratch.Count; i++)
+            for (int i = 0; i < pitches.Count; i++)
             {
-                int pitch = _pitchScratch[i];
+                int pitch = pitches[i];
                 _fingertipTargetSamples++;
                 if (Assignment.GetFinger(leftHand, pitch) < 0) _unassignedFingertipSamples++;
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) { _missingKeyTouchSamples++; continue; }
@@ -639,9 +651,9 @@ namespace PianoTeacher3D.Avatar
 
             // 兜底：极端情况下（提供器没能给出分配）仍保证「按下的音都有指尖指向」，
             // 否则会出现"键亮了但没有手指按"的空档。
-            for (int i = 0; i < _pitchScratch.Count; i++)
+            for (int i = 0; i < pitches.Count; i++)
             {
-                int pitch = _pitchScratch[i];
+                int pitch = pitches[i];
                 if (Assignment.GetFinger(leftHand, pitch) >= 0) continue;
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) continue;
 
@@ -660,15 +672,15 @@ namespace PianoTeacher3D.Avatar
             // 批次 2.5：短音符（16 分、快速和弦）上固定 0.10 s 常走不完，起音瞬间仍悬空；
             // 因此把成形时长压到当前和弦最短音符时值的 40%（上限仍是 ChordFormationSeconds）。
             // 注意：blend 是跨帧累积量，因此这里只清「是否有目标」标志，不清 blend（否则过渡永远走不完）。
-            bool chord = _pitchScratch.Count >= 2;
+            bool chord = pitches.Count >= 2;
             var blend = leftHand ? _leftFingerBlend : _rightFingerBlend;
             float formation = ChordFormationSeconds;
             if (chord)
             {
                 float shortest = float.MaxValue;
-                for (int i = 0; i < _pitchScratch.Count; i++)
+                for (int i = 0; i < pitches.Count; i++)
                 {
-                    if (_pressedDurations.TryGetValue(_pitchScratch[i], out float dur) && dur > 0f && dur < shortest)
+                    if (_pressedDurations.TryGetValue(pitches[i], out float dur) && dur > 0f && dur < shortest)
                         shortest = dur;
                 }
                 if (shortest < float.MaxValue) formation = Mathf.Min(formation, shortest * 0.4f);

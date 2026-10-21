@@ -326,7 +326,7 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots --json _v
 
 | 目的 | 命令 | 说明 |
 |---|---|---|
-| 静态检查（无需 Unity） | `python Tools/static_checks.py` | 纯 C# 模块不得引用 UnityEngine、UI 不得直连调度器/时间轴、禁止空 catch；并扫描 TMPro / Timeline / Animation Rigging 的引用数（信息性，不自动删包） |
+| 静态检查（无需 Unity） | `python Tools/static_checks.py` | ① 纯 C# 模块不得引用 UnityEngine；② UI 不得直连调度器/时间轴；③ 禁止空 catch；④ `Update/LateUpdate/FixedUpdate` 不得每帧分配（字符串插值/拼接、集合拷贝、LINQ、`GetComponentsInChildren`、`SendMessage`、`Debug.Log`）。另扫描 TMPro / Timeline / Animation Rigging 的引用数（信息性，不自动删包） |
 | 真实 Player 基线 | `python Tools/verify.py --player [--player-seconds 20]` | Development Build（仅 `PianoLesson` 场景）→ 独立进程采样 `play` / `switch` 两个场景 → 写入 `Docs/perf/sampling.md` 的 `player-*` 小节与 `Docs/perf/environments.md` |
 | CI | `.github/workflows/verify.yml` | `static` job 跑在 GitHub 托管 runner（无需 Unity）；`unity` job 需要注册 `[self-hosted, windows, unity]` 标签的机器 |
 
