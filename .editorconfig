@@ -1,4 +1,4 @@
-# Piano Teacher 3D — 编辑器约定（对应评估文档 P1-11）
+# Piano Teacher 3D — 编辑器约定（架构分层见 Docs/architecture.md；本文件对应其中的代码风格小节）
 # 目标：统一缩进 / 换行 / 命名，让格式差异不进入 diff。
 # 说明：Unity 2022.3 使用 C# 9，因此不启用 C# 10+ 语法相关规则。
 

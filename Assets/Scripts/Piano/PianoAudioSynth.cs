@@ -135,14 +135,10 @@ namespace PianoTeacher3D.Piano
                 _allocator = new PianoVoiceAllocator(MaxVoices, DefaultFadeSeconds);
                 _allocator.SetMasterVolume(MasterVolume);
 
+                // P0-3：不再在初始化时一次性合成 88 段波形（≈38.8 MB 常驻）。
+                // 只分配索引数组，真正弹到的音高才在 GetClip 里按需合成并缓存。
                 int clipCount = PianoKeyMap.MaxPitch - PianoKeyMap.MinPitch + 1;
                 _clips = new AudioClip[clipCount];
-                for (int i = 0; i < clipCount; i++)
-                {
-                    _clips[i] = CreatePianoClip(PianoKeyMap.MinPitch + i, ClipDurationSeconds);
-                    if (_clips[i] == null)
-                        throw new System.InvalidOperationException($"AudioClip.Create 失败（pitch={PianoKeyMap.MinPitch + i}）");
-                }
 
                 _sources = new AudioSource[MaxVoices];
                 _toneFilters = new AudioLowPassFilter[MaxVoices];
@@ -184,7 +180,7 @@ namespace PianoTeacher3D.Piano
             if (slot < 0 || slot >= _sources.Length) return;
 
             var src = _sources[slot];
-            var clip = _clips[e.Pitch - PianoKeyMap.MinPitch];
+            var clip = GetClip(e.Pitch);
             if (src == null || clip == null) return;
 
             src.Stop();                       // 复用槽位前先停旧声，避免抢占后叠加
@@ -192,6 +188,32 @@ namespace PianoTeacher3D.Piano
             src.volume = _allocator.GetVolume(slot);
             ApplyTone(slot, e.Velocity);
             src.Play();
+        }
+
+        /// <summary>
+        /// 按需合成并缓存某音高的波形（P0-3）：初始化只建索引数组，内存随实际弹到的音高增长，
+        /// 典型曲目（20~30 个音高）只需 9~13 MB，而不是无条件的 38.8 MB。
+        /// 合成一段 2.5 s 波形在实机上为毫秒级以内，首次触发不会造成可感知的卡顿。
+        /// </summary>
+        private AudioClip GetClip(int pitch)
+        {
+            int index = pitch - PianoKeyMap.MinPitch;
+            if (_clips == null || index < 0 || index >= _clips.Length) return null;
+
+            var cached = _clips[index];
+            if (cached != null) return cached;
+
+            var clip = CreatePianoClip(pitch, ClipDurationSeconds);
+            if (clip == null)
+            {
+                // 单个音高失败只降级为该音静音，不再中断整池初始化（原实现会整个抛异常）
+                LastInitError = $"AudioClip.Create 失败（pitch={pitch}），该音高将静音";
+                Debug.LogWarning($"[PianoAudioSynth] {LastInitError}", this);
+                return null;
+            }
+
+            _clips[index] = clip;
+            return clip;
         }
 
         /// <summary>Note Off：把该音高的声部转入淡出释放（未发声的音高为安全空操作）。</summary>

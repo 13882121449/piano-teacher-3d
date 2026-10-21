@@ -59,9 +59,34 @@ PACKAGE_PROBES = {
 
 CATCH_RE = re.compile(r"catch\s*(\([^)]*\))?\s*\{")
 
+# catch 块里必须出现的「可追溯出口」：上报器 / 错误日志 / 构造领域错误 / 重新抛出（P1-9）
+CATCH_TRACE_RE = re.compile(r"ErrorReporter|Debug\.Log(Error|Exception)?|AppError|throw\b|Fail\s*\(")
+
+# 只降级到 Warning 的 catch：不失败，但会汇总上报，供 P1-9 逐文件收敛
+CATCH_WARN_ONLY_RE = re.compile(r"Debug\.LogWarning")
+
+COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
+
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def iter_catch_blocks(text):
+    """逐个吐出 (match, body, line)；body 为花括号内的原文（不含外层括号）。"""
+    for match in CATCH_RE.finditer(text):
+        start = match.end()
+        depth = 1
+        i = start
+        while i < len(text) and depth > 0:
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+            i += 1
+        body = text[start:i - 1] if depth == 0 else ""
+        line = text.count("\n", 0, match.start()) + 1
+        yield match, body, line
 
 
 def check_pure_csharp():
@@ -93,22 +118,48 @@ def check_empty_catch():
     problems = []
     for path in sorted(SCRIPTS.rglob("*.cs")):
         text = read(path)
-        for match in CATCH_RE.finditer(text):
-            start = match.end()
-            depth = 1
-            i = start
-            while i < len(text) and depth > 0:
-                if text[i] == "{":
-                    depth += 1
-                elif text[i] == "}":
-                    depth -= 1
-                i += 1
-            body = text[start:i - 1] if depth == 0 else ""
+        for _match, body, line in iter_catch_blocks(text):
             # 允许「只有注释」的 catch（注释就是「为什么可以吞」的说明）；只拦完全空白的 catch
             if not body.strip():
-                line = text.count("\n", 0, match.start()) + 1
                 problems.append(f"{path.relative_to(PROJECT_ROOT)}:{line}: 空 catch（至少要写注释说明为什么可以吞）")
     return problems
+
+
+def check_catch_trace():
+    """P1-9：catch 必须有可追溯出口。
+
+    允许三种：ErrorReporter/Debug.Log*（日志）、构造 AppError（结构化错误）、throw（重新抛出）。
+    只写注释就吞掉异常不算——注释能解释「为什么可以吞」，但排障时找不到任何痕迹。
+    """
+    problems = []
+    for path in sorted(SCRIPTS.rglob("*.cs")):
+        text = read(path)
+        for _match, body, line in iter_catch_blocks(text):
+            if not body.strip():
+                continue  # 空 catch 由规则 3 负责，避免重复报同一行
+            stripped = COMMENT_RE.sub("", body)
+            if not stripped.strip():
+                continue  # 只有注释：规则 3 允许，这里也不重复报
+            if not CATCH_TRACE_RE.search(body):
+                problems.append(
+                    f"{path.relative_to(PROJECT_ROOT)}:{line}: catch 没有任何出口（需 ErrorReporter / Debug.Log / AppError / throw）"
+                )
+    return problems
+
+
+def catch_warning_stats():
+    """P1-9 的收敛指标：只把异常降级成 Debug.LogWarning 的 catch，按文件计数（不失败）。"""
+    stats = []
+    for path in sorted(SCRIPTS.rglob("*.cs")):
+        text = read(path)
+        count = 0
+        for _match, body, _line in iter_catch_blocks(text):
+            if CATCH_WARN_ONLY_RE.search(body) and not re.search(r"Debug\.LogError|ErrorReporter|throw\b", body):
+                count += 1
+        if count:
+            stats.append((count, str(path.relative_to(PROJECT_ROOT))))
+    stats.sort(reverse=True)
+    return stats
 
 
 def declared_packages():
@@ -141,6 +192,9 @@ def scan_packages():
 def main():
     parser = argparse.ArgumentParser(description="Piano Teacher 3D 静态检查与依赖门禁")
     parser.add_argument("--strict", action="store_true", help="依赖完全未使用时也视为失败")
+    parser.add_argument("--strict-catch", action="store_true",
+                        help="把「catch 没有任何出口」也视为失败（P1-9 收敛完成后打开）")
+    parser.add_argument("--list-catch", action="store_true", help="逐条打印 catch 出口缺口")
     args = parser.parse_args()
 
     if not SCRIPTS.is_dir():
@@ -177,6 +231,27 @@ def main():
     if args.strict and unused:
         failed = True
         print(f"\n✗ --strict：以下包在代码中完全未使用：{', '.join(unused)}")
+
+    untraced = check_catch_trace()
+    if untraced:
+        limit = len(untraced) if args.list_catch else 8
+        print(f"\ncatch 出口缺口（信息性，P1-9 存量）：{len(untraced)} 处 catch 没有任何日志/错误/抛出")
+        for item in untraced[:limit]:
+            print(f"    {item}")
+        if len(untraced) > limit:
+            print(f"    …… 其余 {len(untraced) - limit} 处用 --list-catch 查看")
+        if args.strict_catch:
+            failed = True
+            print("✗ --strict-catch：以上 catch 必须给出可追溯出口")
+    else:
+        print("\n✓ catch 出口完整（每处都有日志/错误/抛出）")
+
+    stats = catch_warning_stats()
+    if stats:
+        total = sum(count for count, _ in stats)
+        print(f"\ncatch 降级统计（信息性，P1-9 收敛目标）：{total} 处只记 Warning")
+        for count, name in stats[:5]:
+            print(f"  · {name}: {count} 处")
 
     print("\n" + ("✗ 静态检查存在违规" if failed else "✓ 静态检查通过"))
     return 1 if failed else 0

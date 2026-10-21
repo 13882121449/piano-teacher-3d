@@ -72,6 +72,12 @@ namespace PianoTeacher3D.Core
         private PracticeHand _practiceHand = PracticeHand.Both;
         private float _lastTime; // 用于检测 Loop/Seek 导致的时间回退
 
+        /// <summary>进度事件上次广播的时间点（秒）。P1-1：事件按 10 Hz 节流，避免 UI 每帧格式化文本。</summary>
+        private float _lastProgressSent = float.NegativeInfinity;
+
+        /// <summary>进度事件最小间隔（秒）。10 Hz 足以让进度条看起来连续，又不会每帧碰 TMP。</summary>
+        private const float ProgressNotifyStep = 0.1f;
+
         private SongAnalysis _analysis = new SongAnalysis();
         private readonly List<MidiNoteEvent> _upcomingBuffer = new();
         private readonly List<MidiNoteEvent> _handLeadBuffer = new();
@@ -275,7 +281,8 @@ namespace PianoTeacher3D.Core
             if (_timeline == null || _scheduler == null) return;
 
             float current = _timeline.CurrentTime;
-            if (current < _lastTime - 0.001f)
+            bool timeJumped = current < _lastTime - 0.001f;
+            if (timeJumped)
             {
                 // Loop 跳转 / Seek 回退：清空后按新时间点重建按键与手部状态（方案 6.3）
                 ResetPlaybackState();
@@ -295,7 +302,13 @@ namespace PianoTeacher3D.Core
 
             if (_displayMode == DisplayMode.Teaching) ApplyTeachingKeySpan();
 
-            OnProgressChanged?.Invoke(current, _timeline.TotalDuration);
+            // P1-1：进度事件节流——只在跨过 0.1 s 或发生 Loop/Seek 跳转时广播，
+            // 暂停时时间不变自然不再发；UI 侧再按"整秒变化"二次收敛，彻底离开每帧字符串格式化。
+            if (timeJumped || Mathf.Abs(current - _lastProgressSent) >= ProgressNotifyStep)
+            {
+                _lastProgressSent = current;
+                OnProgressChanged?.Invoke(current, _timeline.TotalDuration);
+            }
 
             if (_prefsDirty && Time.unscaledTime >= _prefsNextSaveAt) SavePreferences();
         }

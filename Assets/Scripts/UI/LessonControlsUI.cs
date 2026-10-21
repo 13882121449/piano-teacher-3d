@@ -83,6 +83,19 @@ namespace PianoTeacher3D.UI
         private int _flashBeat = -1;
         private float _beatFlashUntil;
         private float _lastMotionRefresh;
+
+        // ---- P1-1：进度展示的脏标记（文本只按整秒刷新，循环标记只在区间变化时重建）----
+        private int _shownSecond = -1;
+        private float _shownTotal = -1f;
+        private float _loopMarkA = float.NaN;
+        private float _loopMarkB = float.NaN;
+        private float _loopMarkTotal = -1f;
+
+        /// <summary>加载动画的点阵：预分配，避免每 0.4 s 用 new string('.', n) 现造。</summary>
+        private static readonly string[] LoadingDots = { "", ".", "..", "..." };
+
+        /// <summary>拍点圆点的复用缓冲（P2-3）：容量固定 4，避免每拍分配一个 StringBuilder。</summary>
+        private readonly StringBuilder _beatBuilder = new StringBuilder(4);
         private float _loopA;
         private float _loopB;
         private float _currentTime;
@@ -193,7 +206,7 @@ namespace PianoTeacher3D.UI
             {
                 _loadingBlinkUntil = Time.unscaledTime + 0.4f;
                 _loadingPhase = (_loadingPhase + 1) % 4;
-                UITheme.SetButtonLabel(_playBtn, "加载中" + new string('.', _loadingPhase));
+                UITheme.SetButtonLabel(_playBtn, "加载中" + LoadingDots[_loadingPhase]);
             }
 
             // 分析面板打开时按 4Hz 刷新动作质量（不与学习操作混排）
@@ -310,15 +323,34 @@ namespace PianoTeacher3D.UI
         {
             _currentTime = current;
             _totalTime = total;
-            if (_timeText != null) _timeText.text = UITheme.FormatTime(current);
-            if (_totalText != null) _totalText.text = UITheme.FormatTime(total);
+
+            // P1-1：整秒没变就不碰 TMP 文本（FormatTime 每次都分配字符串），进度条仍然照常跟随
+            int second = Mathf.FloorToInt(current);
+            if (second != _shownSecond || !Mathf.Approximately(_shownTotal, total))
+            {
+                _shownSecond = second;
+                _shownTotal = total;
+                if (_timeText != null) _timeText.text = UITheme.FormatTime(current);
+                if (_totalText != null) _totalText.text = UITheme.FormatTime(total);
+            }
+
             if (_progress != null && total > 0f)
             {
                 _suppressSlider = true;
                 _progress.value = Mathf.Clamp01(current / total);
                 _suppressSlider = false;
             }
-            RefreshLoopMarks();
+
+            // P1-1：A/B 标记只受循环区间与总时长影响，不必每次进度事件都重算
+            if (!Mathf.Approximately(_loopMarkA, _loopA) ||
+                !Mathf.Approximately(_loopMarkB, _loopB) ||
+                !Mathf.Approximately(_loopMarkTotal, total))
+            {
+                _loopMarkA = _loopA;
+                _loopMarkB = _loopB;
+                _loopMarkTotal = total;
+                RefreshLoopMarks();
+            }
         }
 
         private void OnCameraModeChanged(CameraMode mode)
@@ -1204,14 +1236,14 @@ namespace PianoTeacher3D.UI
             }
 
             int beats = Mathf.Max(1, Mathf.Min(4, _session.BeatsPerBar));
-            var sb = new StringBuilder(beats * 2);
+            _beatBuilder.Clear();   // P2-3：复用 StringBuilder，每拍不再新造
             for (int i = 0; i < beats; i++)
             {
                 // 强拍（第 1 拍）实心、弱拍空心；闪烁拍同样实心：不只靠颜色区分
                 char glyph = (i == _flashBeat || i == 0) ? '●' : '○';
-                sb.Append(glyph);
+                _beatBuilder.Append(glyph);
             }
-            _beatDots.text = sb.ToString();
+            _beatDots.text = _beatBuilder.ToString();
             _beatDots.color = _flashBeat >= 0 ? UITheme.AccentBright : UITheme.TextSecondary;
         }
 
