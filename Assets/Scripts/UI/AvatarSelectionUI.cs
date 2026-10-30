@@ -44,6 +44,8 @@ namespace PianoTeacher3D.UI
         private Core.LessonSessionController _session;
         private AvatarManager _avatarManager;
         private CharacterRegistry _registry;
+        /// <summary>registry 是否由本面板自建（写实化批次 1：共用会话实例时 UI 不负责释放）。</summary>
+        private bool _ownsRegistry;
 
         private readonly List<Button> _cards = new List<Button>();
         private readonly List<Text> _cardLabels = new List<Text>();
@@ -76,10 +78,22 @@ namespace PianoTeacher3D.UI
             // 会话控制器没有公开访问器，这里只在初始化时找一次（不在 Update 里查找）。
             _avatarManager = _session != null ? _session.GetComponentInChildren<AvatarManager>(true) : null;
 
-            if (_registry == null) _registry = new CharacterRegistry();
+            // 角色注册表共用会话实例（写实化批次 1）：消除双份创建与双份 Resources 扫描，
+            // 卡片数据与会话偏好恢复看到的是同一份档案。会话不存在（独立预览 / 旧测试）时保底自建，
+            // 自建的由本面板负责释放（见 OnDestroy 的 _ownsRegistry 判断）。
+            _registry = _session != null && _session.CharacterRegistry != null
+                ? _session.CharacterRegistry
+                : CreateOwnedRegistry();
 
             BuildUI();
             Highlight(CurrentCharacterId());
+        }
+
+        /// <summary>仅在无会话时自建注册表（保底路径）；自建实例由本面板在 OnDestroy 释放。</summary>
+        private CharacterRegistry CreateOwnedRegistry()
+        {
+            _ownsRegistry = true;
+            return new CharacterRegistry();
         }
 
         private void OnDestroy()
@@ -99,8 +113,9 @@ namespace PianoTeacher3D.UI
             }
             _whiteSprite = null;
 
-            _registry?.Dispose();
+            if (_ownsRegistry) _registry?.Dispose();
             _registry = null;
+            _ownsRegistry = false;
 
             if (Instance == this) Instance = null;
         }

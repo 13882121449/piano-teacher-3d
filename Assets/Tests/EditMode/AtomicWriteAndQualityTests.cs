@@ -136,4 +136,29 @@ public class AtomicWriteAndQualityTests
         Assert.IsFalse(prefs.QualityTierUserOverride);
         Assert.AreEqual(QualityProfile.DetectRecommended(), prefs.ResolveQualityTier(), "恢复自动后应回到设备建议");
     }
+
+    // ==================== 角色选择持久化（写实化批次 1） ====================
+
+    [Test]
+    public void SelectedCharacterId_FieldDefault_IsRealisticRocketbox()
+    {
+        var prefs = new UserPreferences();
+
+        Assert.AreEqual(UserPreferences.Defaults.SelectedCharacterId, prefs.SelectedCharacterId,
+            "字段初始值必须等于默认值：旧偏好文件缺该字段时 JsonUtility 保留初始值 → 写实角色默认化");
+        Assert.AreEqual("rocketbox.female01", UserPreferences.Defaults.SelectedCharacterId,
+            "默认必须是写实角色（与 CharacterRegistry.RocketboxFemaleId 一致），不得悄悄改回色块人");
+    }
+
+    [Test]
+    public void SelectedCharacterId_ResetToDefaults_RestoresRealisticDefault()
+    {
+        var prefs = new UserPreferences();
+        prefs.SelectedCharacterId = "builtin.cartoon";
+
+        prefs.ResetToDefaults();
+
+        Assert.AreEqual(UserPreferences.Defaults.SelectedCharacterId, prefs.SelectedCharacterId,
+            "重置后必须回到写实默认，而不是清空（清空会退回色块人路径）");
+    }
 }

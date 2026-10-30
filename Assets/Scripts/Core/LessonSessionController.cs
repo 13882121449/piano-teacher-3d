@@ -41,6 +41,11 @@ namespace PianoTeacher3D.Core
         private PianoKeyHighlighter _highlighter;
         private Metronome _metronome;
         private AvatarManager _avatar;
+        /// <summary>
+        /// 角色档案注册表（写实化批次 1）：会话持有并负责释放，偏好恢复与角色 UI 共用同一实例，
+        /// 消除 UI 侧双份创建与双份 Resources 扫描。
+        /// </summary>
+        private CharacterRegistry _characterRegistry;
         private HandIKController _handIK;
         private FingerPoseController _fingerPose;
         private CameraModeController _camera;
@@ -321,6 +326,11 @@ namespace PianoTeacher3D.Core
         private void OnDisable()
         {
             if (_prefsDirty) SavePreferences();
+
+            // 角色注册表归会话所有（写实化批次 1）：域重载 / 场景卸载时释放自建档案缓存，
+            // 防止 Resources 引用跨域残留；Dispose 幂等，重复调用安全。
+            _characterRegistry?.Dispose();
+            _characterRegistry = null;
         }
 
         /// <summary>
@@ -470,6 +480,7 @@ namespace PianoTeacher3D.Core
             avatarRoot.transform.localPosition = new Vector3(0f, 0f, 0.42f);
             avatarRoot.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
             _avatar = avatarRoot.AddComponent<AvatarManager>();
+            _characterRegistry = new CharacterRegistry();
             _avatar.BuildAvatars();
             _avatar.OnCharacterViewChanged += OnCharacterViewChanged;
             BuildCustomizationPipeline();
@@ -1105,6 +1116,12 @@ namespace PianoTeacher3D.Core
         public ICharacterView CurrentCharacterView => _avatar != null ? _avatar.CurrentView : null;
 
         /// <summary>
+        /// 角色注册表（写实化批次 1）：会话持有，角色 UI 与偏好恢复共用；
+        /// 生命周期随会话（OnDisable 释放），UI 不再自建也不再自释放。
+        /// </summary>
+        public CharacterRegistry CharacterRegistry => _characterRegistry;
+
+        /// <summary>
         /// 按角色档案切换角色（方案 7.3 事务：加载 → 校验 → 激活 → 提交，失败保留原角色）。
         /// 内置角色走 <see cref="AvatarManager"/> 的既有路径，外部预制品走切换事务。
         /// </summary>
@@ -1132,6 +1149,16 @@ namespace PianoTeacher3D.Core
         /// </summary>
         private void OnCharacterViewChanged(ICharacterView view)
         {
+            // 角色选择持久化（写实化批次 1）：内置互切 / 外部角色提交 / 切回内置都汇聚于此，
+            // 在事件源头写偏好比在每个切换入口分别写更不易漏。view 为 null 只发生在销毁——
+            // 绝不能因此把用户的选择清掉。抑制窗口内（ApplyPreferences 恢复过程）不回写。
+            if (view != null && !_suppressPrefsWrite && _prefs != null &&
+                !string.Equals(_prefs.SelectedCharacterId, view.CharacterId, StringComparison.Ordinal))
+            {
+                _prefs.SelectedCharacterId = view.CharacterId;
+                MarkPrefsDirty();
+            }
+
             if (_customization != null)
             {
                 _customization.BindCharacter(view, out _);
@@ -1462,7 +1489,7 @@ namespace PianoTeacher3D.Core
                 SetMetronomeEnabled(_prefs.MetronomeEnabled);
 
                 SetCameraMode((CameraMode)Mathf.Clamp(_prefs.LastCameraMode, 0, 2));
-                SwitchAvatar(Mathf.Clamp(_prefs.AvatarIndex, 0, AvatarManager.AvatarCount - 1));
+                RestoreCharacter();
                 SetPracticeHand(NormalizeHand(_prefs.PracticeHand));
                 SetHighlightMode(NormalizeHighlight(_prefs.HighlightMode));
                 SetDisplayMode(_prefs.DisplayMode == (int)DisplayMode.Teaching ? DisplayMode.Teaching : DisplayMode.Showcase);
@@ -1471,6 +1498,41 @@ namespace PianoTeacher3D.Core
             {
                 _suppressPrefsWrite = false;
             }
+        }
+
+        /// <summary>
+        /// 按持久化 ID 恢复角色（写实化批次 1）。
+        /// <para>
+        /// 恢复顺序：ID 可在注册表解析 → 走 <see cref="ActivateCharacter"/>（8 步事务，含资产校验与回滚），
+        /// 失败时回落<b>内置角色 0</b> 并留 Warning——避免每次启动都对着缺失资产失败一遍，
+        /// 也让「降级」本身成为新的持久化事实；ID 为空或已不在注册表 → 回落既有
+        /// <c>AvatarIndex</c> 下标路径（兼容旧偏好文件）。
+        /// </para>
+        /// <para>
+        /// batchmode 下由 <see cref="ApplyPreferences"/> 统一跳过（测试必须从确定性起点出发）；
+        /// 测试可直接调用带参重载验证恢复语义。
+        /// </para>
+        /// </summary>
+        public void RestoreCharacter() => RestoreCharacter(_prefs != null ? _prefs.SelectedCharacterId : null);
+
+        /// <summary>带显式 ID 的恢复入口（生产路径经无参重载读偏好；测试用它注入任意 ID）。</summary>
+        public void RestoreCharacter(string characterId)
+        {
+            if (_avatar == null) return;
+
+            if (!string.IsNullOrEmpty(characterId) && _characterRegistry != null &&
+                _characterRegistry.TryGet(characterId, out CharacterProfile profile))
+            {
+                CharacterSwitchResult result = ActivateCharacter(profile);
+                if (result.Succeeded) return;
+                Debug.LogWarning($"[PianoTeacher3D] 持久化角色「{characterId}」恢复失败" +
+                                 $"（{(string.IsNullOrEmpty(result.Error) ? "未知原因" : result.Error)}），回落内置角色 0。");
+                SwitchAvatar(0);
+                return;
+            }
+
+            // 旧偏好文件（无 ID）或 ID 已不在注册表：走既有下标路径（保持向后兼容）
+            SwitchAvatar(Mathf.Clamp(_prefs != null ? _prefs.AvatarIndex : 0, 0, AvatarManager.AvatarCount - 1));
         }
 
         private void MarkPrefsDirty()

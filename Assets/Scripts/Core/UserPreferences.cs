@@ -39,6 +39,13 @@ namespace PianoTeacher3D.Core
             /// <summary>默认角色下标。</summary>
             public const int AvatarIndex = 0;
 
+            /// <summary>
+            /// 默认角色 ID（写实角色默认化，写实化批次 1；值对应
+            /// <see cref="PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId"/>）。
+            /// 资产缺失时恢复失败会回落内置角色，见会话层 <c>RestoreCharacter</c>。
+            /// </summary>
+            public const string SelectedCharacterId = "rocketbox.female01";
+
             /// <summary>默认视角：1 = 全景（<c>CameraControl.CameraMode.Full</c>）。</summary>
             public const int LastCameraMode = 1;
 
@@ -100,6 +107,17 @@ namespace PianoTeacher3D.Core
 
         /// <summary>角色下标。</summary>
         public int AvatarIndex = Defaults.AvatarIndex;
+
+        /// <summary>
+        /// 最后选中的角色 ID（含外部预制品，如 Rocketbox；<see cref="PianoTeacher3D.Characters.ICharacterView.CharacterId"/>）。
+        /// <para>
+        /// 恢复顺序见会话层 <c>RestoreCharacter</c>：ID 可在注册表解析 → 按档案激活；
+        /// 解析失败（资产缺失 / 校验不过）→ 回落内置角色 0；为空 → 回落 <see cref="AvatarIndex"/> 下标路径。
+        /// 旧版本偏好文件没有该字段，JsonUtility 反序列化保留字段初始值（= 默认写实角色）——
+        /// 这正是「写实角色默认化」的实现点，不需要额外迁移逻辑。
+        /// </para>
+        /// </summary>
+        public string SelectedCharacterId = Defaults.SelectedCharacterId;
 
         /// <summary>节拍器是否开启。</summary>
         public bool MetronomeEnabled = Defaults.MetronomeEnabled;
@@ -257,6 +275,7 @@ namespace PianoTeacher3D.Core
             PracticeHand = Defaults.PracticeHand;
             HighlightMode = Defaults.HighlightMode;
             AvatarIndex = Defaults.AvatarIndex;
+            SelectedCharacterId = Defaults.SelectedCharacterId;
             MetronomeEnabled = Defaults.MetronomeEnabled;
             BeatsPerBar = Defaults.BeatsPerBar;
             HighlightLookAhead = Defaults.HighlightLookAhead;
@@ -277,6 +296,7 @@ namespace PianoTeacher3D.Core
             PracticeHand = other.PracticeHand;
             HighlightMode = other.HighlightMode;
             AvatarIndex = other.AvatarIndex;
+            SelectedCharacterId = other.SelectedCharacterId ?? Defaults.SelectedCharacterId;
             MetronomeEnabled = other.MetronomeEnabled;
             BeatsPerBar = other.BeatsPerBar;
             HighlightLookAhead = other.HighlightLookAhead;
@@ -301,6 +321,9 @@ namespace PianoTeacher3D.Core
             QualityTier = ClampEnum(QualityTier, Defaults.QualityTierMin, Defaults.QualityTierMax, Defaults.QualityTier);
 
             if (string.IsNullOrEmpty(LastSongId)) LastSongId = "";
+
+            // 角色 ID 为空按「未选择」处理 → 回落写实默认（与字段初始值一致；按 LastSongId 归一化先例）
+            if (string.IsNullOrEmpty(SelectedCharacterId)) SelectedCharacterId = Defaults.SelectedCharacterId;
 
             if (RecentSongIds == null) RecentSongIds = new List<string>();
             RecentSongIds.RemoveAll(id => string.IsNullOrEmpty(id));
