@@ -429,6 +429,37 @@ public class VisualSnapshotTests
             session, cameraCtrl, avatar, timeline));
         session.Pause();
 
+        // ---- V15 写实角色（Rocketbox）：贴图入库后的完整外观（写实化二期新增）----
+        // 为什么必须有这张图：贴图绑定发生在运行时（FBX 内的路径指向建模机临时目录，
+        // 导入器永远解析不到），单元断言只能证明「材质非空」，证明不了「不是白模/没有碎片/没破面」。
+        // 这张图是唯一能人工核对的证据，也是后续视觉回归的基线。
+        session.SetCameraMode(CameraMode.Full);
+        session.Stop();
+        session.Seek(0f);
+        // ActivateCharacter 接的是 CharacterProfile（不是 ID），先从会话的注册表解析
+        PianoTeacher3D.Characters.CharacterProfile rocketboxProfile = null;
+        bool foundProfile = session.CharacterRegistry != null
+            && session.CharacterRegistry.TryGet(
+                PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId, out rocketboxProfile);
+        var rocketboxResult = foundProfile
+            ? session.ActivateCharacter(rocketboxProfile)
+            : default(PianoTeacher3D.Characters.CharacterSwitchResult);
+        Debug.Log(string.Format("[V15] Rocketbox 激活：解析档案={0} 成功={1} 原因={2} 当前角色={3}",
+            foundProfile, rocketboxResult.Succeeded,
+            string.IsNullOrEmpty(rocketboxResult.Error) ? "(无)" : rocketboxResult.Error,
+            session.CurrentCharacterView != null ? session.CurrentCharacterView.CharacterId : "(null)"));
+        yield return new WaitForSeconds(1.2f);
+        yield return Capture(cam, Path.Combine(dir, "V15_rocketbox_character.png"));
+        records.Add(Snapshot("V15_rocketbox_character.png", "新增：写实角色（Rocketbox）",
+            "写实女性全景：皮肤与头发贴图完整、无白模、无碎片、手指自然弯曲",
+            string.Format("激活成功={0}，角色={1}", rocketboxResult.Succeeded,
+                session.CurrentCharacterView != null ? session.CurrentCharacterView.CharacterId : "(null)"),
+            session, cameraCtrl, avatar, timeline));
+
+        // 复位到内置角色，避免影响后续（主菜单截图）
+        session.SwitchAvatar(0);
+        yield return new WaitForSeconds(0.5f);
+
         // ---- V10 主菜单 / 空曲库（方案 11.2-1）----
         // 放在最后：它会切换场景，避免影响上面所有课程场景截图
         session.Pause();
