@@ -230,10 +230,15 @@ namespace PianoTeacher3D.Tests.PlayMode
             float pip = NormalizeAngle(intermediate.localRotation.eulerAngles.x);
             float dip = NormalizeAngle(distal.localRotation.eulerAngles.x);
 
-            Assert.Greater(mcp, 3f, "静止时指根应保留自然弯曲（不应僵直）");
-            Assert.Less(mcp, 40f, "静止时指根不应过度弯曲");
-            Assert.Greater(pip, 1f, "静止时中节应有轻微弯曲");
-            Assert.Greater(dip, 0f, "静止时末节应有轻微弯曲");
+            // 规格手型（写实化批次 4）：静止 C 形 = MCP 25 / PIP 30 / DIP 15（总 70°）。
+            // 旧值 26° 总弯曲偏平（视觉像「举手」），因此这里锁区间而不是只判「有弯曲」。
+            Assert.That(mcp, Is.InRange(21f, 29f), $"静止 MCP 应为规格值 25°（当前 {mcp:F1}°）");
+            Assert.That(pip, Is.InRange(25f, 35f), $"静止 PIP 应为规格值 30°（当前 {pip:F1}°）");
+            Assert.That(dip, Is.InRange(11f, 19f), $"静止 DIP 应为规格值 15°（当前 {dip:F1}°）");
+
+            // 关节级形态：PIP 弯曲应大于 MCP（C 形手的特征），不是「钩手」（MCP 最大）
+            Assert.Greater(pip, mcp, "静止手型应为 C 形（PIP 弯曲大于 MCP），不是钩手");
+
             Assert.IsNull(HandPoseValidator.ValidateJointAngles(mcp, pip, dip, FingerJointLimits.Default));
         }
 

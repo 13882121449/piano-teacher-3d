@@ -48,9 +48,15 @@ namespace PianoTeacher3D.Avatar
     {
         [Header("手指姿态（无目标 / 无三关节时的兜底姿态）")]
         public float PressAngle = 32f;  // 手指按下弯曲角度（绕 X 正角 = 指尖下压向琴键）
-        public float RestAngle = 18f;   // 未按下时的自然弯曲（避免僵直的手型）
+        /// <summary>
+        /// 单手兜底路径（无三关节骨架）的静止弯曲（度）。
+        /// 与三关节路径的 MCP 规格值对齐（25°）——弹琴的静止手型是 C 形，
+        /// 旧值 18° 偏平，视觉上接近「伸手」而不是「搭在键上」。
+        /// </summary>
+        public float RestAngle = 25f;
         public float SlerpSpeed = 15f;
-        public float SpreadAngle = 4f;  // 和弦手型左右张开角（绕 Y）
+        /// <summary>和弦手型左右张开角（绕 Y）。规格 2°：真实演奏时手指基本平行，张开靠指根分叉而非旋外。</summary>
+        public float SpreadAngle = 2f;
 
         [Header("关节级姿态（附录 A.4.2）")]
         /// <summary>指根朝向的最小/最大俯角（度，向下为正）：避免指根向后反折或抬成爪状。</summary>
@@ -61,8 +67,25 @@ namespace PianoTeacher3D.Avatar
         public float MinRootPitchDegrees = 10f;
         public float MaxRootPitchDegrees = 36f;
 
-        /// <summary>无目标时的自然弯曲总量（度）。</summary>
-        public float RestCurlDegrees = 26f;
+        /// <summary>
+        /// 静止手型的三关节总弯曲（度）。规格值 70 = MCP 25 + PIP 30 + DIP 15（标准 C 形手）。
+        /// <para>
+        /// 旧值 26° 偏平（视觉上像「举手」），悬空/压键指标也说明指尖离键面偏远。
+        /// 分配权重按 25:30:15 重标，使三关节各自落到规格角度。
+        /// </para>
+        /// </summary>
+        public float RestCurlDegrees = 70f;
+
+        /// <summary>
+        /// 三关节 CCD 的初值总弯曲（度）。与 <see cref="RestCurlDegrees"/> 解耦：
+        /// 前者是「求解起点」（只影响收敛路径与迭代次数），后者是「无目标时的静止手型」（影响观感）。
+        /// <para>
+        /// 为什么不能直接共用：把初值抬到 70° 会让 CCD 从极度弯曲的状态往里收，收敛路径与前一次
+        /// 逐位不同（实测会造成键面距离/压键指标漂移）。指尖目标求解应当保持既有基线，
+        /// 观感改进走独立参数。
+        /// </para>
+        /// </summary>
+        public float SolveSeedCurlDegrees = 26f;
 
         /// <summary>
         /// 关节轴策略：默认「绕骨骼局部 X 轴弯曲」（程序化手部，行为与改造前逐位一致）。
@@ -76,10 +99,17 @@ namespace PianoTeacher3D.Avatar
         /// <summary>保持阶段的额外轻微下压（度）：长音不抖，但保持"按住"的视觉。</summary>
         public float HoldSettleDegrees = 2.5f;
 
-        /// <summary>MCP / PIP / DIP 的总弯曲分配权重（三者之和建议为 1）。</summary>
-        [Range(0f, 1f)] public float McpWeight = 0.46f;
-        [Range(0f, 1f)] public float PipWeight = 0.34f;
-        [Range(0f, 1f)] public float DipWeight = 0.20f;
+        /// <summary>
+        /// MCP / PIP / DIP 的总弯曲分配权重（三者之和建议为 1）。
+        /// <para>
+        /// 规格值来自静止手型目标角 25° / 30° / 15°（总 70°）的归一化：
+        /// 25/70 = 0.357、30/70 = 0.429、15/70 = 0.214。
+        /// 旧值 0.46 / 0.34 / 0.20 会让 MCP 明显多弯、PIP/DIP 偏直，呈「钩手」而非 C 形。
+        /// </para>
+        /// </summary>
+        [Range(0f, 1f)] public float McpWeight = 0.36f;
+        [Range(0f, 1f)] public float PipWeight = 0.43f;
+        [Range(0f, 1f)] public float DipWeight = 0.21f;
 
         /// <summary>各关节角度上限（度）：超过即钳制并计入 <see cref="JointLimitClampCount"/>。</summary>
         public float MaxMcpDegrees = 82f;
@@ -445,8 +475,10 @@ namespace PianoTeacher3D.Avatar
         private void SolveJointAngles(Transform proximal, Transform intermediate, Transform distal,
             float l2, Vector3 target, float[] angles)
         {
-            // 初值取自然弯曲：全直状态下目标若正好在手指射线上，旋转梯度为 0 会卡住
-            float rest = RestCurlDegrees * Mathf.Deg2Rad;
+            // 初值取自然弯曲：全直状态下目标若正好在手指射线上，旋转梯度为 0 会卡住。
+            // 注意用 SolveSeedCurlDegrees（求解起点）而不是 RestCurlDegrees（静止手型）——
+            // 后者已按 C 形手规格调到 70°，直接当初值会改变收敛路径。
+            float rest = SolveSeedCurlDegrees * Mathf.Deg2Rad;
             float w0 = Mathf.Max(0.001f, McpWeight);
             float w1 = Mathf.Max(0.001f, PipWeight);
             float w2 = Mathf.Max(0.001f, DipWeight);

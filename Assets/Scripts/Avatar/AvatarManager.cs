@@ -682,8 +682,11 @@ namespace PianoTeacher3D.Avatar
             // 0.28 会在颧骨与鼻尖留下明显高光斑（塑料积木感的主要来源）；0.12 接近哑光、仍保留微弱光泽。
             // 再掺入 7% 暖红模拟皮下毛细血管透光（Built-in Standard 无 SSS 时的廉价替代）。
             var skinBase = Color.Lerp(def.SkinColor, new Color(0.86f, 0.42f, 0.38f), 0.07f);
-            var skinMat = CreateMaterial(skinBase, 0.12f, 0f);
-            var nailMat = CreateMaterial(Color.Lerp(def.SkinColor, Color.white, 0.35f), 0.22f, 0f);
+            // 写实化批次 4：URP（Linear + ACES）下高光泽更「亮」，皮肤要更低光泽、指甲要有明确高光点。
+            // 内置管线保持原值逐位不变（回退路径不受影响）。视觉确认在批次 7 的 --visual 出图。
+            bool srp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
+            var skinMat = CreateMaterial(skinBase, srp ? 0.10f : 0.12f, 0f);
+            var nailMat = CreateMaterial(Color.Lerp(def.SkinColor, Color.white, 0.35f), srp ? 0.45f : 0.22f, 0f);
             var clothMat = CreateMaterial(def.ClothColor, 0.15f, 0f);
             var trimMat = CreateMaterial(Color.Lerp(def.ClothColor, Color.black, 0.32f), 0.20f, 0f);
             var darkMat = CreateMaterial(def.DarkColor, 0.25f, 0f);
