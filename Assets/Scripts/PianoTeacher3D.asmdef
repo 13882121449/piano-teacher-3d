@@ -1,7 +1,10 @@
 {
     "name": "PianoTeacher3D",
     "rootNamespace": "PianoTeacher3D",
-    "references": [],
+    "references": [
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

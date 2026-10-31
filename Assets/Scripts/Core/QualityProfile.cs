@@ -1,5 +1,9 @@
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using ShadowRes = UnityEngine.ShadowResolution;
+// 写实化批次 2：URP 的 ShadowQuality 与 UnityEngine.ShadowQuality 同名二义，显式绑定为引擎侧语义
+using ShadowQuality = UnityEngine.ShadowQuality;
 
 namespace PianoTeacher3D.Core
 {
@@ -182,6 +186,16 @@ namespace PianoTeacher3D.Core
             QualitySettings.shadowResolution = ShadowResolution >= 2048 ? ShadowRes.High : ShadowRes.Medium;
 
             QualitySettings.antiAliasing = Tier == QualityTier.High ? 4 : 2;
+
+            // 写实化批次 2：URP 激活时把档位同步调制到当前管线资产（阴影距离 / 分辨率级联 / MSAA）。
+            // 与 QualitySettings 双写是因为 URP 下管线资产参数优先于 QualitySettings 的同名项；
+            // 只调当前激活资产的属性（不切换实例），启动 / 切档各一次，非热路径。
+            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp)
+            {
+                urp.shadowDistance = ShadowDistance;
+                urp.shadowCascadeCount = Tier == QualityTier.High ? 4 : 2;
+                urp.msaaSampleCount = Tier == QualityTier.High ? 4 : 2;
+            }
         }
     }
 }

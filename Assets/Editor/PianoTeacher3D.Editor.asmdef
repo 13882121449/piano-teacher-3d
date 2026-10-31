@@ -1,0 +1,20 @@
+{
+    "name": "PianoTeacher3D.Editor",
+    "rootNamespace": "PianoTeacher3D.EditorTools",
+    "references": [
+        "PianoTeacher3D",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

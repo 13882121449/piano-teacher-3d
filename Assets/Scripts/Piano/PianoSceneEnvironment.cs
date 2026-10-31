@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using PianoTeacher3D.Core;
 
 namespace PianoTeacher3D.Piano
@@ -21,10 +23,12 @@ namespace PianoTeacher3D.Piano
     /// 另保留原「键盘上方点光」提升琴键与手部可读性。刻意<b>避免多个强光造成琴键反光刺眼</b>。
     /// </para>
     /// <para>
-    /// <b>诚实性说明</b>（方案 0 节 / 审查 0.1）：内置渲染管线<b>没有</b>后处理栈，
-    /// 本组件<b>没有实现真实的环境遮蔽（SSAO）或任何后处理</b>。
-    /// 「接触阴影」= 主光软阴影 + 贴地极淡径向渐变薄片（程序化生成、透明度极低）<b>近似</b>；
-    /// 它<b>不是</b> AO，也不是后处理。请勿在文档 / UI 中表述为「已实现环境遮蔽」。
+    /// <b>诚实性说明</b>（方案 0 节 / 审查 0.1；写实化批次 2 修订）：
+    /// URP 激活时本组件通过全局 Volume 提供真实后处理（ACES / Bloom / 暗角 / 色彩调整），
+    /// 真实 SSAO 由 Renderer Feature 承担（<c>RenderPipelineSetup</c> 生成的管线资产内置）；
+    /// 内置管线（未配置 URP）仍<b>没有实现真实的环境遮蔽（SSAO）或任何后处理</b>，行为与历史版本一致。
+    /// 「接触阴影」= 主光软阴影 + 贴地极淡径向渐变薄片（程序化生成、透明度极低）<b>近似</b>——
+    /// 即使在 URP 下它也<b>不是</b> SSAO（真实 AO 由管线资产承担），请勿在文档 / UI 中混用表述。
     /// </para>
     /// <para>
     /// <b>性能</b>（方案 7.2）：几何 / 材质 / 贴图只在 <see cref="Build"/> 期生成（约 9 个 Renderer + 4 个灯），
@@ -83,6 +87,16 @@ namespace PianoTeacher3D.Piano
         private const float KeyLightRange = 2.4f;
         private static readonly Vector3 KeyLightLocalPosition = new Vector3(0f, 1.65f, 0.35f);
 
+        // —— 后处理参数（写实化批次 2；数值原则：轻微，不抢教学焦点，ACIES 主导观感）——
+        private const float BloomThreshold = 1.1f;     // 高光阈值：只让琴漆高光 / 灯光呼吸，不过曝
+        private const float BloomIntensityHigh = 0.35f; // High 档强度（Standard 档归零）
+        private const float BloomScatter = 0.55f;
+        private const float VignetteIntensity = 0.18f; // 微暗角：聚焦键盘区，极轻
+        private const float VignetteSmoothness = 0.4f;
+        private const float PostExposure = 0.1f;       // 轻微提亮补偿 Linear 迁移后的整体变暗
+        private const float ContrastBoost = 6f;
+        private const float SaturationBoost = 4f;
+
         // —— 接触阴影近似薄片（地面顶面 y = 0，薄片贴地 3 mm，透明度极低） ——
         private const float DecalY = 0.0030f;
         private const float DecalThickness = 0.002f;
@@ -115,6 +129,14 @@ namespace PianoTeacher3D.Piano
         // ==================== 内部状态 ====================
 
         private Transform _root;
+
+        // —— 后处理 Volume（写实化批次 2）：ACES 色调映射 / Bloom / 微暗角 / 色彩微调 ——
+        private Volume _postVolume;
+        private VolumeProfile _postProfile;
+        private Bloom _bloom;
+        private Tonemapping _tonemapping;
+        private Vignette _vignette;
+        private ColorAdjustments _colorAdjustments;
         private Renderer _floorRenderer;
         private Renderer _aoDecalRenderer;
         private PianoKeyMap _keyMap;
@@ -151,6 +173,7 @@ namespace PianoTeacher3D.Piano
             {
                 BuildGeometry();
                 BuildLights();
+                BuildPostProcessVolume();
                 _built = true;
             }
 
@@ -207,6 +230,64 @@ namespace PianoTeacher3D.Piano
             // 环境遮蔽观感：内置管线无后处理栈 → 只切换贴地极淡暗色渐变薄片（近似，不是真实 AO）
             _aoApproxEnabled = quality.EnableAmbientOcclusion;
             RefreshEnvironmentVisibility();
+
+            // 后处理按档分层（写实化批次 2）：URP 激活时 Bloom 只在高画质档呼吸发光，
+            // Standard 档强度归零（等效关闭，不改 QualityProfile 结构）；ACES / 暗角 / 色彩两档共用。
+            if (_bloom != null)
+            {
+                _bloom.intensity.Override(quality.Tier == QualityTier.High ? BloomIntensityHigh : 0f);
+            }
+        }
+
+        /// <summary>
+        /// 创建全局后处理 Volume（写实化批次 2，URP 专属；内置管线跳过）。
+        /// <para>
+        /// ACES 色调映射 + Bloom（按档调制，见 <see cref="ApplyQuality"/>）+ 微暗角 + 轻微色彩调整。
+        /// SSAO 由 Renderer Feature 承担（<c>RenderPipelineSetup</c> 生成资产时挂上），不在此处。
+        /// Volume 挂在本组件节点下（<b>不是</b> _root 下——几何可见性开关不得连累后处理），
+        /// isGlobal 使其不受位置限制。profile 为运行时创建的 SO，OnDestroy 负责销毁。
+        /// </para>
+        /// </summary>
+        private void BuildPostProcessVolume()
+        {
+            if (GraphicsSettings.currentRenderPipeline == null) return;   // 内置管线：无后处理栈，诚实跳过
+
+            var go = new GameObject("PostProcessVolume");
+            go.transform.SetParent(transform, false);
+
+            _postVolume = go.AddComponent<Volume>();
+            _postVolume.isGlobal = true;
+            _postProfile = ScriptableObject.CreateInstance<VolumeProfile>();
+            _postVolume.sharedProfile = _postProfile;
+
+            _tonemapping = _postProfile.Add<Tonemapping>(true);
+            _tonemapping.mode.Override(TonemappingMode.ACES);
+
+            _bloom = _postProfile.Add<Bloom>(true);
+            _bloom.threshold.Override(BloomThreshold);
+            _bloom.intensity.Override(BloomIntensityHigh);   // 默认 High；Standard 档由 ApplyQuality 归零
+            _bloom.scatter.Override(BloomScatter);
+
+            _vignette = _postProfile.Add<Vignette>(true);
+            _vignette.intensity.Override(VignetteIntensity);
+            _vignette.smoothness.Override(VignetteSmoothness);
+
+            _colorAdjustments = _postProfile.Add<ColorAdjustments>(true);
+            _colorAdjustments.postExposure.Override(PostExposure);
+            _colorAdjustments.contrast.Override(ContrastBoost);
+            _colorAdjustments.saturation.Override(SaturationBoost);
+        }
+
+        private void OnDestroy()
+        {
+            // profile 是运行时创建的 ScriptableObject，不随 GameObject 销毁，必须手动释放
+            if (_postProfile != null) Destroy(_postProfile);
+            _postProfile = null;
+            _postVolume = null;
+            _bloom = null;
+            _tonemapping = null;
+            _vignette = null;
+            _colorAdjustments = null;
         }
 
         /// <summary>
@@ -460,9 +541,14 @@ namespace PianoTeacher3D.Piano
         /// </summary>
         private static Material CreateLitMaterial(string name, Color color, float smoothness, float metallic)
         {
-            var shader = Shader.Find("Standard")
-                ?? Shader.Find("Universal Render Pipeline/Lit")
-                ?? Shader.Find("Sprites/Default");
+            // 写实化批次 2：由当前管线状态决定顺序（SRP 下 Standard 渲染为洋红，见 PianoKeyMap 同注释）
+            var shader = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
+                ? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Standard")
+                    ?? Shader.Find("Sprites/Default")
+                : Shader.Find("Standard")
+                    ?? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Sprites/Default");
             if (shader == null) return null;
 
             var mat = new Material(shader) { name = name, color = color };

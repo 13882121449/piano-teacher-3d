@@ -216,14 +216,14 @@ namespace PianoTeacher3D.Tests.PlayMode
             // （Stop 语义为完全复位），而真实运行时的着色时机也正是 Note On 当帧。
             var low = new MidiNoteEvent(45, 0f, 2f, 90, 0, 0);
             _highlighter.OnNoteOn(low);
-            Assert.AreEqual(PianoKeyHighlighter.LeftHandColor, KeyColor(45),
+            AssertColorsApproximately(PianoKeyHighlighter.LeftHandColor, KeyColor(45),
                 "低音键（左手侧）必须用左手色（冷蓝）高亮");
             Assert.Greater(KeyX(45), 0f, "低音键应位于世界 +X 侧（与左手同侧）");
             _highlighter.OnNoteOff(low);
 
             var high = new MidiNoteEvent(76, 0f, 2f, 90, 0, 0);
             _highlighter.OnNoteOn(high);
-            Assert.AreEqual(PianoKeyHighlighter.RightHandColor, KeyColor(76),
+            AssertColorsApproximately(PianoKeyHighlighter.RightHandColor, KeyColor(76),
                 "高音键（右手侧）必须用右手色（暖橙）高亮");
             Assert.Less(KeyX(76), 0f, "高音键应位于世界 -X 侧（与右手同侧）");
             _highlighter.OnNoteOff(high);
@@ -404,6 +404,23 @@ namespace PianoTeacher3D.Tests.PlayMode
             var block = new MaterialPropertyBlock();
             renderer.GetPropertyBlock(block);
             return block.GetColor(Shader.PropertyToID("_Color"));
+        }
+
+        // Linear 色彩空间（写实化批次 2）下，颜色经 GPU/原生侧 sRGB↔线性往返会引入 ULP 级
+        // 浮点差：实测 Expected 与 But was 显示到 3 位小数完全相同仍断言失败（位级不同）。
+        // 断言意图是「用哪只手的颜色」而非位级相等，因此改用通道级容差（1e-3，远小于
+        // Color32 量化步长 1/255 ≈ 3.9e-3，不可能掩盖真实的颜色错配）。
+        private const float ColorTolerance = 1e-3f;
+
+        private static void AssertColorsApproximately(Color expected, Color actual, string message)
+        {
+            float maxDiff = Mathf.Max(
+                Mathf.Abs(expected.r - actual.r),
+                Mathf.Abs(expected.g - actual.g),
+                Mathf.Abs(expected.b - actual.b),
+                Mathf.Abs(expected.a - actual.a));
+            Assert.LessOrEqual(maxDiff, ColorTolerance, string.Format(
+                "{0}（期望 {1}，实际 {2}，最大通道差 {3:E2}）", message, expected, actual, maxDiff));
         }
     }
 }

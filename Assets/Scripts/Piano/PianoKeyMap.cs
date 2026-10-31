@@ -400,9 +400,16 @@ namespace PianoTeacher3D.Piano
         /// </summary>
         private static Material CreateMaterial(string name, Color color, float metallic, float smoothness)
         {
-            var shader = Shader.Find("Standard")
-                ?? Shader.Find("Universal Render Pipeline/Lit")
-                ?? Shader.Find("Sprites/Default");
+            // 写实化批次 2：shader 选择由**当前管线状态**决定，而非 Find 顺序——
+            // SRP 激活时 Standard 仍能被 Find 到但渲染为洋红（不被 URP 支持），URP/Lit 必须优先；
+            // 内置管线则相反。Sprites/Default 是最后的可渲染兜底（与两侧管线都兼容）。
+            var shader = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
+                ? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Standard")
+                    ?? Shader.Find("Sprites/Default")
+                : Shader.Find("Standard")
+                    ?? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Sprites/Default");
             if (shader == null)
             {
                 Debug.LogError("[PianoKeyMap] 未找到可用 shader，钢琴材质创建失败");

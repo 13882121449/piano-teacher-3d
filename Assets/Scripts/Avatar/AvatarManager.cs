@@ -1271,9 +1271,14 @@ namespace PianoTeacher3D.Avatar
         /// <summary>创建材质：皮肤用略低 smoothness + 零金属度，避免「塑料积木感」（方案 5.1 第 5 项 / 5.4）。</summary>
         private static Material CreateMaterial(Color c, float smoothness, float metallic)
         {
-            var shader = Shader.Find("Standard")
-                ?? Shader.Find("Universal Render Pipeline/Lit")
-                ?? Shader.Find("Sprites/Default");
+            // 写实化批次 2：由当前管线状态决定顺序（SRP 下 Standard 渲染为洋红，见 PianoKeyMap 同注释）
+            var shader = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
+                ? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Standard")
+                    ?? Shader.Find("Sprites/Default")
+                : Shader.Find("Standard")
+                    ?? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Sprites/Default");
             if (shader == null) return null;
 
             var mat = new Material(shader) { color = c };

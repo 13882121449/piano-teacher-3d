@@ -486,6 +486,7 @@ namespace PianoTeacher3D.Characters
                         if (src == null) continue;
                         // 必须实例化：直接改 sharedMaterial 会污染工程里的共享资产
                         var inst = new Material(src) { name = src.name + " (Character)" };
+                        RemapShaderToActivePipeline(inst);   // URP 下内置 shader 渲染为洋红，须先迁移
                         _scope.Own(inst);
                         _ownMaterials.Add(inst);
                         instances[m] = inst;
@@ -505,6 +506,62 @@ namespace PianoTeacher3D.Characters
                 mat.color = target;
             }
             _tinted = true;
+        }
+
+        /// <summary>
+        /// URP 激活时把内置管线 shader 的实例材质重映射为 URP/Lit（写实化批次 2）。
+        /// <para>
+        /// Rocketbox 的共享材质由模型导入器生成，指向内置 Standard——SRP 下能被引用但<b>渲染为洋红</b>。
+        /// 属性映射：_Color→_BaseColor、_MainTex→_BaseMap、_Glossiness→_Smoothness（法线 _BumpMap 两侧同名，
+        /// new Material 复制时已自动带上）。透明/裁切按 Standard 的 RenderType tag 映射 URP 的
+        /// Surface / AlphaClip（发片用 alpha test）。找不到 URP/Lit 时保持原样不炸——由资产校验门禁兜底报错。
+        /// </para>
+        /// </summary>
+        private static void RemapShaderToActivePipeline(Material inst)
+        {
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null) return; // 内置管线：无需重映射
+
+            var shader = inst.shader;
+            if (shader == null) return;
+            string shaderName = shader.name;
+            bool isBuiltInLit = shaderName == "Standard" || shaderName == "Standard (Specular setup)";
+            if (!isBuiltInLit) return;
+
+            var urpLit = Shader.Find("Universal Render Pipeline/Lit");
+            if (urpLit == null) return;
+
+            var color = inst.HasProperty("_Color") ? inst.color : Color.white;
+            var mainTex = inst.HasProperty("_MainTex") ? inst.GetTexture("_MainTex") : null;
+            var bump = inst.HasProperty("_BumpMap") ? inst.GetTexture("_BumpMap") : null;
+            float gloss = inst.HasProperty("_Glossiness") ? inst.GetFloat("_Glossiness") : -1f;
+            float metallic = inst.HasProperty("_Metallic") ? inst.GetFloat("_Metallic") : -1f;
+            float cutoff = inst.HasProperty("_Cutoff") ? inst.GetFloat("_Cutoff") : 0.5f;
+            // Shader 类没有 renderQueue 属性；材质实例的队列由原 shader 的 RenderType tag 推导（Geometry 2000 / AlphaTest 2450 / Transparent 3000）
+            string renderType = inst.renderQueue >= (int)UnityEngine.Rendering.RenderQueue.Transparent
+                ? "Transparent"
+                : (inst.renderQueue >= (int)UnityEngine.Rendering.RenderQueue.AlphaTest ? "TransparentCutout" : "Opaque");
+
+            inst.shader = urpLit;
+            if (inst.HasProperty("_BaseColor")) inst.SetColor("_BaseColor", color);
+            if (mainTex != null && inst.HasProperty("_BaseMap")) inst.SetTexture("_BaseMap", mainTex);
+            if (bump != null && inst.HasProperty("_BumpMap")) inst.SetTexture("_BumpMap", bump);
+            if (gloss >= 0f && inst.HasProperty("_Smoothness")) inst.SetFloat("_Smoothness", gloss);
+            if (metallic >= 0f && inst.HasProperty("_Metallic")) inst.SetFloat("_Metallic", metallic);
+
+            if (renderType == "Transparent")
+            {
+                if (inst.HasProperty("_Surface")) inst.SetFloat("_Surface", 1f);   // 1 = Transparent
+                if (inst.HasProperty("_Cutoff")) inst.SetFloat("_Cutoff", cutoff);
+                inst.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                inst.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            }
+            else if (renderType == "TransparentCutout")
+            {
+                if (inst.HasProperty("_AlphaClip")) inst.SetFloat("_AlphaClip", 1f);
+                if (inst.HasProperty("_Cutoff")) inst.SetFloat("_Cutoff", cutoff);
+                inst.EnableKeyword("_ALPHATEST_ON");
+                inst.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
+            }
         }
 
         /// <summary>是否存在可染色的材质（渲染器缺失时不该谎报成功）。</summary>
