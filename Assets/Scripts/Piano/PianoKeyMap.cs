@@ -254,8 +254,13 @@ namespace PianoTeacher3D.Piano
             c.SetParent(transform, false);
             _caseRoot = c;
 
-            var wood = CreateMaterial("CaseWood", new Color(0.225f, 0.152f, 0.110f), 0.00f, 0.32f);      // 胡桃木清漆
-            var woodDark = CreateMaterial("CaseWoodDark", new Color(0.150f, 0.098f, 0.074f), 0.00f, 0.20f); // 哑光深木
+            // 写实化批次 5：琴漆（URP + 反射探针）提高 smoothness 才有清漆反射；
+            // 内置管线没有探针且场景无 skybox，保持原值避免「灰塑料」。
+            // 0.55 实拍过亮（点光在琴体上半板打出黄斑），收到 0.40：仍有清漆高光但不过曝。
+            bool srp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
+            float lacquerSmoothness = srp ? 0.40f : 0.32f;
+            var wood = CreateMaterial("CaseWood", new Color(0.225f, 0.152f, 0.110f), 0.00f, lacquerSmoothness);  // 胡桃木清漆
+            var woodDark = CreateMaterial("CaseWoodDark", new Color(0.150f, 0.098f, 0.074f), 0.00f, srp ? 0.26f : 0.20f); // 哑光深木（仍远低于清漆）
             var felt = CreateMaterial("CaseFelt", new Color(0.72f, 0.14f, 0.14f), 0.00f, 0.05f);          // 键盘后挡红绒
             var brass = CreateMaterial("PedalMetal", new Color(0.62f, 0.50f, 0.24f), 0.85f, 0.72f);       // 黄铜踏板
 

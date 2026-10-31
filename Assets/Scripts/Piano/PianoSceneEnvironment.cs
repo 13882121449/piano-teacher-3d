@@ -46,11 +46,11 @@ namespace PianoTeacher3D.Piano
         private const float FloorY = -0.03f;
         private const float FloorZ = 0.2f;
         private static readonly Vector3 FloorScale = new Vector3(6f, 0.06f, 6f);
-        private static readonly Color FloorColor = new Color(0.105f, 0.115f, 0.135f);
+        private static readonly Color FloorColor = new Color(0.135f, 0.145f, 0.165f);
         private const float FloorSmoothness = 0.25f; // 轻微粗糙度，避免地板成为镜面
 
         // —— 背景远景：低饱和、低对比的素色板，放在琴体后方足够远（相机为 +Z 侧，故背景在 -Z）——
-        private static readonly Color BackdropColor = new Color(0.125f, 0.132f, 0.152f);
+        private static readonly Color BackdropColor = new Color(0.150f, 0.160f, 0.180f);
         private const float BackdropSmoothness = 0.10f;
 
         // —— 受控装饰（共 3 个，全部为极简体块、低对比，不抢教学焦点）——
@@ -79,17 +79,22 @@ namespace PianoTeacher3D.Piano
         private const float RimIntensity = 0.28f;
         private static readonly Vector3 RimEuler = new Vector3(33f, 41f, 0f);
 
-        // —— 键盘上方点光：保留既有作用（提升琴键与手部可读性），位置 / 范围 / 强度与基线一致 ——
+        // —— 键盘上方点光：保留既有作用（提升琴键与手部可读性），位置 / 范围与基线一致 ——
         //    强度由 1.1 降到 0.78：该灯位于人物头顶正上方，过强会把鼻梁、眼窝、下颌的阴影全部抹平，
         //    脸变成一个没有起伏的亮块。降低后仍足以照亮琴键与手部。
+        //    写实化批次 5：URP 的点光是物理单位（1/d² 衰减 + 平滑收边），同等数值比内置管线亮得多，
+        //    实拍会把琴体上半板打成一块黄斑并连带地面过曝 → URP 下再乘 UrpPointLightScale。
         private static readonly Color KeyLightColor = new Color(1f, 0.97f, 0.92f);
         private const float KeyLightIntensity = 0.78f;
+        private const float UrpPointLightScale = 0.42f;
         private const float KeyLightRange = 2.4f;
         private static readonly Vector3 KeyLightLocalPosition = new Vector3(0f, 1.65f, 0.35f);
 
-        // —— 后处理参数（写实化批次 2；数值原则：轻微，不抢教学焦点，ACIES 主导观感）——
-        private const float BloomThreshold = 1.1f;     // 高光阈值：只让琴漆高光 / 灯光呼吸，不过曝
-        private const float BloomIntensityHigh = 0.35f; // High 档强度（Standard 档归零）
+        // —— 后处理参数（写实化批次 2；数值原则：轻微，不抢教学焦点，ACES 主导观感）——
+        //    写实化批次 5 实拍回调：阈值 1.1 / 强度 0.35 在琴漆高光上仍会糊成光斑，
+        //    收到 1.3 / 0.22 —— 只让最强的灯芯与黄铜踏板轻微呼吸。
+        private const float BloomThreshold = 1.3f;     // 高光阈值：只让琴漆高光 / 灯光呼吸，不过曝
+        private const float BloomIntensityHigh = 0.22f; // High 档强度（Standard 档归零）
         private const float BloomScatter = 0.55f;
         private const float VignetteIntensity = 0.18f; // 微暗角：聚焦键盘区，极轻
         private const float VignetteSmoothness = 0.4f;
@@ -129,7 +134,9 @@ namespace PianoTeacher3D.Piano
         // ==================== 内部状态 ====================
 
         private Transform _root;
-
+        private ReflectionProbe _reflectionProbe;
+        /// <summary>实际写入点光的强度（按管线缩放后；ApplyQuality 每档都会重写，必须用这个值）。</summary>
+        private float _keyLightIntensity;
         // —— 后处理 Volume（写实化批次 2）：ACES 色调映射 / Bloom / 微暗角 / 色彩微调 ——
         private Volume _postVolume;
         private VolumeProfile _postProfile;
@@ -173,6 +180,7 @@ namespace PianoTeacher3D.Piano
             {
                 BuildGeometry();
                 BuildLights();
+                BuildReflectionProbe();
                 BuildPostProcessVolume();
                 _built = true;
             }
@@ -224,7 +232,7 @@ namespace PianoTeacher3D.Piano
             {
                 KeyLight.enabled = true; // 教学下限：任何档位都不得关闭键盘点光
                 KeyLight.shadows = LightShadows.None;
-                KeyLight.intensity = KeyLightIntensity;
+                KeyLight.intensity = _keyLightIntensity > 0f ? _keyLightIntensity : KeyLightIntensity;
             }
 
             // 环境遮蔽观感：内置管线无后处理栈 → 只切换贴地极淡暗色渐变薄片（近似，不是真实 AO）
@@ -237,6 +245,76 @@ namespace PianoTeacher3D.Piano
             {
                 _bloom.intensity.Override(quality.Tier == QualityTier.High ? BloomIntensityHigh : 0f);
             }
+
+            // 反射探针按档开关（写实化批次 5）：High 档启用并渲染一次；Standard 档关闭省开销。
+            // 只在「从关到开」时渲染，避免每次改画质都重跑 6 面立方体渲染。
+            if (_reflectionProbe != null)
+            {
+                bool wantProbe = quality.Tier == QualityTier.High;
+                if (wantProbe && !_reflectionProbe.enabled)
+                {
+                    _reflectionProbe.enabled = true;
+                    TryRenderProbe();
+                }
+                else if (!wantProbe && _reflectionProbe.enabled)
+                {
+                    _reflectionProbe.enabled = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 渲染一次反射探针。批处理 / 无图形设备时安全跳过（<c>-nographics</c> 下渲染会失败并刷警告），
+        /// 失败不影响任何逻辑——反射缺失只是观感差一点，不影响琴键与指标。
+        /// </summary>
+        private void TryRenderProbe()
+        {
+            if (_reflectionProbe == null) return;
+            if (!Application.isPlaying || Application.isBatchMode) return;
+            try
+            {
+                _reflectionProbe.RenderProbe();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[PianoSceneEnvironment] 反射探针渲染失败（不影响功能）：{ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 反射探针（写实化批次 5）：琴漆面板与黄铜踏板的环境反射来源。
+        /// <para>
+        /// 只渲染一次（<c>RenderProbe</c>），不逐帧更新——钢琴 / 地面 / 背景板都是静态的，
+        /// 场景没有会移动的反射体（角色不参与反射：探针盒只覆盖琴体一侧，教学场景也不需要倒影）。
+        /// 盒投影（boxProjection）让平面上的反射方向随位置变化，避免「整块金属贴纸」的假感。
+        /// </para>
+        /// <para>
+        /// 画质分档：只在 High 档启用（Standard 档关掉，省下一次 128² 立方体渲染）；
+        /// 开关逻辑在 <see cref="ApplyQuality"/>，此处只负责创建。
+        /// </para>
+        /// </summary>
+        private void BuildReflectionProbe()
+        {
+            var go = new GameObject("SceneReflectionProbe");
+            go.transform.SetParent(transform, false);
+            // 探针中心略高于琴体中心、向琴体一侧（-Z）偏：把琴首与背景板都纳入反射
+            go.transform.localPosition = new Vector3(0f, 0.85f, -0.15f);
+
+            var probe = go.AddComponent<ReflectionProbe>();
+            probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
+            probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.ViaScripting;
+            probe.timeSlicingMode = UnityEngine.Rendering.ReflectionProbeTimeSlicingMode.AllFacesAtOnce;
+            probe.resolution = 128;
+            probe.hdr = true;
+            probe.importance = 1;
+            probe.boxProjection = true;
+            probe.size = new Vector3(3.2f, 2.0f, 2.6f);
+            // 场景没有 skybox：用中性冷色清屏，避免探针采到纯黑导致琴漆发死
+            probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.SolidColor;
+            probe.backgroundColor = new Color(0.30f, 0.32f, 0.38f);
+            probe.enabled = false;   // 由 ApplyQuality 按档位开启
+
+            _reflectionProbe = probe;
         }
 
         /// <summary>
@@ -405,10 +483,15 @@ namespace PianoTeacher3D.Piano
 
         private void BuildLights()
         {
+            // URP 点光按物理单位衰减，同等强度比内置亮得多（实测琴体上半板被打成黄斑），
+            // 因此只对点光做管线感知缩放；三盏平行光语义一致，不动。
+            bool srp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
+            _keyLightIntensity = srp ? KeyLightIntensity * UrpPointLightScale : KeyLightIntensity;
+
             MainLight = CreateDirectional("MainLight", MainLightColor, MainLightIntensity, MainLightEuler);
             FillLight = CreateDirectional("FillLight", FillColor, FillIntensity, FillEuler);
             RimLight = CreateDirectional("RimLight", RimColor, RimIntensity, RimEuler);
-            KeyLight = CreatePoint("KeyLight", KeyLightColor, KeyLightIntensity, KeyLightRange, KeyLightLocalPosition);
+            KeyLight = CreatePoint("KeyLight", KeyLightColor, _keyLightIntensity, KeyLightRange, KeyLightLocalPosition);
         }
 
         private Light CreateDirectional(string name, Color color, float intensity, Vector3 euler)

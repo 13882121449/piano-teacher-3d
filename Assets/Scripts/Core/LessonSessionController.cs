@@ -511,8 +511,13 @@ namespace PianoTeacher3D.Core
             }
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = PianoTeacher3D.UI.UITheme.SceneBg;
-            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.38f, 0.40f, 0.47f);
+            // 环境光改三色梯度（写实化批次 5）：Flat 单色会让所有朝上的面同样亮，
+            // 空间失去「上亮下暗」的自然过渡。Trilight 用天空 / 地平 / 地面三色，
+            // 配合批次 2 的 Linear + ACES，墙面与琴体侧面才有层次。
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.50f, 0.53f, 0.61f);   // 天空：偏冷的顶光
+            RenderSettings.ambientEquatorColor = new Color(0.44f, 0.45f, 0.50f); // 地平：中性
+            RenderSettings.ambientGroundColor = new Color(0.28f, 0.28f, 0.31f);  // 地面反射：暗偏暖
 
             _camera = gameObject.AddComponent<CameraModeController>();
             _camera.Initialize(cam, _avatar, _keyMap);
