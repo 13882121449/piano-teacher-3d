@@ -119,6 +119,59 @@ namespace PianoTeacher3D.Avatar
         /// <summary>关节插值速度（比指根对准略快，避免指尖落后于手腕）。</summary>
         public float JointSlerpSpeed = 20f;
 
+        [Header("关节自然运动（写实化三期：抓握与伸展的过渡）")]
+        /// <summary>
+        /// 关节角改用临界阻尼二阶跟随，替代一阶指数插值。
+        /// <para>
+        /// <b>为什么一阶插值让手指看起来像机械爪</b>：<c>Slerp(cur, tgt, dt·k)</c> 的角速度是
+        /// <c>k(1−k)^n</c>——<b>第一帧就最大</b>、之后单调衰减。真实手指屈曲由肌腱拉动，
+        /// 有明确的加速段（肌力>惯性时加速、接近目标时被对抗肌减速），角速度呈钟形。
+        /// 一阶插值把「起步」直接做成峰值，观感就是「啪」地弹到位，缺抓握的酝酿感。
+        /// </para>
+        /// <para>
+        /// 用角度标量（不是四元数）做二阶：每个关节只绕自身铰链轴屈伸，单自由度即可描述，
+        /// 状态量小、无万向锁、且与 CCD 的 <c>angles[]</c> 语义直接对应。
+        /// </para>
+        /// </summary>
+        public bool UseDampedJointMotion = true;
+
+        /// <summary>
+        /// 关节弹簧角频率（rad/s）。整定依据：临界阻尼整定时间 ≈ 5.8/ω，
+        /// 取 26 → 约 0.22 s，与原来 JointSlerpSpeed=20（时间常数 0.05 s、整定约 0.20 s）
+        /// <b>总时长一致</b>——只改曲线形状，不改手指到位快慢。
+        /// </summary>
+        public float JointSpringOmega = 26f;
+
+        /// <summary>关节弹簧积分子步上限（秒）：低帧率下 ω·dt 过大会振荡。</summary>
+        public float JointMaxSubStep = 1f / 120f;
+
+        /// <summary>
+        /// DIP 与 PIP 的屈曲耦合比。真实手部 DIP 由掌腱膜被动牵拉，
+        /// 屈曲量约为 PIP 的 0.6–0.67（没有独立伸肌腱，无法单独伸直）。
+        /// </summary>
+        public float DipPipRatio = 0.62f;
+
+        /// <summary>
+        /// 耦合容差（度）：DIP 允许在「耦合值 ± 该容差」内自由调整以够到目标。
+        /// 完全锁死会损失可达性（指尖到不了键面），完全放开则退化成无约束的钩手。
+        /// </summary>
+        public float DipCouplingSlackDegrees = 14f;
+
+        /// <summary>
+        /// 接触带宽度（度）：关节误差小于该值时切换到过阻尼。指尖按到键面后由琴键刚体挡住，
+        /// 关节不可能继续自由屈曲——自由二阶在「目标持续朝同一方向变化后突然停止」时会保留
+        /// 残余速度并冲过目标（实测键面 P50 由 +8.6 mm 变成 −0.3 mm，压键帧 120→183）。
+        /// 提高阻尼比让减速提前开始：速度曲线仍是钟形，但尾部不再越界。
+        /// </summary>
+        public float JointContactBandDegrees = 6f;
+
+        /// <summary>
+        /// 接触带内的阻尼比（1 = 临界阻尼，&gt;1 = 过阻尼）。取 2.2：无过冲且减速平滑，
+        /// 不会像「到点即停」那样产生硬切。
+        /// </summary>
+        public float JointContactDampingRatio = 2.2f;
+
+
         /// <summary>按下后多久算"保持"阶段（秒）。</summary>
         public float HoldSettleSeconds = 0.12f;
 
@@ -145,6 +198,15 @@ namespace PianoTeacher3D.Avatar
         // CCD 求解的复用缓冲（弧度 / 关节引用），避免每帧分配
         private readonly float[] _jointScratch = new float[3];
         private readonly Transform[] _joints = new Transform[3];
+
+        // 关节角二阶跟随状态（每手 5 指 × 3 关节 = 15 槽；角度 + 角速度 + 是否已初始化）
+        // 用状态量而不是反解 localRotation：导入骨架的铰链轴是任意方向，反解不可靠。
+        private readonly float[] _leftJointAngle = new float[MaxFingers * 3];
+        private readonly float[] _leftJointVelocity = new float[MaxFingers * 3];
+        private readonly float[] _rightJointAngle = new float[MaxFingers * 3];
+        private readonly float[] _rightJointVelocity = new float[MaxFingers * 3];
+        private readonly bool[] _leftJointPrimed = new bool[MaxFingers * 3];
+        private readonly bool[] _rightJointPrimed = new bool[MaxFingers * 3];
 
         /// <summary>当前指法分配（由会话层注入，与 <see cref="HandIKController"/> 是同一个实例）。</summary>
         public FingerAssignmentService Assignment
@@ -279,6 +341,17 @@ namespace PianoTeacher3D.Avatar
                 _leftPhases[f] = FingerPhase.Rest;
                 _rightPhases[f] = FingerPhase.Rest;
             }
+
+            // 关节二阶状态同步复位：不复位会让 Seek / 切曲后手指带着旧角速度冲过头
+            for (int i = 0; i < _leftJointAngle.Length; i++)
+            {
+                _leftJointAngle[i] = 0f;
+                _leftJointVelocity[i] = 0f;
+                _leftJointPrimed[i] = false;
+                _rightJointAngle[i] = 0f;
+                _rightJointVelocity[i] = 0f;
+                _rightJointPrimed[i] = false;
+            }
         }
 
         /// <summary>指定手指当前分配到的音高（-1 = 未按下），供测试与调试使用；结果直接反映共用分配。</summary>
@@ -355,7 +428,7 @@ namespace PianoTeacher3D.Avatar
                 if (jointRig != null && jointRig.TryGetJoints(f, out var proximal, out var intermediate, out var distal))
                 {
                     UpdateFingerJoints(finger, jointRig, f, proximal, intermediate, distal,
-                        worldTarget, hasTarget, phase);
+                        worldTarget, hasTarget, phase, leftHand);
                 }
                 else
                 {
@@ -377,7 +450,7 @@ namespace PianoTeacher3D.Avatar
         /// </summary>
         private void UpdateFingerJoints(Transform finger, IFingerJointRig rig, int fingerIndex,
             Transform proximal, Transform intermediate, Transform distal,
-            Vector3 worldTarget, bool hasTarget, FingerPhase phase)
+            Vector3 worldTarget, bool hasTarget, FingerPhase phase, bool leftHand)
         {
             float l0 = Vector3.Distance(proximal.position, intermediate.position);
             float l1 = Vector3.Distance(intermediate.position, distal.position);
@@ -410,7 +483,8 @@ namespace PianoTeacher3D.Avatar
                 aimUp = palmUp.sqrMagnitude > 1e-6f ? palmUp : Vector3.up;
                 aim = true;
 
-                SolveJointAngles(proximal, intermediate, distal, l2, worldTarget, angles);
+                SolveJointAngles(proximal, intermediate, distal, l2, worldTarget, angles,
+                    rig.GetFingertip(fingerIndex));
             }
             else
             {
@@ -447,21 +521,88 @@ namespace PianoTeacher3D.Avatar
                 angles[0] += HoldSettleDegrees * Mathf.Deg2Rad;
             }
 
-            // ---- 关节角：逐关节限幅并插值 ----
-            ApplyJoint(proximal, 0, angles[0] * Mathf.Rad2Deg, MaxMcpDegrees);
-            ApplyJoint(intermediate, 1, angles[1] * Mathf.Rad2Deg, MaxPipDegrees);
-            ApplyJoint(distal, 2, angles[2] * Mathf.Rad2Deg, MaxDipDegrees);
+            // ---- 关节角：逐关节限幅并按二阶动力学推进 ----
+            ApplyJoint(proximal, 0, angles[0] * Mathf.Rad2Deg, MaxMcpDegrees, leftHand, fingerIndex);
+            ApplyJoint(intermediate, 1, angles[1] * Mathf.Rad2Deg, MaxPipDegrees, leftHand, fingerIndex);
+            ApplyJoint(distal, 2, angles[2] * Mathf.Rad2Deg, MaxDipDegrees, leftHand, fingerIndex);
 
             if (hasTarget) RecordReachIssue(distance, l0 + l1 + l2, angles);
         }
 
-        private void ApplyJoint(Transform joint, int jointIndex, float degrees, float maxDegrees)
+        /// <summary>
+        /// 单关节：把目标角按临界阻尼二阶动力学推进后写入旋转。
+        /// <para>
+        /// 一阶 <c>Slerp(cur, tgt, dt·k)</c> 的角速度在第一帧就达峰值（「啪」地弹到位），
+        /// 二阶 <c>a = ω²(θ_t − θ) − 2ω·ω_ang</c> 才有「加速—匀速—减速」的肌腱拉动感。
+        /// 状态按 (手指, 关节) 索引复用数组，Update 路径零分配。
+        /// </para>
+        /// </summary>
+        private void ApplyJoint(Transform joint, int jointIndex, float degrees, float maxDegrees,
+            bool leftHand, int fingerIndex)
         {
             if (joint == null) return;
-            // 弯曲轴由策略决定：程序化手部绕局部 X（与改造前一致），导入骨架绕推导出的铰链轴
-            var target = JointAxes.CurlLocalRotation(joint, jointIndex, Mathf.Clamp(degrees, 0f, maxDegrees));
-            joint.localRotation = Quaternion.Slerp(joint.localRotation, target,
-                Time.deltaTime * JointSlerpSpeed);
+
+            float targetDeg = Mathf.Clamp(degrees, 0f, maxDegrees);
+            int slot = fingerIndex * 3 + jointIndex;
+            if (slot < 0 || slot >= _leftJointAngle.Length) return;
+
+            if (!UseDampedJointMotion)
+            {
+                // 回退路径：与改动前逐位一致
+                var legacy = JointAxes.CurlLocalRotation(joint, jointIndex, targetDeg);
+                joint.localRotation = Quaternion.Slerp(joint.localRotation, legacy,
+                    Time.deltaTime * JointSlerpSpeed);
+                return;
+            }
+
+            var angles = leftHand ? _leftJointAngle : _rightJointAngle;
+            var velos = leftHand ? _leftJointVelocity : _rightJointVelocity;
+            var primed = leftHand ? _leftJointPrimed : _rightJointPrimed;
+
+            float dt = Mathf.Max(0f, Time.deltaTime);
+            if (!primed[slot] || dt <= 1e-6f)
+            {
+                // 首帧直接到位：否则手指会从 0° 慢慢爬到 C 形，入场动画里可见
+                angles[slot] = targetDeg;
+                velos[slot] = 0f;
+                primed[slot] = true;
+                joint.localRotation = JointAxes.CurlLocalRotation(joint, jointIndex, targetDeg);
+                return;
+            }
+
+            float omega = Mathf.Max(1f, JointSpringOmega);
+            float h = Mathf.Clamp(JointMaxSubStep, 1f / 480f, 0.05f);
+            int steps = Mathf.Clamp(Mathf.CeilToInt(dt / h), 1, 32);
+            float step = dt / steps;
+
+            float a = angles[slot];
+            float v = velos[slot];
+            float band = Mathf.Max(0f, JointContactBandDegrees);
+            float contactZeta = Mathf.Max(1f, JointContactDampingRatio);
+
+            for (int i = 0; i < steps; i++)
+            {
+                float error = targetDeg - a;
+
+                // 接触带内切换过阻尼（键面刚体阻挡的等效建模）。自由二阶在目标停止后会保留
+                // 残余速度、冲过目标 —— 实测键面 P50 由全关时的 +8.6 mm 变成 −0.3 mm，
+                // 压键帧 120→183。过阻尼让减速提前，速度曲线仍呈钟形但尾部不越界。
+                float zeta = Mathf.Abs(error) < band ? contactZeta : 1f;
+                float accel = omega * omega * error - 2f * zeta * omega * v;
+                v += accel * step;
+                a += v * step;
+            }
+
+            // 不允许反关节：过冲穿过 0° 时钳住并把速度归零（否则会在 0 附近来回抖）
+            if (a < 0f)
+            {
+                a = 0f;
+                if (v < 0f) v = 0f;
+            }
+
+            angles[slot] = a;
+            velos[slot] = v;
+            joint.localRotation = JointAxes.CurlLocalRotation(joint, jointIndex, a);
         }
 
         /// <summary>
@@ -471,9 +612,16 @@ namespace PianoTeacher3D.Avatar
         /// 关节角一律 ≥ 0（不允许反关节），并受 MCP/PIP/DIP 各自上限约束；
         /// 6 次迭代对 3 关节足以收敛。目标不可达时停在最接近的合法姿态，并计入限位统计。
         /// </para>
+        /// <para>
+        /// <b>指尖模型必须与度量口径一致</b>：优先用 <see cref="IFingertipRig"/> 给出的真实指尖
+        /// 节点，只有拿不到时才退回 <c>distal.TransformPoint(0,0,l2)</c> 的长度估算。
+        /// 之前一律用估算，导致「求解认为到了、真实指尖还差几毫米」的系统偏差——
+        /// 一阶关节插值的滞后恰好抵消了它，换成准确跟随的二阶后立刻暴露为
+        /// 「键面 P50 由 +8.6 mm 变成 −5.6 mm」的压键。
+        /// </para>
         /// </summary>
         private void SolveJointAngles(Transform proximal, Transform intermediate, Transform distal,
-            float l2, Vector3 target, float[] angles)
+            float l2, Vector3 target, float[] angles, Transform fingertip)
         {
             // 初值取自然弯曲：全直状态下目标若正好在手指射线上，旋转梯度为 0 会卡住。
             // 注意用 SolveSeedCurlDegrees（求解起点）而不是 RestCurlDegrees（静止手型）——
@@ -506,7 +654,7 @@ namespace PianoTeacher3D.Avatar
                     joint.localRotation = JointAxes.CurlLocalRotation(joint, j, angles[j] * Mathf.Rad2Deg);
 
                     Vector3 jointPos = joint.position;
-                    Vector3 tip = distal.TransformPoint(0f, 0f, l2);
+                    Vector3 tip = fingertip != null ? fingertip.position : distal.TransformPoint(0f, 0f, l2);
                     Vector3 axis = JointAxes.WorldCurlAxis(joint, j);
 
                     Vector3 a = Vector3.ProjectOnPlane(tip - jointPos, axis);
@@ -516,6 +664,18 @@ namespace PianoTeacher3D.Avatar
                     float delta = Vector3.SignedAngle(a, b, axis) * Mathf.Deg2Rad;
                     float max = j == 0 ? maxMcp : (j == 1 ? maxPip : maxDip);
                     angles[j] = Mathf.Clamp(angles[j] + delta, 0f, max);
+
+                    // DIP ↔ PIP 解剖耦合（掌腱膜被动牵拉：DIP 无法单独伸直，屈曲约为 PIP 的 0.62）。
+                    // 完全锁死会损害可达性（指尖够不到键面），完全放开则退化成无约束的钩手；
+                    // 所以只在「耦合值 ± 容差」内允许自由调整。<see cref="DipCouplingSlackDegrees"/>
+                    // 设为负值即禁用耦合（回退到无约束 CCD）。
+                    if (j == 2 && DipCouplingSlackDegrees >= 0f)
+                    {
+                        float coupled = angles[1] * DipPipRatio;
+                        float slack = DipCouplingSlackDegrees * Mathf.Deg2Rad;
+                        angles[2] = Mathf.Clamp(angles[2], coupled - slack, coupled + slack);
+                        angles[2] = Mathf.Clamp(angles[2], 0f, maxDip);
+                    }
                 }
             }
         }

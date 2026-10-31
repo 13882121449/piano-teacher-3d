@@ -770,10 +770,14 @@ namespace PianoTeacher3D.Avatar
             wrist.SetParent(parent, false);
             wrist.localPosition = new Vector3(positionSign * 0.20f * s, 0.90f * s, 0.10f * s);
 
-            // 腕部连接：一个比掌根略小的过渡体，把「手臂（圆形）→ 手掌（扁形）」的截面差摊平。
-            // 尺寸必须小于掌根截面，否则会在腕部形成一圈可见的凸环（附录 A.3.2 第 6 条）。
-            CreatePart(PrimitiveType.Sphere, wrist, "Wrist", new Vector3(0f, 0f, -wristR * 0.55f),
-                new Vector3(palmW * 0.62f, palmT * 0.85f, wristR * 1.65f), skinMat);
+            // 腕部连接：把「手臂（圆形）→ 手掌（扁形）」的截面差摊平。
+            // 腕部：<b>不</b>另建过渡体。真实腕围是整条手臂最细处（前臂肌腱在此汇聚），
+            // 前臂与手掌之间是「收窄再展开」，不是膨大。
+            // 之前用一个 Sphere 填「前臂（圆 32 mm）→ 手掌（扁 51×17 mm）」的截面差，
+            // 试了三组尺寸（薄饼 / 球形 / 扁椭球）都读成一眼可见的腕部鼓包 ——
+            // 球面弧线一旦超出两侧轮廓就必然像「关节球」，与真人腕部形态相反。
+            // 现在靠手掌网格自身向腕后延伸（z0 = −WristRadius×0.55）+ 端面封口覆盖交界，
+            // 交界处的宽度台阶与真实手腕的展开方向一致。
 
             // 掌部：单块连续放样网格（腕部收窄 → 掌心变宽 → 掌指关节略收，含大鱼际/小鱼际隆起）
             AttachMesh(wrist, "PalmMesh", HandMeshFactory.BuildPalm(meshDef), skinMat);

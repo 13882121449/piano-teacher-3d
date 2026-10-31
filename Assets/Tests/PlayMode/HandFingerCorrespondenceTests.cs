@@ -268,8 +268,16 @@ namespace PianoTeacher3D.Tests.PlayMode
                     $"找不到音高 {pitch} 的键面按压点");
                 Assert.IsTrue(_handIK.TryGetFingertipTarget(left, finger, out Vector3 target),
                     $"手指 {finger} 没有指尖目标（弯的手指与伸的手指不同步）");
-                Assert.AreEqual(pressPoint, target,
-                    $"手指 {finger} 的指尖目标不是音高 {pitch} 的键面按压点（手指与琴键错配）");
+                // 指尖目标 = 该音的键面按压点 + 指腹半径（仅垂直方向）。
+                // 横向/纵向必须完全一致：手指指向的琴键不能有任何错位；
+                // 垂直方向高出一个指腹半径是因为贴键的是指腹（有厚度的软垫），
+                // 骨骼末端继续压到键面上就会穿模。
+                Assert.AreEqual(pressPoint.x, target.x, 1e-5f,
+                    $"手指 {finger} 的指尖目标横向偏离音高 {pitch} 的键位");
+                Assert.AreEqual(pressPoint.z, target.z, 1e-5f,
+                    $"手指 {finger} 的指尖目标纵向偏离音高 {pitch} 的键位");
+                Assert.AreEqual(pressPoint.y + _handIK.FingertipPadRadius, target.y, 1e-4f,
+                    $"指尖目标应比键面高一个指腹半径（指腹贴键，不是骨骼末端穿键）");
 
                 // 该音不应被第二根手指同时认领
                 for (int other = 0; other < 5; other++)

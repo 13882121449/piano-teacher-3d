@@ -57,6 +57,43 @@ namespace PianoTeacher3D.Avatar
         public float GlideLift = 0.055f;     // 换位过程中的额外抬升高度（米）
         public float MaxStepPerFrame = 0.035f; // 单帧最大位移（米）：硬约束，防瞬移与动作失控
 
+        [Header("自然运动轨迹（临界阻尼二阶跟随，写实化三期）")]
+        /// <summary>
+        /// 用临界阻尼弹簧（二阶动力学）替代一阶指数逼近，解决「起步突兀 = 僵硬」。
+        /// <para>
+        /// <b>为什么一阶指数逼近看起来僵硬</b>：<c>Lerp(cur, tgt, k)</c> 的位移是
+        /// <c>1−(1−k)^n</c>，速度 <c>k(1−k)^n</c> 在<b>第一帧就达到最大</b>、之后单调衰减。
+        /// 也就是手一启动就全速冲出、然后一路减速，缺了人手的「加速段」。
+        /// </para>
+        /// <para>
+        /// <b>为什么不用 minimum jerk（五阶多项式）</b>：它要求「先固定目标、再规划整段」，
+        /// 而本场景的目标每帧都在变（手掌修正、预置切换、连续音符），
+        /// 实测会退化成「每帧重建轨迹段、每帧原地不动」——键面 P95 从 10 mm 恶化到 84 mm
+        /// （bench 三曲，见 Docs/perf/hand-baseline-2026-10-31.md）。
+        /// 二阶跟随器没有「段」的概念，目标怎么漂都只是重新受力，不存在重建死锁。
+        /// </para>
+        /// <para>
+        /// <b>物理依据</b>：<c>a = ω²(x_target − x) − 2ωv</c> 是临界阻尼弹簧（PD 控制器），
+        /// 阶跃响应下加速度在起点最大、速度呈钟形单峰、终点平滑落位——正是人手臂
+        /// 「慢起—快中—缓停」的形状。游戏动画里用它做次级运动（follow/lag）是标准做法。
+        /// </para>
+        /// </summary>
+        public bool UseDampedSpring = false;
+
+        /// <summary>
+        /// 弹簧角频率（rad/s）。整定依据：临界阻尼 2% 整定时间 ≈ 5.8/ω，
+        /// 取 18 → 约 0.32 s，与原来指数逼近（MoveSpeed = 12，时间常数 0.083 s、
+        /// 整定时间约 0.33 s）的<b>总时长基本一致</b>——只改曲线形状，不改跟随快慢。
+        /// 峰值速度 ≈ 0.37·ω·d：250 mm 换位 ≈ 1.67 m/s ≈ 28 mm/帧，低于 35 mm 硬约束。
+        /// </summary>
+        public float SpringOmega = 18f;
+
+        /// <summary>
+        /// 积分子步上限（秒）。半隐式欧拉在 ω·dt 接近 1 时会振荡，
+        /// 低帧率下必须切子步（ω=18 时 dt 上限 1/120 s → ω·dt = 0.15，余量充足）。
+        /// </summary>
+        public float SpringMaxSubStep = 1f / 120f;
+
         [Header("距离自适应速度（写实化二期：A/B 后默认关闭）")]
         /// <summary>
         /// 是否启用「远距离满速直线、近距离指数收敛」的自适应速度。
@@ -82,6 +119,13 @@ namespace PianoTeacher3D.Avatar
         /// 两值之间用 InverseLerp 连续混合，阈值处不会跳变。
         /// </summary>
         public float FullSpeedDistance = 0.12f;
+
+        /// <summary>
+        /// 手移到键盘两端时的额外腕背伸（度）。手伸向琴键外侧时，肩—肘—腕连线偏离身体中线，
+        /// 手指要保持竖直落键只能靠腕关节多背伸来补偿；固定俯仰角会让两端的手「手腕僵住」，
+        /// 这也是「手腕与前臂不协调」的观感来源之一。取 0 即关闭。
+        /// </summary>
+        public float OuterWristPitchBias = 6f;
 
         /// <summary>
         /// 手臂可达比例（接触方案 2.3）：可达半径 = (上臂 + 前臂) × BodyScale × 该值。
@@ -133,6 +177,21 @@ namespace PianoTeacher3D.Avatar
         public bool EnableFingertipMetrics = true;
         public float FingertipTargetForward = 0.80f;  // 按压区沿键长方向的比例（0 = 键根，1 = 键前端）
         public float FingertipReachEstimate = 0.085f; // 缺少指尖 Transform 时的指根→指尖长度估计（米）
+
+        /// <summary>
+        /// 指腹半径（米）：让<b>指腹</b>贴键，而不是骨骼末端穿过键面。
+        /// <para>
+        /// <see cref="FingertipWorld"/> 取的是指尖骨骼末端；真实指腹是有厚度的软垫，
+        /// 骨骼末端距接触面约 5 mm，所以控制目标要抬这么多。
+        /// </para>
+        /// <para>
+        /// 不抬的后果（实测）：CCD 优化的是 3D 距离，当键位在 XZ 上偏 30–40 mm 时它会
+        /// 牺牲 Y 去换总距离，骨骼末端于是穿过键面 5–9 mm —— 表现为「键面 P50 为负、
+        /// 压键帧暴涨」（关节二阶准确跟随之后才暴露，此前的一阶滞后一直掩盖着它）。
+        /// 统计口径仍按真实键面计算，不会被这个抬升美化。
+        /// </para>
+        /// </summary>
+        public float FingertipPadRadius = 0.005f;
         public float FingertipErrorTolerance = 0.035f;// 指尖到目标键面的「命中」容差（米）
         public float HoverHeight = 0.045f;            // 指尖高于键面超过该值视为「离键悬空」（米）
         public float ThumbOrientationMaxDegrees = 75f; // 拇指轴与掌心前向的最大夹角（超过记为拇指方向异常）
@@ -209,6 +268,10 @@ namespace PianoTeacher3D.Avatar
 
         private int _upcomingLeftPitch = -1;
         private int _upcomingRightPitch = -1;
+
+        // 手腕速度状态（临界阻尼二阶跟随的内部状态；每手独立）
+        private Vector3 _leftWristVelocity;
+        private Vector3 _rightWristVelocity;
 
         // 手掌修正（指尖贴键的几何反馈量，仅作用于 XZ）
         private Vector3 _leftPalmCorrection;
@@ -426,6 +489,9 @@ namespace PianoTeacher3D.Avatar
             _avgNoteGap = 0.4f;
             _upcomingLeftPitch = -1;     // 复位预置目标，避免停止/切曲后手继续移向旧音符
             _upcomingRightPitch = -1;
+            // 复位手腕速度：Seek / 切曲 / 停止后必须清零，否则手会带着旧的动量冲过头
+            _leftWristVelocity = Vector3.zero;
+            _rightWristVelocity = Vector3.zero;
             _leftPalmCorrection = Vector3.zero;   // 复位手掌修正，避免 Seek 后从旧修正量滑过去
             _rightPalmCorrection = Vector3.zero;
             _hasLeftSmoothed = false;    // 复位目标平滑，Seek 后重新对齐而非从旧目标滑过去（左右手各自复位）
@@ -760,42 +826,48 @@ namespace PianoTeacher3D.Avatar
             if (hand == null || shoulder == null || upperArm == null) return;
 
             var current = hand.Wrist.position;
-            var target = ApplyGlideLift(current, LimitTargetRate(leftHand, rawTarget));
             float speedScale = CurrentSpeedScale() * (preselected ? HandLeadSpeedScale : 1f);
 
-            // 距离自适应速度（写实化二期）。
-            //
-            // 原实现是纯指数逼近：Vector3.Lerp(cur, tgt, dt*MoveSpeed*speedScale)，
-            // 每帧只收敛固定比例（dt=1/60、MoveSpeed=12、预置 0.7 时约 14%），
-            // 于是「阶跃目标」永远追不上——250 mm 的跨八度换位在 15 帧（0.25 s）后仍差 25 mm，
-            // 而音符窗口只有 0.125 s。实测换位峰值卡在 63.9/141.2/250 mm 正是这个原因，
-            // 不是可达性问题（臂长判定三曲触发 0%），也不是手型问题（腕高自适应 A/B 无收益）。
-            //
-            // 修法：按「到目标的距离」在两种速度间连续混合——
-            //   · 近（< SmoothFollowDistance）：完全走指数收敛，保留原有细腻手感；
-            //   · 远（> FullSpeedDistance）：按单帧硬约束 MaxStepPerFrame 直线推进（2.1 m/s 上限）。
-            // 混合用 InverseLerp 保证连续，不会在阈值处跳变；单帧位移再统一钳到硬约束内，
-            // 因此「防瞬移」这条安全底线完全保留。
             Vector3 next;
-            if (UseDistanceAdaptiveSpeed)
+            if (UseDampedSpring)
             {
-                float dist = Vector3.Distance(current, target);
-                float frameScale = Mathf.Clamp01(Time.deltaTime * 60f);   // 对抗帧率变化：60fps 时为 1
-                float smoothStep = dist * Mathf.Clamp01(Time.deltaTime * MoveSpeed * speedScale);
-                float fullStep = MaxStepPerFrame * frameScale;
-                float blend = Mathf.InverseLerp(SmoothFollowDistance, FullSpeedDistance, dist);
-                float stepLen = Mathf.Min(Mathf.Lerp(smoothStep, fullStep, blend), dist);
-                stepLen = Mathf.Min(stepLen, MaxStepPerFrame * frameScale);
-                next = dist > 1e-6f ? current + (target - current) * (stepLen / dist) : target;
-            }
-            else
-            {
-                // 默认路径：与改动前逐位一致（指数逼近 + 单帧硬约束）
-                next = Vector3.Lerp(current, target, Time.deltaTime * MoveSpeed * speedScale);
+                // 目标限速保留（它抑制换手位时的单帧抖跳），但弹簧不受目标漂移影响——
+                // 这正是与 minimum jerk 的关键差别：没有「段」，就不会出现「每帧重建段」的死锁。
+                var target = ApplyGlideLift(current, LimitTargetRate(leftHand, rawTarget));
+                next = leftHand
+                    ? AdvanceSpring(ref _leftWristVelocity, current, target, speedScale)
+                    : AdvanceSpring(ref _rightWristVelocity, current, target, speedScale);
+
+                // 硬约束：单帧位移上限（防瞬移与动作失控）。弹簧峰值已在 ω 里整定，
+                // 这里只兜底目标突跳（切曲 / Seek / 换角色）。
                 var delta = next - current;
                 float step = delta.magnitude;
                 if (step > MaxStepPerFrame && step > 1e-6f)
                     next = current + delta * (MaxStepPerFrame / step);
+            }
+            else
+            {
+                var target = ApplyGlideLift(current, LimitTargetRate(leftHand, rawTarget));
+                if (UseDistanceAdaptiveSpeed)
+                {
+                    float dist = Vector3.Distance(current, target);
+                    float frameScale = Mathf.Clamp01(Time.deltaTime * 60f);
+                    float smoothStep = dist * Mathf.Clamp01(Time.deltaTime * MoveSpeed * speedScale);
+                    float fullStep = MaxStepPerFrame * frameScale;
+                    float blend = Mathf.InverseLerp(SmoothFollowDistance, FullSpeedDistance, dist);
+                    float stepLen = Mathf.Min(Mathf.Lerp(smoothStep, fullStep, blend), dist);
+                    stepLen = Mathf.Min(stepLen, MaxStepPerFrame * frameScale);
+                    next = dist > 1e-6f ? current + (target - current) * (stepLen / dist) : target;
+                }
+                else
+                {
+                    // 旧路径：指数逼近 + 单帧硬约束（改动前逐位一致，作为回退）
+                    next = Vector3.Lerp(current, target, Time.deltaTime * MoveSpeed * speedScale);
+                    var delta = next - current;
+                    float step = delta.magnitude;
+                    if (step > MaxStepPerFrame && step > 1e-6f)
+                        next = current + delta * (MaxStepPerFrame / step);
+                }
             }
 
             if (EnablePoseClamp && _hasLimits)
@@ -831,6 +903,11 @@ namespace PianoTeacher3D.Avatar
                 float center = (_limits.MinX + _limits.MaxX) * 0.5f;
                 float half = Mathf.Max(0.001f, (_limits.MaxX - _limits.MinX) * 0.5f);
                 float offset = Mathf.Clamp((hand.Wrist.position.x - center) / half, -1f, 1f);
+
+                // 外侧背伸：手离开中线越远，腕背伸越大（|offset| 而不是 offset——两端对称）。
+                // 与 roll 的分工：roll 负责尺偏/桡偏（方向相反），pitch 负责补偿够不到的落键角度。
+                pitch += Mathf.Abs(offset) * Mathf.Max(0f, OuterWristPitchBias);
+
                 roll = offset * MaxWristRollDegrees * (leftHand ? -1f : 1f);
             }
 
@@ -878,6 +955,8 @@ namespace PianoTeacher3D.Avatar
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) continue;
 
                 targets[f] = touch.Press;
+                // 指腹贴键（不是骨骼末端穿键）：抬指腹半径。见 FingertipPadRadius 的说明。
+                targets[f].y += FingertipPadRadius;
                 // 黑键按压（接触方案批次 2）：黑键键面高 10 mm，弯曲不足会让指尖压入键面；
                 // 只抬「控制目标」（FingerPoseController 朝目标弯曲），统计仍按真实键面口径。
                 if (touch.Black && BlackKeyTargetLift != 0f) targets[f].y += BlackKeyTargetLift;
@@ -913,6 +992,7 @@ namespace PianoTeacher3D.Avatar
                 }
                 if (free < 0) break;
                 targets[free] = touch.Press;
+                targets[free].y += FingertipPadRadius;
                 if (touch.Black && BlackKeyTargetLift != 0f) targets[free].y += BlackKeyTargetLift;
                 if (reachAdjust != 0f) targets[free].y += reachAdjust;
                 has[free] = true;
@@ -1112,6 +1192,50 @@ namespace PianoTeacher3D.Avatar
             float distance = delta.magnitude;
             if (distance < 1e-6f || distance <= maxDelta) return target;
             return current + delta * (maxDelta / distance);
+        }
+
+        /// <summary>
+        /// 临界阻尼二阶跟随：<c>a = ω²·(target − pos) − 2ω·v</c>。
+        /// <para>
+        /// 目标每帧可变，不需要「轨迹段」——这是它与 minimum jerk 的本质差别，
+        /// 也是本场景唯一可行的建模方式（目标由手掌修正与预置切换连续驱动）。
+        /// 阶跃响应：加速度在起点最大、速度呈钟形单峰、终点零速落位，
+        /// 即人手「慢起—快中—缓停」的形状，而不是一阶指数逼近的「起步即全速」。
+        /// </para>
+        /// <para>
+        /// 半隐式欧拉按子步积分：ω·dt 接近 1 会振荡，低帧率下必须切子步
+        /// （ω=18 时子步 1/120 s → ω·dt = 0.15）。
+        /// </para>
+        /// </summary>
+        private Vector3 AdvanceSpring(ref Vector3 velocity, Vector3 current, Vector3 target, float speedScale)
+        {
+            float omega = Mathf.Max(1f, SpringOmega * Mathf.Clamp(speedScale, 0.2f, 3f));
+
+            float remaining = Mathf.Max(0f, Time.deltaTime);
+            if (remaining <= 1e-6f) return current;
+
+            float h = Mathf.Clamp(SpringMaxSubStep, 1f / 480f, 0.05f);
+            int steps = Mathf.Clamp(Mathf.CeilToInt(remaining / h), 1, 32);
+            float dt = remaining / steps;
+
+            var pos = current;
+            var vel = velocity;
+
+            for (int i = 0; i < steps; i++)
+            {
+                // a = ω²(x_t − x) − 2ωv（临界阻尼：阻尼系数 = 2√(k·m) 且 m = 1）
+                var accel = (target - pos) * (omega * omega) - vel * (2f * omega);
+                vel += accel * dt;
+                pos += vel * dt;
+            }
+
+            // 速度状态与实际位移约束保持一致：否则速度会在状态里累积，
+            // 外层硬约束钳住位移后，下一帧又会拿着过大的速度继续冲（观感是「粘住后猛弹」）。
+            float maxSpeed = MaxStepPerFrame / remaining;
+            vel = Vector3.ClampMagnitude(vel, maxSpeed);
+            velocity = vel;
+
+            return pos;
         }
 
         /// <summary>
