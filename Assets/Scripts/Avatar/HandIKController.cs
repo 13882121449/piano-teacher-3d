@@ -110,6 +110,45 @@ namespace PianoTeacher3D.Avatar
         public float FastScaleGapSeconds = 0.18f;     // 「快速音阶」分组判定的平均音符间隔上限（秒）
         public float SpeedAnomalyStepDelta = 0.020f;  // 连续帧位移变化超过该值记为速度突变（米）
 
+        [Header("手腕高度自适应（接触方案批次 2.4：按指尖—键面法向反馈修正每手腕高）")]
+        /// <summary>
+        /// 是否启用腕高自适应：按每手「被分配指尖到键面的法向距离」反馈微调该手腕高，
+        /// 修正「手型整体偏高/偏低」造成的持续悬空或压键。
+        /// <para>
+        /// <b>默认关闭</b>——A/B 实测（bench 三曲，2026-10-31，基线见
+        /// <c>Docs/perf/hand-baseline-2026-10-31.md</c>）：±8 mm 限幅的收益落在噪声内
+        /// （键面 P95 变化 ≤0.5 mm、压键帧 ±5），而真问题的量级是 17–46 mm / 数百帧。
+        /// 根因是<b>手指弯曲不足</b>（指尖到不了目标）而非腕高，应由批次 4（C 形手）与
+        /// 2.3（可达性）解决。保留实现与参数供后续改进反馈口径后复测开启。
+        /// </para>
+        /// </summary>
+        public bool WristHeightAdaptation = false;
+
+        /// <summary>腕高自适应的单手偏移限幅（米）。±8 mm：只做微调，大幅偏差属于姿态/目标问题。</summary>
+        public float MaxWristHeightAdaptation = 0.008f;
+
+        /// <summary>腕高自适应的指数平滑时间常数（秒）。</summary>
+        public float WristAdaptationSmoothSeconds = 0.06f;
+
+        /// <summary>指尖高于键面超过该值（米）视为「持续悬空」，触发降腕。</summary>
+        public float WristAdaptationHoverThreshold = 0.015f;
+
+        /// <summary>指尖压入键面超过该值（米）视为「压键过深」，触发升腕（与 4 mm 穿模容差留出余量）。</summary>
+        public float WristAdaptationPressThreshold = 0.006f;
+
+        [Header("黑键按压（接触方案批次 2：黑键键面高 10 mm，弯曲不足导致指尖压入键面）")]
+        /// <summary>
+        /// 黑键指尖控制目标相对键面的抬升量（米）。只抬「控制目标」，统计口径仍按真实键面
+        /// （<see cref="KeyTouchPoint.SurfaceY"/>），因此指标不会被美化。
+        /// <para>
+        /// <b>默认 0（不抬）</b>——A/B 实测（bench_black_keys，2026-10-31）：抬 3 mm 后
+        /// 指尖压键帧 110→107（仅 -3，噪声级），而键面距离 P50 9.1→11.0 mm、P95 10.2→12.1 mm
+        /// 全线变差。说明该曲的压键量级远超 3 mm（平均压入 >7 mm），靠抬目标救不回来，
+        /// 必须由批次 4 的手指弯曲控制解决。保留参数供弯曲改进后配合调参。
+        /// </para>
+        /// </summary>
+        public float BlackKeyTargetLift = 0f;
+
         private const int MaxRecordedIssues = 8;
 
         private AvatarManager _avatar;
@@ -142,6 +181,17 @@ namespace PianoTeacher3D.Avatar
         // 手掌修正（指尖贴键的几何反馈量，仅作用于 XZ）
         private Vector3 _leftPalmCorrection;
         private Vector3 _rightPalmCorrection;
+
+        // 腕高自适应（接触方案批次 2.4）：每手独立的「腕高偏移」反馈量与连续悬空帧计数。
+        // 偏移量有界（±MaxWristHeightAdaptation）且按指数平滑跟随；无按下音时目标归零、
+        // 偏移自然衰减回 0，因此无需显式复位。
+        private float _leftWristHeightAdapt;
+        private float _rightWristHeightAdapt;
+        private int _leftHoverStreak;
+        private int _rightHoverStreak;
+
+        // 腕高自适应的每帧指尖—键面距离暂存（≤5 指，预分配零 GC；排序取极值/中位数用）
+        private readonly float[] _surfaceScratch = new float[5];
 
         // 双手共用的「手指 ↔ 音高」分配（方案 5.3 第二阶段）：与 FingerPoseController 是同一个实例
         private FingerAssignmentService _assignment;
@@ -370,6 +420,10 @@ namespace PianoTeacher3D.Avatar
             _unassignedFingertipSamples = 0;
             _missingKeyTouchSamples = 0;
             _unreachableTargetSamples = 0;
+            _leftWristHeightAdapt = 0f;
+            _rightWristHeightAdapt = 0f;
+            _leftHoverStreak = 0;
+            _rightHoverStreak = 0;
         }
 
         /// <summary>
@@ -406,6 +460,13 @@ namespace PianoTeacher3D.Avatar
             // 手掌修正用「本帧的实际指尖位置」反推，供下一帧的手腕目标使用（一帧延迟的负反馈，稳定且不发散）
             UpdatePalmCorrection(leftHand: true);
             UpdatePalmCorrection(leftHand: false);
+
+            // 腕高自适应同哲学：用本帧指尖—键面法向距离更新每手腕高偏移，下一帧生效
+            if (WristHeightAdaptation)
+            {
+                UpdateWristHeightAdaptation(leftHand: true);
+                UpdateWristHeightAdaptation(leftHand: false);
+            }
 
             if (EnableMetrics) SampleMetrics();
         }
@@ -460,6 +521,88 @@ namespace PianoTeacher3D.Avatar
             else _rightPalmCorrection = next;
         }
 
+        /// <summary>
+        /// 腕高自适应（接触方案批次 2.4）：按该手「被分配指尖到键面的法向距离」的**分布**
+        /// 反向微调该手腕高——用<b>最小值</b>判压键（任一指尖压入即升腕，压键是硬伤）、
+        /// 用<b>中位数</b>判整体悬空（连续帧确认后降腕）。
+        /// <para>
+        /// 为什么不用均值：一手 5 指里 3 指悬空 20 mm + 2 指压入 8 mm 时均值只有 +8.8 mm，
+        /// 落在死区内 → 永远不修。A/B 实测（bench 三曲，2026-10-31）证实均值口径收益为 0
+        /// （键面 P95 变化 ≤0.5 mm、压键帧仅降 3 帧），故改用极值 + 中位数。
+        /// </para>
+        /// 偏移限幅 ±<see cref="MaxWristHeightAdaptation"/>、指数平滑
+        /// <see cref="WristAdaptationSmoothSeconds"/>；无按下音时目标归零，偏移自然衰减。
+        /// 统计口径（<see cref="AssignedFingertipError"/>）用真实键面，不受本偏移美化。
+        /// </summary>
+        private void UpdateWristHeightAdaptation(bool leftHand)
+        {
+            var hand = leftHand ? _avatar.LeftHand : _avatar.RightHand;
+            var pitches = leftHand ? _leftPitches : _rightPitches;
+            int streak = leftHand ? _leftHoverStreak : _rightHoverStreak;
+
+            int count = 0;
+            if (hand != null && hand.Fingers != null && pitches.Count > 0)
+            {
+                for (int i = 0; i < pitches.Count && count < _surfaceScratch.Length; i++)
+                {
+                    if (!_keyTouches.TryGetValue(pitches[i], out var touch)) continue;
+                    int finger = Assignment.GetFinger(leftHand, pitches[i]);
+                    if (finger < 0 || finger >= hand.Fingers.Count) continue;
+
+                    // + = 指尖高于键面（悬空），− = 压入键面（压键）。
+                    // 指尖位置与统计口径同源（FingertipWorld：优先 IFingertipRig 的真实指尖）
+                    _surfaceScratch[count++] = FingertipWorld(hand, finger).y - touch.SurfaceY;
+                }
+            }
+
+            float want;
+            if (count == 0)
+            {
+                want = 0f;                                   // 该手无按下音：偏移自然衰减回 0
+                streak = 0;
+            }
+            else
+            {
+                // 插入排序（≤5 个元素，零分配）：sorted[0] = 最压入，sorted[count/2] = 中位数
+                for (int i = 1; i < count; i++)
+                {
+                    float v = _surfaceScratch[i];
+                    int j = i - 1;
+                    while (j >= 0 && _surfaceScratch[j] > v) { _surfaceScratch[j + 1] = _surfaceScratch[j]; j--; }
+                    _surfaceScratch[j + 1] = v;
+                }
+
+                float lowest = _surfaceScratch[0];             // 最压入的那根指尖
+                float median = _surfaceScratch[count / 2];     // 该手整体水平
+
+                if (lowest < -WristAdaptationPressThreshold)
+                {
+                    streak = 0;
+                    // 压键立即升腕（不等连续帧确认：压键是硬伤，多等一帧就多穿模一帧）
+                    want = -(lowest + WristAdaptationPressThreshold);
+                }
+                else if (median > WristAdaptationHoverThreshold)
+                {
+                    streak++;                                // 「持续悬空」需连续帧确认，防单帧毛刺
+                    // 连续 2 帧以上整体悬空才降腕：收敛到阈值带内（不追求 0，避免过冲再反向修）
+                    want = streak >= 2 ? -(median - WristAdaptationHoverThreshold) : 0f;
+                }
+                else
+                {
+                    streak = 0;
+                    want = 0f;                               // 死区：阈值带内不修
+                }
+            }
+
+            if (leftHand) _leftHoverStreak = streak;
+            else _rightHoverStreak = streak;
+
+            want = Mathf.Clamp(want, -MaxWristHeightAdaptation, MaxWristHeightAdaptation);
+            float k = 1f - Mathf.Exp(-Time.deltaTime / Mathf.Max(0.001f, WristAdaptationSmoothSeconds));
+            if (leftHand) _leftWristHeightAdapt = Mathf.Lerp(_leftWristHeightAdapt, want, k);
+            else _rightWristHeightAdapt = Mathf.Lerp(_rightWristHeightAdapt, want, k);
+        }
+
         private void UpdateHand(bool leftHand)
         {
             int? targetPitch = FindHandTarget(leftHand);
@@ -500,6 +643,11 @@ namespace PianoTeacher3D.Avatar
                     rawTarget.y + def.HandHeightOffset + def.Hand.PalmKeyPlaneOffset,
                     rawTarget.z + def.HandDepthOffset);
             }
+
+            // 腕高自适应偏移（接触方案批次 2.4）：按每手反馈量微调腕高，不改公共 HandHeight 常量语义。
+            // 与 def.HandHeightOffset 的叠加方式一致（参照 AvatarDefinition 叠加点先例）。
+            if (WristHeightAdaptation)
+                rawTarget.y += leftHand ? _leftWristHeightAdapt : _rightWristHeightAdapt;
 
             // 指尖贴键的手掌修正（方案 5.3 第二阶段）：把手腕朝「消灭指尖平均误差」的方向平移。
             // 只修正 XZ（高度由手指弯曲负责），并夹在键盘允许范围内，避免把手腕推出琴键区触发姿态钳制。
@@ -635,6 +783,9 @@ namespace PianoTeacher3D.Avatar
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) continue;
 
                 targets[f] = touch.Press;
+                // 黑键按压（接触方案批次 2）：黑键键面高 10 mm，弯曲不足会让指尖压入键面；
+                // 只抬「控制目标」（FingerPoseController 朝目标弯曲），统计仍按真实键面口径。
+                if (touch.Black && BlackKeyTargetLift != 0f) targets[f].y += BlackKeyTargetLift;
                 if (reachAdjust != 0f) targets[f].y += reachAdjust;
                 has[f] = true;
             }
@@ -664,6 +815,7 @@ namespace PianoTeacher3D.Avatar
                 }
                 if (free < 0) break;
                 targets[free] = touch.Press;
+                if (touch.Black && BlackKeyTargetLift != 0f) targets[free].y += BlackKeyTargetLift;
                 if (reachAdjust != 0f) targets[free].y += reachAdjust;
                 has[free] = true;
             }
