@@ -80,9 +80,11 @@ namespace PianoTeacher3D.CameraControl
         // 从几何上排除头部遮挡；同时保留足够宽度以容纳大跨度双手（审查 3.2 观察标准）。
         public float CloseupViewPitch = 60f;
         public float CloseupViewYaw = 0f;
-        // 躯干避让（接触方案批次 3）：躯干中心落在视口内时，允许抬角到该上限再取「手部占屏更大」的候选
+        // 躯干避让（接触方案批次 3）：整个躯干包围盒（8 角 + 中心）落在视口内时，
+        // 依次尝试后移 / 抬角 / 前移，取「手部占屏更大」的候选。
+        // 余量 0.02 → 0.10：中心点判定漏判体积遮挡（实测躯干占掉右下角四分之一画面）。
         public float CloseupViewPitchMax = 70f;
-        public float CloseupTorsoMargin = 0.02f;
+        public float CloseupTorsoMargin = 0.04f;
 
         /// <summary>
         /// 特写躯干避让开关（接触方案批次 3 的回滚点）：关闭后行为与改动前完全一致。

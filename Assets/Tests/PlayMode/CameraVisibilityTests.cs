@@ -1167,28 +1167,75 @@ namespace PianoTeacher3D.Tests.PlayMode
                 Assert.IsTrue(_avatar.TryGetTorsoBounds(out Bounds torso),
                     string.Format("躯干避让·{0}：拿不到躯干包围盒，断言失效。{1}", handMode, Diag()));
 
-                Vector3 vp = _cam.WorldToViewportPoint(torso.center);
-                bool outside = vp.z <= 0f || vp.x < 0f || vp.x > 1f || vp.y < 0f || vp.y > 1f;
+                float coverage = TorsoViewportCoverage(torso);
 
-                // 取证：关闭避让（= 改动前行为）复测一次，把前后视口位置都记进日志，
+                // 取证：关闭避让（= 改动前行为）复测一次，把前后的遮挡面积都记进日志，
                 // 避免「本来就出画」被误当成修复效果（方案风险 5：结论必须可归因）。
                 _camera.CloseupTorsoAvoidance = false;
                 yield return WaitCameraConverged(240);
-                Vector3 vpBefore = _cam.WorldToViewportPoint(torso.center);
-                bool outsideBefore = vpBefore.z <= 0f || vpBefore.x < 0f || vpBefore.x > 1f || vpBefore.y < 0f || vpBefore.y > 1f;
+                float coverageBefore = TorsoViewportCoverage(torso);
                 Debug.Log(string.Format(
-                    "[TORSO] {0}: 避让前 viewport=({1:F3},{2:F3}) z={3:F3} 出画={4} → 避让后 viewport=({5:F3},{6:F3}) z={7:F3} 出画={8}",
-                    handMode, vpBefore.x, vpBefore.y, vpBefore.z, outsideBefore, vp.x, vp.y, vp.z, outside));
+                    "[TORSO] {0}: 避让前遮挡面积={1:P1} → 避让后={2:P1}（减少 {3:P1}）",
+                    handMode, coverageBefore, coverage, coverageBefore - coverage));
                 _camera.CloseupTorsoAvoidance = true;
                 yield return WaitCameraConverged(240);
 
-                Assert.IsTrue(outside,
-                    string.Format("躯干避让·{0}：躯干中心仍在视口内（viewport=({1:F3},{2:F3}), z={3:F3}）。{4}",
-                        handMode, vp.x, vp.y, vp.z, Diag()));
+                // 断言口径：躯干在画面上的**遮挡面积**，而不是「中心点是否出画」。
+                //
+                // 中心点出画只是代理指标，两个方向都会失真：
+                //   · 漏判体积遮挡 —— 实测出现过中心点出画（viewport.z 仅 0.079 m）、
+                //     画面右下角却压着一大块躯干的构图；
+                //   · 几何上过严 —— 躯干包围盒高约 0.5 m，而 0.88 m 距离 / 44° FOV 时
+                //     视口高只有 0.71 m，要求「整个包围盒完全出画」在特写距离下不可能满足。
+                // 面积占比是直接指标：25% 相当于「最多占掉画面四分之一」，超过即构图不合格。
+                Assert.LessOrEqual(coverage, 0.25f,
+                    string.Format("躯干避让·{0}：躯干遮挡面积 {1:P0} 超过 25%（避让前 {2:P0}）。{3}",
+                        handMode, coverage, coverageBefore, Diag()));
 
                 // 避让不能以「手出画」为代价：活动手仍必须在安全视口内
                 AssertPracticeHandVisible(string.Format("3.3 躯干避让·{0}", handMode));
             }
+        }
+
+        /// <summary>
+        /// 躯干包围盒在画面上的遮挡面积占比（0 = 完全出画，1 = 铺满画面）。
+        /// <para>
+        /// 用<b>真实相机</b>把 8 角 + 中心投影到视口坐标后取 AABB 与 [0,1]² 的交集面积，
+        /// 因此不依赖被测的取景逻辑本身（避免「用实现验证实现」的循环论证）。
+        /// 任一角点落到相机后方时直接按「铺满画面」处理——那是最糟的情况，不能跳过。
+        /// </para>
+        /// </summary>
+        private float TorsoViewportCoverage(Bounds bounds)
+        {
+            Vector3 c = bounds.center;
+            Vector3 e = bounds.extents;
+
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+
+            for (int i = 0; i < 9; i++)
+            {
+                Vector3 p = i == 0
+                    ? c
+                    : new Vector3(
+                        c.x + (((i - 1) & 1) == 0 ? -e.x : e.x),
+                        c.y + (((i - 1) & 2) == 0 ? -e.y : e.y),
+                        c.z + (((i - 1) & 4) == 0 ? -e.z : e.z));
+
+                Vector3 vp = _cam.WorldToViewportPoint(p);
+                if (vp.z <= 0f) return 1f;   // 角点在相机后方：按满屏计
+
+                minX = Mathf.Min(minX, vp.x);
+                maxX = Mathf.Max(maxX, vp.x);
+                minY = Mathf.Min(minY, vp.y);
+                maxY = Mathf.Max(maxY, vp.y);
+            }
+
+            if (minX > maxX || minY > maxY) return 0f;
+
+            float ix = Mathf.Max(0f, Mathf.Min(maxX, 1f) - Mathf.Max(minX, 0f));
+            float iy = Mathf.Max(0f, Mathf.Min(maxY, 1f) - Mathf.Max(minY, 0f));
+            return Mathf.Clamp01(ix * iy);
         }
     }
 
