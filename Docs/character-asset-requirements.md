@@ -110,16 +110,20 @@ Assets/Characters/
 
 ## 6. Rocketbox 适配现状
 
+> 2026-10-31 复核：下表已按代码实测更新（早期「未标定 / 未验证」的条目多数已落地）。
+
 | 项 | 状态 |
 | --- | --- |
 | 预制体加载（Resources） | ✅ 已验证路径 `Characters/Rocketbox/Female_Adult_01` |
 | Humanoid Animator / Avatar | ✅ 结构可用（PlayMode 测试断言） |
 | 手部 5 指 × 3 节绑定 | ✅ 结构可用（PlayMode 测试断言） |
 | 手部规范基推导 | ✅ 由绑定姿态推导（见 `RocketboxHandRig` 类注释） |
-| **坐姿角度** | ⚠️ **未标定**（`SittingPoseSettings.Calibrated = false`） |
-| **手指驱动视觉正确性** | ⚠️ **未验证**：Biped 骨骼局部轴不满足 `FingerPoseController` 的「+Z 弯曲轴」假设 |
-| **手臂 IK 视觉正确性** | ⚠️ **未验证**：`StretchArm` 直接改骨骼 Transform，蒙皮模型上会拉伸网格 |
-| **演奏流程接通** | ⚠️ 会话控制器尚无「按资料切换角色」的入口，切到外部角色后 `FingerPoseController` 未重新初始化 |
+| 指关节弯曲轴 | ✅ `ImportedFingerJointAxes` 从绑定姿态推导铰链轴（`axis = −cross(骨方向, 屈曲方向)`，父空间保存），不依赖内置手部的「+Z 弯曲轴」假设 |
+| 手臂 IK | ✅ `RotationalArmChainSolver`：两段纯旋转（`FromToRotation`），不写 `position/scale`，蒙皮不会拉伸；内置角色仍用 `CapsuleArmChainSolver` |
+| 坐姿 | ✅ `SittingPoseApplier` 已用绝对目标标定（凳面 0.445 + 髋差 0.075 = 0.520；膝前伸 42 cm、踝离地 63 mm） |
+| 演奏流程接通 | ✅ 会话入口 `ActivateCharacter` / `RestoreCharacter`（批次 1）+ 偏好持久化；UI 与场景共用同一 `CharacterRegistry` |
+| **资产完整性** | ❌ **缺 body/opacity 主贴图**（仅 head 两张 TGA）。`CharacterAssetValidator.ValidateMaterials` 缺主贴图即判失败 → 资产门禁拒绝激活并回落内置角色，同时在 UI 显示失败原因。补齐贴图后无需改代码即可生效 |
+| 手指驱动视觉正确性 | ⚠️ **未做真机视觉确认**：结构链路已通（轴推导 + 旋转解算），但本机无法激活该角色（见上一行），只能等贴图补齐后走 `--visual` 复核 |
 
 ### 手部规范基推导（为什么不能硬编码轴）
 

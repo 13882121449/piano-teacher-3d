@@ -15,7 +15,7 @@
 <!-- SECTION:frame-timing:BEGIN -->
 ### 帧时间采样（纯播放）
 
-- 时间：2026-10-19 18:49:20
+- 时间：2026-10-31 19:39:51
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -26,16 +26,16 @@
 
 | 指标 | 数值 |
 |---|---|
-| 采样帧数 | 480 |
-| 平均帧时间 | 16.7 ms |
+| 采样帧数 | 444 |
+| 平均帧时间 | 18 ms |
 | p50 帧时间 | 16.7 ms |
 | p95 帧时间 | 16.8 ms |
-| p99 帧时间 | 16.9 ms |
-| 最大帧时间 | 22.5 ms |
-| 平均 FPS | 60 |
-| 1% low FPS | 55.3 |
-| 托管内存增量（GC.GetTotalMemory(false)） | 0.02 MB |
-| 总分配内存（Profiler.GetTotalAllocatedMemoryLong） | 133.17 MB → 133.17 MB（峰值 133.23 MB） |
+| p99 帧时间 | 72.5 ms |
+| 最大帧时间 | 260.6 ms |
+| 平均 FPS | 55.5 |
+| 1% low FPS | 8.6 |
+| 托管内存增量（GC.GetTotalMemory(false)） | 3.80 MB |
+| 总分配内存（Profiler.GetTotalAllocatedMemoryLong） | 123.99 MB → 127.79 MB（峰值 127.88 MB） |
 
 **口径说明**
 
@@ -48,27 +48,27 @@
 <!-- SECTION:switching-load:BEGIN -->
 ### 切换负载（每 20 帧切换视角/角色/速度）
 
-- 时间：2026-10-19 18:49:30
+- 时间：2026-10-31 19:40:01
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
 - 是否批处理（-batchmode）：是；是否 -nographics：是
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
-- 场景口径：播放中每 20 帧切换一次，共触发 24 次切换
+- 场景口径：播放中每 20 帧切换一次，共触发 23 次切换
 
 | 指标 | 数值 |
 |---|---|
-| 采样帧数 | 477 |
-| 平均帧时间 | 16.8 ms |
+| 采样帧数 | 442 |
+| 平均帧时间 | 18.1 ms |
 | p50 帧时间 | 16.7 ms |
 | p95 帧时间 | 16.8 ms |
-| p99 帧时间 | 17 ms |
-| 最大帧时间 | 40.6 ms |
-| 平均 FPS | 59.5 |
-| 1% low FPS | 33.9 |
-| 托管内存增量（GC.GetTotalMemory(false)） | 0.99 MB |
-| 总分配内存（Profiler.GetTotalAllocatedMemoryLong） | 170.71 MB → 170.70 MB（峰值 170.73 MB） |
+| p99 帧时间 | 70.6 ms |
+| 最大帧时间 | 262.1 ms |
+| 平均 FPS | 55.2 |
+| 1% low FPS | 8.6 |
+| 托管内存增量（GC.GetTotalMemory(false)） | 5.35 MB |
+| 总分配内存（Profiler.GetTotalAllocatedMemoryLong） | 130.25 MB → 134.16 MB（峰值 134.24 MB） |
 
 **口径说明**
 
@@ -107,7 +107,7 @@
 <!-- SECTION:resource-load:BEGIN -->
 ### 资源加载采样（方案 11.4「资源加载耗时和失败率采样」）
 
-- 时间：2026-10-31 19:30:51
+- 时间：2026-10-31 19:46:01
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -115,11 +115,11 @@
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
 - 曲目目录：`StreamingAssets/Songs`；曲目数：1
-- 最慢单曲：26.6 ms；失败数：0
+- 最慢单曲：26.4 ms；失败数：0
 
 | 曲目 | 加载耗时 (ms) | 结果 |
 |---|---|---|
-| demo.mid | 26.6 | 成功 |
+| demo.mid | 26.4 | 成功 |
 
 **口径说明**：耗时用 `System.Diagnostics.Stopwatch` 包裹 `LessonSessionController.LoadSong`，包含校验 + 解析 + 一次性提交；示例曲为毫秒级，5 秒上限只用于捕获卡死，不代表目标设备上的加载性能。
 <!-- SECTION:resource-load:END -->

@@ -9,12 +9,14 @@
 | 首版平台 | Windows 桌面端（x86_64） |
 | 引擎 / 语言 | Unity **2022.3.22f1c1**（中国版，revision `c3cbd310e76e`）/ C# |
 | 程序集 | `PianoTeacher3D`（运行时代码）、`PianoTeacher3D.EditModeTests`、`PianoTeacher3D.PlayModeTests` |
-| 第三方资源 | **无**：钢琴 / 人物 / 材质 / 音频 / 曲目 / 字体全部程序化生成或使用引擎内置资源 |
-| 代码规模 | `Assets/Scripts` **48 个脚本 / 17,302 行**；`Assets/Tests` **33 个测试文件 / 10,215 行** |
-| 已验证状态 | 编译 **0 错误 0 警告**；EditMode **301/301**；PlayMode **90 通过 + 5 跳过 + 0 失败**；Stress 3/3、Perf 4/4、Soak 1/1 |
+| 第三方资源 | **无**：钢琴 / 人物 / 材质 / 音频 / 曲目 / 字体全部程序化生成或使用引擎内置资源（URP 为 Unity 官方包，不计入第三方） |
+| 渲染管线 | **URP 14.0.10 + Linear 色彩空间**（2026-10-31 迁移完成；SSAO / ACES / Bloom / 暗角 / 运行时反射探针） |
+| 代码规模 | `Assets/Scripts` **82 个脚本 / 30,682 行**；`Assets/Tests` **53 个测试文件 / 15,850 行** |
+| 已验证状态 | 编译 **0 错误 0 警告**；EditMode **468/468**；PlayMode **124 通过 + 5 跳过 + 0 失败**；Stress 3/3、Perf 4/4、Soak 1/1 |
 
-> 数字来源：2026-10-16 本机实测（`python Tools/verify.py --stress --perf --soak --soak-seconds 90`）。
-> 口径与逐条验收见 [`Docs/completion-review.md`](Docs/completion-review.md)、[`Docs/how-to-run.md`](Docs/how-to-run.md)。
+> 数字来源：2026-10-31 本机实测（`python Tools/verify.py --stress --perf`）。
+> 口径与逐条验收见 [`Docs/completion-review.md`](Docs/completion-review.md)、[`Docs/how-to-run.md`](Docs/how-to-run.md)、
+> 本轮写实化升级记录见 [`Docs/optimization-2026-10-31.md`](Docs/optimization-2026-10-31.md)。
 
 ---
 
@@ -50,10 +52,13 @@ MIDI 文件 → 解析为音符事件 → 统一时间轴驱动
 | 维度 | 现状 |
 |---|---|
 | 功能完整度 | 播放 / 视角 / 角色 / 分手 / 循环 / 节拍器 / 高亮 / 曲目导入 / 偏好持久化 / 错误恢复 均已可用 |
-| 测试 | EditMode 301 条纯逻辑用例（含手部网格几何 18 条）；PlayMode 95 项（含 9 个视角可用性场景、手部三关节姿态 7 条、压力与视觉快照） |
-| 性能（批处理采样） | 锁 60 FPS：纯播放 p99 **17 ms**、1% low **58.4 FPS**、GC **0.01 MB**；90 s 长跑内存 **+0.4%** |
-| 视觉基线 | **20 张**截图（6 张旧基线 + V01–V14），清单由测试自动生成 |
-| 未实现 | AI 动作生成、照片生成 3D 人物、MP3/WAV 转谱、移动端 / Web（均为计划项） |
+| 渲染管线 | URP 14.0.10 + **Linear**；Shader 按管线状态选择（SRP 下 URP/Lit 优先，避免 Standard 渲染洋红）；SSAO Renderer Feature + 后处理 Volume（ACES / Bloom / 暗角 / 色彩）；运行时反射探针（High 档） |
+| 测试 | EditMode **468** 条纯逻辑用例（含手部网格几何、关节姿态规格值、偏好归一化）；PlayMode **129** 项（9 个视角可用性场景、手部三关节姿态、遮挡、压力与视觉快照） |
+| 性能（批处理采样） | 锁 60 FPS：纯播放 p99 **17 ms**、1% low **58.4 FPS**、GC **0.01 MB**；90 s 长跑内存 **+0.4%**（口径：`-nographics` + Null Device，测的是逻辑锁帧不掉队，不代表 GPU 预算） |
+| 视觉基线 | **20 张**截图（01–06 + V01–V14），**2026-10-31 在 Linear + URP 下全部重采**；历史 Gamma 基线已作废 |
+| 角色状态 | 内置 3 角色可用且选择持久化；Rocketbox 真人模型已接入但**缺 body/opacity 主贴图**，资产门禁拒绝后回落内置角色（切换链路与降级路径有测试覆盖） |
+| 手部接触 | 静止 C 形手（MCP 25 / PIP 30 / DIP 15）；键面距离与悬空/压键指标已量化入 `Docs/perf/hand-baseline-2026-10-31.md`，**尚未达标**（键面 P95 10.2–17.7 mm、压键帧 17–301），根因归手指弯曲链路 |
+| 未实现 | AI 动作生成、照片生成 3D 人物（Provider 仍为 Mock）、MP3/WAV 转谱、移动端 / Web |
 
 ---
 
@@ -176,12 +181,16 @@ MIDI 文件 → 解析为音符事件 → 统一时间轴驱动
 
 ### 3.3 零外部资源策略
 
+> **2026-10-31 修订**：本轮（写实化升级）在用户授权下引入 **URP**（Unity 官方包，非第三方资源），
+> 并接入 **Rocketbox** 真人模型（MIT，`Assets/Characters/Rocketbox/`，目前缺 body/opacity 主贴图）。
+> 「人物与钢琴本体不引入生成式模型」的原则不变——手部是教学核心，生成式骨骼绑定质量不可控。
+
 | 资产类型 | 实现方式 |
 |---|---|
-| 钢琴与琴体 | `PianoMeshFactory` 程序化倒角网格 + 立式琴体几何 |
-| 人物与手部 | `AvatarRigBuilder` 程序化 Humanoid 骨架 + 程序化网格（三段指节、拇指对掌） |
-| 材质 / 贴图 | 运行时 `new Material(Shader.Find("Standard"))`，无贴图 |
-| 音频 | 波形合成（基频 + 谐波 + 指数衰减）+ 程序化节拍器击拍 |
+| 钢琴与琴体 | `PianoMeshFactory` 程序化倒角网格 + 立式琴体几何；琴漆光泽随管线调整，反射由运行时反射探针提供 |
+| 人物与手部 | `AvatarRigBuilder` 程序化 Humanoid 骨架 + 程序化网格（三段指节、拇指对掌）；Rocketbox 真人模型为可选实现（`ICharacterView`） |
+| 材质 / 贴图 | 运行时 `new Material()`，按 `GraphicsSettings.currentRenderPipeline` 选 URP/Lit 或 Standard；**无贴图**（程序化网格共享顶点、无 UV，见 `Docs/optimization-2026-10-31.md` §4） |
+| 音频 | 波形合成升级为**非谐分音 + 分音独立衰减 + 击弦瞬态**，播放端按音高声像展开，松键有制音声 |
 | 示例曲目 | `Assets/StreamingAssets/Songs/demo.mid`（**运行时资源中唯一的二进制内容资产**；`Docs/screenshots/` 的 PNG 只用于文档） |
 | 字体 | `Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")` |
 
