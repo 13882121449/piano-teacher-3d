@@ -57,6 +57,32 @@ namespace PianoTeacher3D.Avatar
         public float GlideLift = 0.055f;     // 换位过程中的额外抬升高度（米）
         public float MaxStepPerFrame = 0.035f; // 单帧最大位移（米）：硬约束，防瞬移与动作失控
 
+        [Header("距离自适应速度（写实化二期：A/B 后默认关闭）")]
+        /// <summary>
+        /// 是否启用「远距离满速直线、近距离指数收敛」的自适应速度。
+        /// <para>
+        /// <b>默认关闭，且实测无收益</b>：bench 三曲 A/B 显示换位峰值几乎不动
+        /// （63.9→66.5 / 141.2→142.7 / 250.9→249.7 mm），压键帧与悬空帧反而上升
+        /// （chords 悬空 227→272、压键 225→264）。原因：<b>提速不是瓶颈</b>——
+        /// 滞后发生在「目标何时被更新」，而不是「手腕每帧能走多远」。
+        /// 手正在按音时预置分支不生效（见 UpdateHand 的 preselected 判定），
+        /// 目标始终等于「当前按下的键」，那么手腕再快也只是追一个刚好被替换的目标。
+        /// 真正的修法需要把目标提前到未来音符（预判式），属独立课题。
+        /// 实现与参数保留，供后续接入预判后复用。
+        /// </para>
+        /// </summary>
+        public bool UseDistanceAdaptiveSpeed = false;
+
+        /// <summary>
+        /// 小于该距离时完全走指数收敛（保留原有细腻手感）。取 40 mm ≈ 一个键宽多一点。
+        /// </summary>
+        public float SmoothFollowDistance = 0.04f;
+        /// <summary>
+        /// 大于该距离时按单帧硬约束满速直线推进。取 120 mm ≈ 跨三个八度的换位量级。
+        /// 两值之间用 InverseLerp 连续混合，阈值处不会跳变。
+        /// </summary>
+        public float FullSpeedDistance = 0.12f;
+
         /// <summary>
         /// 手臂可达比例（接触方案 2.3）：可达半径 = (上臂 + 前臂) × BodyScale × 该值。
         /// 取 0.98 留 2% 余量吸收指尖长度与肩带微动，避免临界抖动误报为不可达。
@@ -736,13 +762,41 @@ namespace PianoTeacher3D.Avatar
             var current = hand.Wrist.position;
             var target = ApplyGlideLift(current, LimitTargetRate(leftHand, rawTarget));
             float speedScale = CurrentSpeedScale() * (preselected ? HandLeadSpeedScale : 1f);
-            var next = Vector3.Lerp(current, target, Time.deltaTime * MoveSpeed * speedScale);
 
-            // 硬约束：单帧位移上限（对应方案阶段五「避免动作失控」，杜绝瞬移观感）
-            var delta = next - current;
-            float step = delta.magnitude;
-            if (step > MaxStepPerFrame && step > 1e-6f)
-                next = current + delta * (MaxStepPerFrame / step);
+            // 距离自适应速度（写实化二期）。
+            //
+            // 原实现是纯指数逼近：Vector3.Lerp(cur, tgt, dt*MoveSpeed*speedScale)，
+            // 每帧只收敛固定比例（dt=1/60、MoveSpeed=12、预置 0.7 时约 14%），
+            // 于是「阶跃目标」永远追不上——250 mm 的跨八度换位在 15 帧（0.25 s）后仍差 25 mm，
+            // 而音符窗口只有 0.125 s。实测换位峰值卡在 63.9/141.2/250 mm 正是这个原因，
+            // 不是可达性问题（臂长判定三曲触发 0%），也不是手型问题（腕高自适应 A/B 无收益）。
+            //
+            // 修法：按「到目标的距离」在两种速度间连续混合——
+            //   · 近（< SmoothFollowDistance）：完全走指数收敛，保留原有细腻手感；
+            //   · 远（> FullSpeedDistance）：按单帧硬约束 MaxStepPerFrame 直线推进（2.1 m/s 上限）。
+            // 混合用 InverseLerp 保证连续，不会在阈值处跳变；单帧位移再统一钳到硬约束内，
+            // 因此「防瞬移」这条安全底线完全保留。
+            Vector3 next;
+            if (UseDistanceAdaptiveSpeed)
+            {
+                float dist = Vector3.Distance(current, target);
+                float frameScale = Mathf.Clamp01(Time.deltaTime * 60f);   // 对抗帧率变化：60fps 时为 1
+                float smoothStep = dist * Mathf.Clamp01(Time.deltaTime * MoveSpeed * speedScale);
+                float fullStep = MaxStepPerFrame * frameScale;
+                float blend = Mathf.InverseLerp(SmoothFollowDistance, FullSpeedDistance, dist);
+                float stepLen = Mathf.Min(Mathf.Lerp(smoothStep, fullStep, blend), dist);
+                stepLen = Mathf.Min(stepLen, MaxStepPerFrame * frameScale);
+                next = dist > 1e-6f ? current + (target - current) * (stepLen / dist) : target;
+            }
+            else
+            {
+                // 默认路径：与改动前逐位一致（指数逼近 + 单帧硬约束）
+                next = Vector3.Lerp(current, target, Time.deltaTime * MoveSpeed * speedScale);
+                var delta = next - current;
+                float step = delta.magnitude;
+                if (step > MaxStepPerFrame && step > 1e-6f)
+                    next = current + delta * (MaxStepPerFrame / step);
+            }
 
             if (EnablePoseClamp && _hasLimits)
             {
