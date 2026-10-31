@@ -12,7 +12,7 @@
 | 第三方资源 | **无**：钢琴 / 人物 / 材质 / 音频 / 曲目 / 字体全部程序化生成或使用引擎内置资源（URP 为 Unity 官方包，不计入第三方） |
 | 渲染管线 | **URP 14.0.10 + Linear 色彩空间**（2026-10-31 迁移完成；SSAO / ACES / Bloom / 暗角 / 运行时反射探针） |
 | 代码规模 | `Assets/Scripts` **82 个脚本 / 30,682 行**；`Assets/Tests` **53 个测试文件 / 15,850 行** |
-| 已验证状态 | 编译 **0 错误 0 警告**；EditMode **468/468**；PlayMode **124 通过 + 5 跳过 + 0 失败**；Stress 3/3、Perf 4/4、Soak 1/1 |
+| 已验证状态 | 编译 **0 错误 0 警告**；EditMode **473/473**；PlayMode **124 通过 + 5 跳过 + 0 失败**；Stress 3/3、Perf 4/4、Soak 1/1 |
 
 > 数字来源：2026-10-31 本机实测（`python Tools/verify.py --stress --perf`）。
 > 口径与逐条验收见 [`Docs/completion-review.md`](Docs/completion-review.md)、[`Docs/how-to-run.md`](Docs/how-to-run.md)、
@@ -53,9 +53,9 @@ MIDI 文件 → 解析为音符事件 → 统一时间轴驱动
 |---|---|
 | 功能完整度 | 播放 / 视角 / 角色 / 分手 / 循环 / 节拍器 / 高亮 / 曲目导入 / 偏好持久化 / 错误恢复 均已可用 |
 | 渲染管线 | URP 14.0.10 + **Linear**；Shader 按管线状态选择（SRP 下 URP/Lit 优先，避免 Standard 渲染洋红）；SSAO Renderer Feature + 后处理 Volume（ACES / Bloom / 暗角 / 色彩）；运行时反射探针（High 档） |
-| 测试 | EditMode **468** 条纯逻辑用例（含手部网格几何、关节姿态规格值、偏好归一化）；PlayMode **129** 项（9 个视角可用性场景、手部三关节姿态、遮挡、压力与视觉快照） |
+| 测试 | EditMode **473** 条纯逻辑用例（含手部网格几何、关节姿态规格值、偏好归一化）；PlayMode **129** 项（9 个视角可用性场景、手部三关节姿态、遮挡、压力与视觉快照） |
 | 性能（批处理采样） | 锁 60 FPS：纯播放 p99 **17 ms**、1% low **58.4 FPS**、GC **0.01 MB**；90 s 长跑内存 **+0.4%**（口径：`-nographics` + Null Device，测的是逻辑锁帧不掉队，不代表 GPU 预算） |
-| 视觉基线 | **20 张**截图（01–06 + V01–V14），**2026-10-31 在 Linear + URP 下全部重采**；历史 Gamma 基线已作废 |
+| 视觉基线 | **22 张**截图（01–06 + V01–V16），**2026-10-31 在 Linear + URP 下全部重采**；历史 Gamma 基线已作废 |
 | 角色状态 | 内置 3 角色可用且选择持久化；Rocketbox 真人模型已接入但**缺 body/opacity 主贴图**，资产门禁拒绝后回落内置角色（切换链路与降级路径有测试覆盖） |
 | 手部接触 | 静止 C 形手（MCP 25 / PIP 30 / DIP 15）；键面距离与悬空/压键指标已量化入 `Docs/perf/hand-baseline-2026-10-31.md`，**尚未达标**（键面 P95 10.2–17.7 mm、压键帧 17–301），根因归手指弯曲链路 |
 | 未实现 | AI 动作生成、照片生成 3D 人物（Provider 仍为 Mock）、MP3/WAV 转谱、移动端 / Web |
@@ -437,7 +437,7 @@ python Tools/verify.py --timeout 600      # 单阶段超时（秒，默认 420�
 |---|---|---|
 | 无参数 | 编译 + EditMode + PlayMode | 3–4 分钟 |
 | `--edit-only` | 只跑 EditMode | 约 1 分钟 |
-| `--visual` | 生成 20 张截图（需 GPU） | 分钟级 |
+| `--visual` | 生成 22 张截图（需 GPU） | 分钟级 |
 | `--stress` | ≥ 200 次快速切换 / 资源加载 / 环境自检 | 分钟级 |
 | `--perf` | 帧时间与 GC 采样 | 分钟级 |
 | `--soak` | 长跑稳定性 | 长跑时长 + 约 4 分钟 |
@@ -485,7 +485,7 @@ export UNITY_PATH="D:/Unity/Unity 2022.3.22f1c1/Editor/Unity.exe"   # Git Bash
 | PlayMode | 82 通过 + 5 跳过 + 0 失败（总计 87） | `_verify_out/playmode.xml` |
 | Stress / Perf / Soak | 3/3、4/4、1/1 | `_verify_out/{stress,perf,soak}.xml` |
 | 动作质量 | 手腕命中率 93.6%（左 94.7 / 右 92.7）、单帧位移 ≤ 35 mm、穿模 0 | `HandMotionTests` |
-| 视觉 | 20 张截图 + 自动清单 | `Docs/screenshots/` |
+| 视觉 | 22 张截图 + 自动清单 | `Docs/screenshots/` |
 
 ---
 
