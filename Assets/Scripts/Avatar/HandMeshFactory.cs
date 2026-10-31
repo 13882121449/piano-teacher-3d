@@ -129,10 +129,12 @@ namespace PianoTeacher3D.Avatar
                 default:
                     // 12 环：10 环在特写下能看出多边形棱边（掌心与指节最明显），
                     // 12 环的顶点增量约 20%，换掉「低模塑料感」值得。
+                    // 指甲开启：特写是俯视，指节弯曲在这个视角下只表现为「手指变短」，
+                    // 真正能被看见的手部细节就是指甲与指节的明暗过渡（真实教学视频同理）。
                     d.RingSegments = 12;
                     d.PalmRings = 9;
                     d.FingerRings = 5;
-                    d.IncludeNails = false;
+                    d.IncludeNails = true;
                     d.RoundTips = true;
                     break;
             }

@@ -171,6 +171,23 @@ public class VisualSnapshotTests
         records.Add(Snapshot("V01_closeup_chord.png", "审查 6.1 V01 / 方案 11.2-4",
             "掌心、指尖、琴键可见；指法自然", v01Note, session, cameraCtrl, avatar, timeline));
 
+        // ---- V16 手部特写 + 演奏中（不暂停）----
+        // V01/V02 都是 Play 后 Pause —— 手型被冻结便于回归对比，但冻结也掩盖了动态：
+        // 看不出手指是否真的在弯曲、指尖是否贴在键上。本图在播放状态下直接抓帧，
+        // 是唯一能同时验证「指节弯曲」与「接触」的快照（写实化三期补）。
+        session.Seek(v01Time);
+        session.Play();
+        // 0.30 s：和弦刚开始按下（音符持续 2 s，此时手指在键上、手型已成形）。
+        // 等太久（0.75 s）会落到 demo 曲的音符间隙，抓到的其实是空闲姿态，
+        // 反而看不出「指节弯曲 + 指尖接触」——这张图的用途正是验证这两点。
+        yield return new WaitForSeconds(0.30f);
+        yield return Capture(cam, Path.Combine(dir, "V16_closeup_playing.png"));
+        records.Add(Snapshot("V16_closeup_playing.png", "写实化三期 / 手部动态",
+            "演奏中不暂停：指节弯曲与指尖接触可见（非冻结手型）",
+            v01Note, session, cameraCtrl, avatar, timeline));
+        session.Pause();
+        yield return new WaitForSeconds(0.4f);
+
         // ---- V02 手部特写 + 低音到高音大跨度跳跃（审查 6.1 V02 / 3.2-1）----
         string v02Note = contentNote;
         float v02Time = total * 0.5f;

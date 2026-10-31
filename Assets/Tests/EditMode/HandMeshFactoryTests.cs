@@ -196,13 +196,18 @@ namespace PianoTeacher3D.Tests.EditMode
         }
 
         [Test]
-        public void Nail_OnlyGeneratedForHighDetail()
+        public void Nail_GeneratedFromMediumDetailUp()
         {
             var high = Definition(detail: AvatarMeshDetail.High);
             var medium = Definition(detail: AvatarMeshDetail.Medium);
+            var low = Definition(detail: AvatarMeshDetail.Low);
 
             Assert.IsTrue(high.IncludeNails, "高精度档应生成指甲");
-            Assert.IsFalse(medium.IncludeNails, "标准档不生成指甲（省绘制批次）");
+            // 标准档也生成：特写是俯视角，指节弯曲在该视角下只表现为「手指变短」，
+            // 指甲与指节的明暗过渡是唯一能被看见的手部细节（真实教学视频同理）。
+            // 10 片指甲的额外绘制批次可忽略。
+            Assert.IsTrue(medium.IncludeNails, "标准档也生成指甲（俯视特写的可读性）");
+            Assert.IsFalse(low.IncludeNails, "低精度档不生成指甲（省绘制批次）");
 
             var nail = Track(HandMeshFactory.BuildNail(high, 1));
             Assert.IsNotNull(nail);

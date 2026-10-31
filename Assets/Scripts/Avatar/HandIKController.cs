@@ -273,6 +273,14 @@ namespace PianoTeacher3D.Avatar
         private Vector3 _leftWristVelocity;
         private Vector3 _rightWristVelocity;
 
+        // 空闲锚点：无目标时手停在「最后一个真实键位」而不是跳回键盘中央。
+        // 真实演奏音与音之间不会抬回中央再重新下移——那会让每个间隙都产生一次
+        // 「抬起—落下」的往复，观感机械（原实现每次间隙都回 DefaultHandPos）。
+        private Vector3 _leftIdleAnchor;
+        private Vector3 _rightIdleAnchor;
+        private bool _hasLeftIdleAnchor;
+        private bool _hasRightIdleAnchor;
+
         // 手掌修正（指尖贴键的几何反馈量，仅作用于 XZ）
         private Vector3 _leftPalmCorrection;
         private Vector3 _rightPalmCorrection;
@@ -492,6 +500,9 @@ namespace PianoTeacher3D.Avatar
             // 复位手腕速度：Seek / 切曲 / 停止后必须清零，否则手会带着旧的动量冲过头
             _leftWristVelocity = Vector3.zero;
             _rightWristVelocity = Vector3.zero;
+            // 空闲锚点一并清除：真正的「停止 / 定位」应该回到默认手位，而不是停在旧键上
+            _hasLeftIdleAnchor = false;
+            _hasRightIdleAnchor = false;
             _leftPalmCorrection = Vector3.zero;   // 复位手掌修正，避免 Seek 后从旧修正量滑过去
             _rightPalmCorrection = Vector3.zero;
             _hasLeftSmoothed = false;    // 复位目标平滑，Seek 后重新对齐而非从旧目标滑过去（左右手各自复位）
@@ -762,9 +773,20 @@ namespace PianoTeacher3D.Avatar
                 }
                 else
                 {
-                    // 【左右约定】左手在 +X（角色面向 -Z，其左手在世界 +X = 低音侧 = 画面左侧）
-                    rawTarget = DefaultHandPos(leftHand ? 1f : -1f);
+                    // 空闲时停在「上一个真实键位」，不跳回键盘中央（见 _leftIdleAnchor 说明）。
+                    // 只有 ReleaseAll / 停止后才回 DefaultHandPos —— 那才是真正的「收手」。
+                    rawTarget = leftHand
+                        ? (_hasLeftIdleAnchor ? _leftIdleAnchor : DefaultHandPos(1f))
+                        : (_hasRightIdleAnchor ? _rightIdleAnchor : DefaultHandPos(-1f));
                 }
+            }
+
+            // 记录空闲锚点：取「真实键位目标」（尚未叠加角色偏移与手掌修正，
+            // 那些量每帧微变，作为锚点会让空闲位置持续漂移）
+            if (hasTarget || preselected)
+            {
+                if (leftHand) { _leftIdleAnchor = rawTarget; _hasLeftIdleAnchor = true; }
+                else { _rightIdleAnchor = rawTarget; _hasRightIdleAnchor = true; }
             }
 
             // 每角色 IK 偏移（方案 5.2 中期「每角色 IK 偏移」；默认 0，不影响 HandHeight/HandDepth 的既有语义）
