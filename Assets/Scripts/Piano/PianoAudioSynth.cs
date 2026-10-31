@@ -42,12 +42,25 @@ namespace PianoTeacher3D.Piano
         /// <summary>合成波形时长（秒）：与改造前一致，保证内存占用量级不变。</summary>
         private const float ClipDurationSeconds = 2.5f;
 
+        /// <summary>
+        /// 制音释放声时长（秒）。松键时制音器落弦的闷响，很短——只是反馈，不是音效。
+        /// </summary>
+        private const float DamperDurationSeconds = 0.09f;
+
+        /// <summary>制音声相对主音量的比例：必须很低，否则快速连奏会变成「咚咚」伴奏。</summary>
+        private const float DamperVolume = 0.10f;
+
+        /// <summary>按音高展开的最大声像偏移（0 = 居中，1 = 完全偏一侧）。0.30 刚好听得出左右，不夸张。</summary>
+        private const float MaxPan = 0.30f;
+
         /// <summary>合成采样率（Hz）：最高音 C8 的 4 次谐波仍低于 Nyquist，不产生混叠。</summary>
         private const int SampleRate = 44100;
 
         private AudioClip[] _clips;                    // 按 (pitch - MinPitch) 索引
         private AudioSource[] _sources;                // 槽位 → AudioSource（位于各自的子物体，保证滤波器路由确定）
         private AudioLowPassFilter[] _toneFilters;     // 槽位 → 音色低通（力度映射）
+        private AudioSource _damperSource;             // 制音声专用（不占 24 声部池）
+        private AudioClip _damperClip;
         private PianoVoiceAllocator _allocator;
         private bool _initStarted;
         private bool _muted;
@@ -160,6 +173,16 @@ namespace PianoTeacher3D.Piano
                     _toneFilters[v] = lp;
                 }
 
+                // 制音释放声：独立 AudioSource + 一次性小 clip（约 8 KB），松键时 PlayOneShot
+                var damperGo = new GameObject("Damper");
+                damperGo.transform.SetParent(transform, false);
+                _damperSource = damperGo.AddComponent<AudioSource>();
+                _damperSource.playOnAwake = false;
+                _damperSource.loop = false;
+                _damperSource.spatialBlend = 0f;
+                _damperSource.volume = DamperVolume * MasterVolume;
+                _damperClip = CreateDamperClip();
+
                 Initialized = true;
             }
             catch (System.Exception ex)
@@ -186,6 +209,10 @@ namespace PianoTeacher3D.Piano
             src.Stop();                       // 复用槽位前先停旧声，避免抢占后叠加
             src.clip = clip;
             src.volume = _allocator.GetVolume(slot);
+            // 立体声展开（写实化批次 6）：按音高分配声像（低音偏左、高音偏右）。
+            // 用播放端 panStereo 而不是双声道波形——听感一致但每个音高省一半常驻内存。
+            float panT = Mathf.InverseLerp(PianoKeyMap.MinPitch, PianoKeyMap.MaxPitch, e.Pitch);
+            src.panStereo = Mathf.Lerp(-MaxPan, MaxPan, panT);
             ApplyTone(slot, e.Velocity);
             src.Play();
         }
@@ -216,11 +243,20 @@ namespace PianoTeacher3D.Piano
             return clip;
         }
 
-        /// <summary>Note Off：把该音高的声部转入淡出释放（未发声的音高为安全空操作）。</summary>
+        /// <summary>
+        /// Note Off：把该音高的声部转入淡出释放（未发声的音高为安全空操作）。
+        /// 只有「确实有正在发声的声部被释放」时才播放制音声，避免空松键也出声。
+        /// </summary>
         public void OnNoteOff(MIDI.MidiNoteEvent e)
         {
             if (!Initialized || _allocator == null) return;
-            _allocator.NoteOff(e.Pitch);
+
+            int slot = _allocator.NoteOff(e.Pitch);
+            if (slot < 0) return;                     // 该音根本没在响（或已被抢占）
+
+            if (_muted || _damperSource == null || _damperClip == null) return;
+            _damperSource.volume = DamperVolume * MasterVolume;
+            _damperSource.PlayOneShot(_damperClip);   // 允许重叠：连奏松键本来就密集
         }
 
         /// <summary>
@@ -237,6 +273,7 @@ namespace PianoTeacher3D.Piano
         {
             MasterVolume = Mathf.Clamp01(v);
             _allocator?.SetMasterVolume(MasterVolume);
+            if (_damperSource != null) _damperSource.volume = DamperVolume * MasterVolume;
         }
 
         // ==================== 内部 ====================
@@ -253,8 +290,20 @@ namespace PianoTeacher3D.Piano
         }
 
         /// <summary>
-        /// 程序化波形合成（基频 + 2/3/4 次谐波 + 指数衰减）。
+        /// 程序化波形合成（写实化批次 6）：非谐分音 + 分音独立衰减 + 击弦瞬态。
+        /// <para>
+        /// 物理依据：真实琴弦不是理想弦，分音频率为 <c>n·f0·√(1 + B·n²)</c>（B = 非谐系数，
+        /// 低音弦更长更粗 → B 更大）；高次分音能量衰减更快（τ_n ≈ τ_1 / n^0.6）；
+        /// 起音有槌头接触琴弦的非周期瞬态噪声。三者叠加才不是「电子风琴」。
+        /// </para>
+        /// <para>
+        /// <b>为什么是单声道</b>：立体声合成会让每个音高的常驻内存翻倍（0.44 → 0.88 MB，
+        /// 极端情况 88 键 77 MB）。左右展开改由播放端的 <c>AudioSource.panStereo</c> 按音高
+        /// 分配（低音偏左、高音偏右），听感上同样是「左右分布」，但不额外占内存。
+        /// </para>
+        /// <para>
         /// 零采样依赖、零第三方资源 —— 可作长期降级模式（方案 7.3）。
+        /// </para>
         /// </summary>
         private static AudioClip CreatePianoClip(int pitch, float duration)
         {
@@ -262,18 +311,86 @@ namespace PianoTeacher3D.Piano
             int samples = Mathf.Max(1, (int)(SampleRate * duration));
             var data = new float[samples];
 
-            for (int i = 0; i < samples; i++)
+            // 非谐系数：低音端（琴弦长而粗）非谐强，高音端接近理想弦
+            float keyT = Mathf.InverseLerp(PianoKeyMap.MinPitch, PianoKeyMap.MaxPitch, pitch);
+            float inharmonicity = Mathf.Lerp(0.00035f, 0.00006f, keyT);
+
+            // 分音数：低音区 9 个、每升高一个八度减 1，最少 3 个
+            int partials = Mathf.Clamp(9 - (pitch - PianoKeyMap.MinPitch) / 12, 3, 9);
+
+            const float attackSeconds = 0.002f;   // 极短起音（击弦本身就是瞬态，不要淡入感）
+            for (int n = 1; n <= partials; n++)
+            {
+                float partialFreq = n * freq * Mathf.Sqrt(1f + inharmonicity * n * n);
+                if (partialFreq >= SampleRate * 0.45f) break;   // 防混叠
+
+                // 分音幅度 1/n^1.15：比 1/n 稍陡，接近钢琴频谱的自然倾斜
+                float amp = 1f / Mathf.Pow(n, 1.15f);
+                // 分音独立衰减：高次分音衰减更快（低音「嗡」很快消失，只剩基频）
+                float tau = 1.6f / Mathf.Pow(n, 0.6f);
+                float omega = 2f * Mathf.PI * partialFreq / SampleRate;
+
+                for (int i = 0; i < samples; i++)
+                {
+                    float t = i / (float)SampleRate;
+                    float env = Mathf.Exp(-t / tau) * Mathf.Min(1f, t / attackSeconds);
+                    data[i] += Mathf.Sin(omega * i) * amp * env;
+                }
+            }
+
+            // 击弦瞬态噪声（槌头接触琴弦的非周期成分）：一阶低通避免刺耳，固定种子保证可复现
+            var rng = new System.Random(pitch * 7919 + 13);
+            float noiseState = 0f;
+            int strikeSamples = Mathf.Min(samples, (int)(0.008f * SampleRate));
+            for (int i = 0; i < strikeSamples; i++)
             {
                 float t = i / (float)SampleRate;
-                float env = Mathf.Exp(-2.5f * t);
-                float v = Mathf.Sin(2f * Mathf.PI * freq * t)
-                        + 0.5f * Mathf.Sin(2f * Mathf.PI * 2f * freq * t)
-                        + 0.25f * Mathf.Sin(2f * Mathf.PI * 3f * freq * t)
-                        + 0.12f * Mathf.Sin(2f * Mathf.PI * 4f * freq * t);
-                data[i] = v * env * 0.25f;
+                float env = Mathf.Exp(-t / 0.0028f);
+                float white = (float)(rng.NextDouble() * 2.0 - 1.0);
+                noiseState += (white - noiseState) * 0.35f;
+                data[i] += noiseState * env * 0.10f;
+            }
+
+            // 峰值归一化到 0.85：分音数随音高变化，不归一化会让高低音音量差得远
+            float peak = 0f;
+            for (int i = 0; i < samples; i++)
+            {
+                float a = data[i] < 0f ? -data[i] : data[i];
+                if (a > peak) peak = a;
+            }
+            if (peak > 1e-6f)
+            {
+                float gain = 0.85f / peak;
+                for (int i = 0; i < samples; i++) data[i] *= gain;
             }
 
             var clip = AudioClip.Create($"piano_{pitch}", samples, 1, SampleRate, false);
+            if (clip == null) return null;
+            clip.SetData(data, 0);
+            return clip;
+        }
+
+        /// <summary>
+        /// 制音释放声（写实化批次 6）：松键时制音器落到琴弦上的短促闷响。
+        /// 重低通噪声 + 22 ms 指数衰减，音量很低——只是让「松键」有声音反馈，不是音效。
+        /// </summary>
+        private static AudioClip CreateDamperClip()
+        {
+            int samples = Mathf.Max(1, (int)(DamperDurationSeconds * SampleRate));
+            var data = new float[samples];
+            var rng = new System.Random(9187);
+            float state = 0f;
+
+            for (int i = 0; i < samples; i++)
+            {
+                float t = i / (float)SampleRate;
+                float env = Mathf.Exp(-t / 0.022f);
+                float white = (float)(rng.NextDouble() * 2.0 - 1.0);
+                state += (white - state) * 0.12f;      // 重低通 → 闷响而非「嘶」
+                data[i] = state * env;
+            }
+
+            var clip = AudioClip.Create("piano_damper", samples, 1, SampleRate, false);
             if (clip == null) return null;
             clip.SetData(data, 0);
             return clip;
