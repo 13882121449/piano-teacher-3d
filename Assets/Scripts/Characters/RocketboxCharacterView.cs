@@ -139,6 +139,13 @@ namespace PianoTeacher3D.Characters
             var view = new RocketboxCharacterView(profile, scope, root, animator, skeleton,
                 left, right, handError, poseSettings, definition);
             view.CollectRenderers();
+            // 材质必须在 ValidateRig 之前准备好：资产门禁检查的是「材质有没有主贴图」，
+            // 而贴图是运行时从 Resources 绑上去的（FBX 内的引用永远解析不到）。
+            // 不前置的话门禁看到的是导入器生成的空材质，必然拒绝这个角色。
+            view.EnsureMaterials();
+            // 琴凳：外部角色此前没有凳子——BuildStool 挂在程序化 rig 的根下，
+            // Rocketbox 视图走不到那段代码，切过去就是「悬空坐着」（实测 V15 截图臀部下方完全空着）。
+            view.BuildStool(root.transform, profile);
             view.BuildJointAxes();
 
             if (left == null || right == null)
@@ -150,6 +157,104 @@ namespace PianoTeacher3D.Characters
             }
 
             return view;
+        }
+
+        /// <summary>
+        /// 琴凳：以<b>髋部世界坐标</b>定位，而不是角色根的局部坐标。
+        /// <para>
+        /// 为什么不能用局部坐标：内置角色的 rig 根被旋转了 180°（面向 −Z），所以它的
+        /// <c>z = +0.10</c> 表示「身体前方」；Rocketbox 的 FBX 根没有这个旋转，同一套局部数值
+        /// 会把凳子放到脚下偏前的位置（实测第一版就是这样，凳子落到人和琴之间）。
+        /// 用髋部世界位置反算，既绕开朝向差异，也自动对齐 <see cref="SittingPoseApplier"/> 的坐姿。
+        /// </para>
+        /// <para>
+        /// 座面高度 = 髋关节中心 − 75 mm（坐姿标定的髋-凳面高差，见 SittingPoseApplier 的落座目标）。
+        /// </para>
+        /// </summary>
+        private void BuildStool(Transform parent, CharacterProfile profile)
+        {
+            if (parent == null) return;
+
+            var hips = _skeleton != null ? _skeleton.Hips : null;
+            Vector3 hipsWorld = hips != null
+                ? hips.position
+                : parent.position + Vector3.up * 0.52f;
+
+            const float hipsToSeatDrop = 0.075f;   // 髋关节中心 → 凳面（坐姿标定值）
+            float seatTop = Mathf.Max(0.30f, hipsWorld.y - hipsToSeatDrop);
+
+            // 凳子根挂在角色下（随角色生命周期释放），但位置/缩放用世界值，
+            // 避免父级的旋转与缩放把尺寸和方向带偏。
+            var stoolRoot = new GameObject("StoolRoot").transform;
+            stoolRoot.SetParent(parent, true);
+            stoolRoot.position = new Vector3(hipsWorld.x, seatTop, hipsWorld.z);
+            stoolRoot.rotation = Quaternion.identity;
+            stoolRoot.localScale = Vector3.one;
+
+            const float seatT = 0.05f;
+            const float seatW = 0.40f;
+            const float seatD = 0.30f;
+
+            var wood = CreateStoolMaterial("StoolWood", new Color(0.085f, 0.070f, 0.062f), 0.16f);
+            var cushion = CreateStoolMaterial("StoolCushion", new Color(0.150f, 0.095f, 0.098f), 0.05f);
+
+            // 座面：顶面正好在 y = 0（即 seatTop 世界高度）
+            CreateStoolPart(PrimitiveType.Cube, stoolRoot, "Stool",
+                new Vector3(0f, -seatT * 0.5f, 0f), new Vector3(seatW, seatT, seatD), wood);
+
+            // 软垫：略高于座面，给臀部落点一个可读的接触体
+            CreateStoolPart(PrimitiveType.Cube, stoolRoot, "StoolCushion",
+                new Vector3(0f, 0.013f, 0f), new Vector3(seatW * 0.96f, 0.026f, seatD * 0.96f), cushion);
+
+            // 四条腿：从座面底部落到世界地面（stoolRoot 的 y = seatTop，地面即局部 −seatTop）
+            float legH = seatTop - seatT;
+            float legCenterY = -(seatT + legH * 0.5f);
+            for (int sx = -1; sx <= 1; sx += 2)
+            {
+                for (int sz = -1; sz <= 1; sz += 2)
+                {
+                    CreateStoolPart(PrimitiveType.Cylinder, stoolRoot, $"StoolLeg_{sx}_{sz}",
+                        new Vector3(sx * seatW * 0.40f, legCenterY, sz * seatD * 0.38f),
+                        new Vector3(0.022f, legH * 0.5f, 0.022f), wood);
+                }
+            }
+        }
+
+        private void CreateStoolPart(PrimitiveType type, Transform parent, string name,
+            Vector3 localPos, Vector3 localScale, Material mat)
+        {
+            var go = GameObject.CreatePrimitive(type);
+            go.name = name;
+            var t = go.transform;
+            t.SetParent(parent, false);
+            t.localPosition = localPos;
+            t.localScale = localScale;
+
+            // 非 MonoBehaviour 类没有实例 Destroy，必须显式走 UnityEngine.Object
+            var collider = go.GetComponent<Collider>();
+            if (collider != null) UnityEngine.Object.Destroy(collider);
+
+            if (mat != null)
+            {
+                _scope.Own(mat);
+                go.GetComponent<Renderer>().sharedMaterial = mat;
+            }
+        }
+
+        private static Material CreateStoolMaterial(string name, Color color, float smoothness)
+        {
+            var shader = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
+                ? Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard")
+                : Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) return null;
+
+            var m = new Material(shader) { name = name };
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", color);
+            if (m.HasProperty("_Color")) m.SetColor("_Color", color);
+            if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", smoothness);
+            if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", smoothness);
+            if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
+            return m;
         }
 
         public string CharacterId => _profile.CharacterId;
@@ -465,36 +570,53 @@ namespace PianoTeacher3D.Characters
 
         // ==================== 整体色调（材质实例化 + 登记） ====================
 
+        /// <summary>
+        /// 材质实例化 + 管线重映射 + 贴图绑定（幂等，可重复调用）。
+        /// <para>
+        /// 必须在 <see cref="ValidateRig"/> 之前调用：资产门禁检查的是「材质有没有主贴图」，
+        /// 而贴图由 <see cref="RocketboxTextureLibrary"/> 在运行时从 Resources 绑上去
+        /// （FBX 内的引用指向建模机临时目录，导入器永远解析不到）。
+        /// </para>
+        /// </summary>
+        /// <returns>是否已具备可用材质。</returns>
+        public bool EnsureMaterials()
+        {
+            if (_ownMaterials.Count > 0) return true;
+            if (_renderers.Count == 0) return false;
+
+            for (int i = 0; i < _renderers.Count; i++)
+            {
+                var renderer = _renderers[i];
+                if (renderer == null) continue;
+
+                var shared = renderer.sharedMaterials;
+                if (shared == null || shared.Length == 0) continue;
+
+                var instances = new Material[shared.Length];
+                for (int m = 0; m < shared.Length; m++)
+                {
+                    var src = shared[m];
+                    if (src == null) continue;
+                    // 必须实例化：直接改 sharedMaterial 会污染工程里的共享资产
+                    var inst = new Material(src) { name = src.name + " (Character)" };
+                    RemapShaderToActivePipeline(inst);   // URP 下内置 shader 渲染为洋红，须先迁移
+                    // FBX 内的贴图路径指向建模机的临时目录，导入器永远解析不到 → 必须运行时绑定，
+                    // 否则整套材质没有主贴图，角色是白模（资产门禁会据此拒绝该角色）
+                    RocketboxTextureLibrary.Bind(inst, src.name);
+                    _scope.Own(inst);
+                    _ownMaterials.Add(inst);
+                    instances[m] = inst;
+                    if (inst.HasProperty("_Color")) _originalColors[inst] = inst.color;
+                }
+                renderer.sharedMaterials = instances;
+            }
+
+            return _ownMaterials.Count > 0;
+        }
+
         private void ApplyTint(Color tint)
         {
-            if (_renderers.Count == 0) return;
-
-            if (_ownMaterials.Count == 0)
-            {
-                for (int i = 0; i < _renderers.Count; i++)
-                {
-                    var renderer = _renderers[i];
-                    if (renderer == null) continue;
-
-                    var shared = renderer.sharedMaterials;
-                    if (shared == null || shared.Length == 0) continue;
-
-                    var instances = new Material[shared.Length];
-                    for (int m = 0; m < shared.Length; m++)
-                    {
-                        var src = shared[m];
-                        if (src == null) continue;
-                        // 必须实例化：直接改 sharedMaterial 会污染工程里的共享资产
-                        var inst = new Material(src) { name = src.name + " (Character)" };
-                        RemapShaderToActivePipeline(inst);   // URP 下内置 shader 渲染为洋红，须先迁移
-                        _scope.Own(inst);
-                        _ownMaterials.Add(inst);
-                        instances[m] = inst;
-                        if (inst.HasProperty("_Color")) _originalColors[inst] = inst.color;
-                    }
-                    renderer.sharedMaterials = instances;
-                }
-            }
+            if (!EnsureMaterials()) return;
 
             const float strength = 0.35f;
             for (int i = 0; i < _ownMaterials.Count; i++)

@@ -54,7 +54,7 @@ namespace PianoTeacher3D.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator RestoreCharacter_IncompleteAsset_FallsBackToBuiltInZero()
+        public IEnumerator RestoreCharacter_TexturedAsset_Succeeds()
         {
             SceneManager.LoadScene("PianoLesson");
             yield return null;
@@ -63,14 +63,13 @@ namespace PianoTeacher3D.Tests.PlayMode
             var session = Object.FindFirstObjectByType<LessonSessionController>();
             Assert.IsNotNull(session);
 
-            // 现状（2026-10-20 实测）：Rocketbox 缺 body/opacity 主贴图，资产校验门禁必然拒绝。
-            // 恢复必须显式降级：LogWarning + 回落内置角色 0；当前角色保持可驱动（无半成品）。
-            // 贴图入库解除门禁后，本用例的 Expect 需同步移除（届时恢复直接成功）。
-            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("恢复失败"));
+            // 贴图已入库、门禁解除（原注释约定「届时移除 Expect、恢复直接成功」，此处即兑现）。
+            // 降级路径（恢复失败 → LogWarning + 回落内置 0）仍保留在 RestoreCharacter 里，
+            // 只是当前资产不再触发它。
             session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
 
-            Assert.AreEqual(CharacterRegistry.BuiltInIds[0], session.CurrentCharacterView.CharacterId,
-                "恢复失败必须回落内置角色 0（写实女性）");
+            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, session.CurrentCharacterView.CharacterId,
+                "贴图入库后写实女性应可直接恢复（不再回落内置角色）");
         }
 
         [UnityTest]

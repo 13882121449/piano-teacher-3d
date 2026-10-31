@@ -147,7 +147,12 @@ namespace PianoTeacher3D.Characters
                     if (mat == null)
                         return CharacterValidation.Fail($"网格「{smr.name}」第 {m} 个材质为空（材质丢失）。");
 
-                    bool hasMainTexture = mat.HasProperty("_MainTex") && mat.mainTexture != null;
+                    // URP/Lit 用 _BaseMap，内置 Standard 用 _MainTex —— 两个都要认。
+                    // 只认 _MainTex 会在 URP 下把已正确绑定 _BaseMap 的角色误判成白模
+                    // （Rocketbox 走的就是运行时绑 URP/Lit 的路径）。
+                    bool hasMainTexture =
+                        (mat.HasProperty("_MainTex") && mat.GetTexture("_MainTex") != null) ||
+                        (mat.HasProperty("_BaseMap") && mat.GetTexture("_BaseMap") != null);
                     if (!hasMainTexture)
                     {
                         return CharacterValidation.Fail(
