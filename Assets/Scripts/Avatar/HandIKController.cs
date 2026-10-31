@@ -57,6 +57,12 @@ namespace PianoTeacher3D.Avatar
         public float GlideLift = 0.055f;     // 换位过程中的额外抬升高度（米）
         public float MaxStepPerFrame = 0.035f; // 单帧最大位移（米）：硬约束，防瞬移与动作失控
 
+        /// <summary>
+        /// 手臂可达比例（接触方案 2.3）：可达半径 = (上臂 + 前臂) × BodyScale × 该值。
+        /// 取 0.98 留 2% 余量吸收指尖长度与肩带微动，避免临界抖动误报为不可达。
+        /// </summary>
+        public const float ArmReachRatio = 0.98f;
+
         [Header("预置（即将到来的音符，方案 5.3 第二阶段 / 4.2.3 轻量预测）")]
         public float HandLeadSpeedScale = 0.7f; // 预置移动的速度倍率（比按键时略慢，避免抢拍感）
 
@@ -442,6 +448,41 @@ namespace PianoTeacher3D.Avatar
                 && point.z >= _limits.MinZ - margin && point.z <= _limits.MaxZ + margin;
         }
 
+        /// <summary>
+        /// 手臂可达性判定（接触方案 2.3）：<b>指尖</b>目标到同侧肩的直线距离超过
+        /// <c>(上臂 + 前臂 + 掌长 + 最长手指) × BodyScale × ArmReachRatio</c> 即为不可达。
+        /// <para>
+        /// 为什么必须加手长：判定的对象是「指尖按压点」，而手臂只负责把<b>手腕</b>送到位置，
+        /// 掌长 + 手指（约 0.156 m）本身也是可及距离的一部分。只算上臂+前臂会把三首曲子的
+        /// 全部按压点判成不可达（实测 100% 误报）。
+        /// </para>
+        /// <para>
+        /// 为什么不能只用 <see cref="IsWithinPoseLimits"/>：那个盒子是「键盘包围盒 + 边距」，
+        /// 按压点永远落在盒内（实测 (c) 类触发数为 0），对「手臂够不够长」没有判别力。
+        /// 两个判定分工：盒子管「目标是否在合法区域」（穿模/越界），本方法管「人体比例上够不够得到」。
+        /// </para>
+        /// </summary>
+        private bool IsArmReachable(Vector3 point, bool leftHand)
+        {
+            if (_avatar == null) return true;
+            var shoulder = leftHand ? _avatar.LeftShoulder : _avatar.RightShoulder;
+            if (shoulder == null) return true;
+
+            float scale = 1f;
+            float handReach = AvatarBodyMetrics.PalmLength + AvatarBodyMetrics.FingerLengths[2];
+            var def = _avatar.CurrentDefinition;
+            if (def != null)
+            {
+                scale = Mathf.Clamp(def.BodyScale, 0.5f, 1.6f);
+                if (def.Hand != null)
+                    handReach = def.Hand.PalmLength + def.Hand.FingerLength(2);
+            }
+
+            float limit = (AvatarBodyMetrics.UpperArmLength + AvatarBodyMetrics.LowerArmLength + handReach)
+                          * scale * ArmReachRatio;
+            return Vector3.Distance(shoulder.position, point) <= limit;
+        }
+
         /// <summary>生成动作质量报告（方案阶段五验收量化）。</summary>
         public HandMotionReport BuildMotionReport() => _metrics.Build();
 
@@ -797,7 +838,10 @@ namespace PianoTeacher3D.Avatar
                 _fingertipTargetSamples++;
                 if (Assignment.GetFinger(leftHand, pitch) < 0) _unassignedFingertipSamples++;
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) { _missingKeyTouchSamples++; continue; }
-                if (!IsWithinPoseLimits(touch.Press)) _unreachableTargetSamples++;
+                // (c) 类：合法的键盘区域内但手臂够不到（2.3 引入肩距判定；盒子判定同时保留，
+                // 因为「目标在盒外」同样是解不到的情形，例如角色比例异常时）
+                if (!IsWithinPoseLimits(touch.Press) || !IsArmReachable(touch.Press, leftHand))
+                    _unreachableTargetSamples++;
             }
 
             // 兜底：极端情况下（提供器没能给出分配）仍保证「按下的音都有指尖指向」，
