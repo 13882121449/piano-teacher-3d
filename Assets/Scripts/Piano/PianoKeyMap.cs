@@ -64,7 +64,7 @@ namespace PianoTeacher3D.Piano
 
         [Header("键面倒角（方案 5.4 / 审查 1.3A：细小倒角 + 柔和高光，单位：米）")]
         public float WhiteKeyChamfer = 0.0008f;  // 约 0.8mm，白键顶面四周
-        public float BlackKeyChamfer = 0.0006f;  // 约 0.6mm，黑键顶面四周
+        public float BlackKeyChamfer = 0.0012f;  // 约 1.2mm：真实黑键顶棱是圆润过渡，0.6mm 读起来像切角
 
         [Header("键盘高度（地面至键面下沿，立式钢琴约 0.72m）")]
         public float KeybedHeight = DefaultKeybedHeight;
@@ -124,11 +124,18 @@ namespace PianoTeacher3D.Piano
             Material blackTopMat = CreateMaterial("KeyBlackTop", new Color(0.13f, 0.13f, 0.145f), 0.10f, 0.45f);
             Material blackSideMat = CreateMaterial("KeyBlackSide", new Color(0.055f, 0.055f, 0.062f), 0.00f, 0.15f);
 
+            // 程序化象牙纹理（写实化二期）：顶点级三平面 UV 已就位，贴图可以直接用。
+            // 基色归白是必须的——贴图自带颜色，若仍乘原来的 0.96 白，会再压暗一层。
+            ApplyProceduralTexture(whiteMat, ProceduralTextures.Ivory(), 1f);
+
             // ---- 网格（白键 1 份、黑键 3 份，全部复用于 88 键）----
+            // 白键从 TopOnly 改为 AllEdges：真实白键的前端是圆润收边的，只有顶面倒角时
+            // 前端呈直角切边，近景里像一片「平贴的塑料板」。AllEdges 顶点 24（TopOnly 12），
+            // 但 88 键共享同一 mesh，总开销不变。
             _whiteKeyMesh = Track(PianoMeshFactory.CreateChamferedBox(
-                WhiteWidth, WhiteHeight, WhiteLength, WhiteKeyChamfer, ChamferMode.TopOnly));
+                WhiteWidth, WhiteHeight, WhiteLength, WhiteKeyChamfer, ChamferMode.AllEdges));
             _blackTopMesh = Track(PianoMeshFactory.CreateChamferedBox(
-                BlackWidth, BlackTopHeight, BlackLength, BlackKeyChamfer, ChamferMode.TopOnly));
+                BlackWidth, BlackTopHeight, BlackLength, BlackKeyChamfer, ChamferMode.AllEdges));
             _blackSideMesh = Track(PianoMeshFactory.CreateChamferedBox(
                 BlackWidth, BlackSideHeight, BlackLength, BlackKeyChamfer * 0.5f, ChamferMode.AllEdges));
             _blackBaseMesh = Track(PianoMeshFactory.CreateChamferedBox(
@@ -263,6 +270,18 @@ namespace PianoTeacher3D.Piano
             var woodDark = CreateMaterial("CaseWoodDark", new Color(0.150f, 0.098f, 0.074f), 0.00f, srp ? 0.26f : 0.20f); // 哑光深木（仍远低于清漆）
             var felt = CreateMaterial("CaseFelt", new Color(0.72f, 0.14f, 0.14f), 0.00f, 0.05f);          // 键盘后挡红绒
             var brass = CreateMaterial("PedalMetal", new Color(0.62f, 0.50f, 0.24f), 0.85f, 0.72f);       // 黄铜踏板
+            // 键缝暗底：接近全黑的哑光面。键缝深处本该被相邻键身完全遮挡（积灰 + 自阴影），
+            // 没有这层时看到的是木色 Keybed，配合顶面倒角形成的 V 槽被光打亮，
+            // 整排键读起来就是「白色梳齿」而不是「一排琴键」。
+            var gapShade = CreateMaterial("KeyGapShade", new Color(0.042f, 0.038f, 0.036f), 0.00f, 0.03f);
+
+            // 程序化木纹 / 红绒（写实化二期）：贴图自带颜色，故基色归白；
+            // woodDark 用同一张木纹但压到 0.72 灰，形成「正面亮、侧面暗」的层次，
+            // 这比给两种木头各做一套纹理更省，也避免两张贴图之间出现风格断裂。
+            var walnut = ProceduralTextures.Walnut();
+            ApplyProceduralTexture(wood, walnut, 1f);
+            ApplyProceduralTexture(woodDark, walnut, 0.72f);
+            ApplyProceduralTexture(felt, ProceduralTextures.Felt(), 1f);
 
             float w = TotalWidth;
             float mid = w * 0.5f;
@@ -270,6 +289,11 @@ namespace PianoTeacher3D.Piano
             // ---- 键盘托板（键下方，稍微前凸）----
             CreateCasePart(c, "Keybed", new Vector3(mid, KeybedHeight - 0.02f, 0.02f),
                 new Vector3(w + 0.05f, 0.04f, 0.21f), wood);
+
+            // ---- 键缝暗底（写实化二期）：紧贴键面下方的极深色薄板 ----
+            // 位置在 Keybed 顶面之上、白键底面之下，从键缝看下去是黑的，形成「缝」而不是「切割线」。
+            CreateCasePart(c, "KeyGapShade", new Vector3(mid, KeybedHeight - 0.002f, 0.02f),
+                new Vector3(w + 0.02f, 0.003f, 0.215f), gapShade);
 
             // ---- 键后挡绒（遮挡键尾，经典红绒）----
             CreateCasePart(c, "BackFelt", new Vector3(mid, KeybedHeight + 0.012f, -WhiteLength * 0.5f - 0.006f),
@@ -324,18 +348,64 @@ namespace PianoTeacher3D.Piano
             CreateCaseMeshPart(c, "Pedal_L", pedalMesh, new Vector3(mid - 0.09f, 0.185f, 0.12f), brass);
             CreateCaseMeshPart(c, "Pedal_C", pedalMesh, new Vector3(mid, 0.185f, 0.12f), brass);
             CreateCaseMeshPart(c, "Pedal_R", pedalMesh, new Vector3(mid + 0.09f, 0.185f, 0.12f), brass);
+
+            // ==================== 结构细节（写实化二期） ====================
+            // 这一组不改变任何演奏几何，只补「可辨识特征」——真实钢琴之所以一眼能认出来，
+            // 靠的正是侧臂、脚轮、铰链、铭牌这些轮廓上的小东西。
+
+            // ---- 侧臂（cheek block）：键盘两端竖起的小挡板，立式琴最醒目的识别特征之一 ----
+            // 放在键区外侧（x < 0 与 x > w），不侵占用键范围
+            CreateCasePart(c, "Cheek_L", new Vector3(-0.030f, KeybedHeight + 0.012f, 0.02f),
+                new Vector3(0.060f, 0.115f, 0.225f), wood);
+            CreateCasePart(c, "Cheek_R", new Vector3(w + 0.030f, KeybedHeight + 0.012f, 0.02f),
+                new Vector3(0.060f, 0.115f, 0.225f), wood);
+
+            // ---- 品牌铭牌：琴盖上的一小块黄铜 ----
+            // 金属与木头的材质差异（高金属度 + 高光泽）在近景里是很强的真实感锚点
+            CreateCasePart(c, "Nameplate", new Vector3(mid, KeybedHeight + 0.036f, -0.020f),
+                new Vector3(0.22f, 0.016f, 0.004f), brass);
+
+            // ---- 顶盖铰链：后侧两条黄铜，暗示顶盖可以掀开 ----
+            CreateCasePart(c, "Hinge_L", new Vector3(mid - 0.28f, 1.432f, -0.315f),
+                new Vector3(0.055f, 0.014f, 0.022f), brass);
+            CreateCasePart(c, "Hinge_R", new Vector3(mid + 0.28f, 1.432f, -0.315f),
+                new Vector3(0.055f, 0.014f, 0.022f), brass);
+
+            // ---- 脚轮：琴腿底部的金属轮座 ----
+            CreateCasePart(c, "Caster_L", new Vector3(0.01f, 0.022f, -0.02f),
+                new Vector3(0.032f, 0.044f, 0.034f), brass);
+            CreateCasePart(c, "Caster_R", new Vector3(w - 0.01f, 0.022f, -0.02f),
+                new Vector3(0.032f, 0.044f, 0.034f), brass);
         }
 
-        private static Transform CreateCasePart(Transform parent, string name, Vector3 pos, Vector3 scale, Material mat)
+        /// <summary>
+        /// 创建琴体部件（倒角化）。
+        /// <para>
+        /// <b>为什么不用 <c>PrimitiveType.Cube</c></b>：真实木制品没有数学意义上的锐利边缘，
+        /// 任何加工过的边都有零点几毫米到几毫米的圆角。这些圆角会沿边缘捕捉一条细长高光，
+        /// 而那条高光正是大脑判断「这是实体而非贴图」的依据。用 Cube 时侧板/箱体/琴腿的边缘
+        /// 完全没有高光，整台琴读起来就是「纸板拼的柜子」（实测观感，V01/V13 截图）。
+        /// </para>
+        /// <para>
+        /// 倒角量取最短边的 15%，钳制在 2.5–10 mm：太小学数学盒子，太大则像肥皂。
+        /// <see cref="PianoMeshFactory.CreateChamferedBox"/> 的 AllEdges 模式顶点 ≤24，
+        /// 与 Cube 的 24 顶点持平，不增加任何几何预算。
+        /// </para>
+        /// </summary>
+        private Transform CreateCasePart(Transform parent, string name, Vector3 pos, Vector3 scale, Material mat)
         {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = name;
+            float minEdge = Mathf.Min(scale.x, Mathf.Min(scale.y, scale.z));
+            float chamfer = Mathf.Clamp(minEdge * 0.15f, 0.0025f, 0.010f);
+            var mesh = Track(PianoMeshFactory.CreateChamferedBox(
+                scale.x, scale.y, scale.z, chamfer, ChamferMode.AllEdges));
+
+            var go = new GameObject(name);
             var t = go.transform;
             t.SetParent(parent, false);
             t.localPosition = pos;
-            t.localScale = scale;
-            if (mat != null) go.GetComponent<Renderer>().sharedMaterial = mat;
-            Object.Destroy(go.GetComponent<Collider>());
+            if (mesh != null) go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var r = go.AddComponent<MeshRenderer>();
+            if (mat != null) r.sharedMaterial = mat;
             return t;
         }
 
@@ -426,6 +496,32 @@ namespace PianoTeacher3D.Piano
             if (m.HasProperty(GlossinessId)) m.SetFloat(GlossinessId, smoothness);
             if (m.HasProperty(SmoothnessId)) m.SetFloat(SmoothnessId, smoothness);
             return m;
+        }
+
+        /// <summary>
+        /// 把程序化纹理绑到材质（兼容 Standard 的 <c>_MainTex</c> 与 URP/Lit 的 <c>_BaseMap</c>）。
+        /// <para>
+        /// <paramref name="tint"/> 把基色设成灰度，用于「同一张贴图产出不同明度」——
+        /// 木材正面用 1.0、侧面用 0.72，形成层次而不需要第二张纹理。
+        /// 基色必须显式覆盖：贴图自带颜色，若继续乘原来的深褐色会再压暗一层。
+        /// </para>
+        /// </summary>
+        private static void ApplyProceduralTexture(Material mat, Texture2D tex, float tint)
+        {
+            if (mat == null || tex == null) return;
+
+            if (mat.HasProperty("_MainTex")) mat.SetTexture("_MainTex", tex);
+            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", tex);
+
+            var c = new Color(tint, tint, tint, 1f);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", c);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", c);
+        }
+
+        private void OnDestroy()
+        {
+            // 程序化纹理是静态缓存，场景销毁时统一释放（单钢琴实例，不存在共享竞争）
+            ProceduralTextures.ReleaseAll();
         }
     }
 }

@@ -264,6 +264,40 @@ namespace PianoTeacher3D.Piano
 
         // ==================== 组装与法线 ====================
 
+        /// <summary>
+        /// 三平面 UV 的世界尺度（米）：一次纹理平铺覆盖 0.32 m。
+        /// 取值的依据是「年轮密度」——木纹纹理每个平铺周期约 13 条年轮，0.32 m 对应约 2.5 cm 一条，
+        /// 与真实胡桃木的观感接近；过大则纹理糊成一片，过小则像斑马纹。
+        /// </summary>
+        private const float TriplanarTiling = 0.32f;
+
+        /// <summary>
+        /// 顶点级三平面 UV：按顶点所属的面朝向选择投影平面，<b>不拆顶点、不改变顶点数</b>。
+        /// <para>
+        /// 为什么不做标准 UV：拆 UV 会产生接缝，接缝必须拆顶点，而顶点一旦不共享，
+        /// <see cref="ComputeAreaWeightedNormals"/> 的平滑倒角高光就没了——那是琴体「实体感」的唯一来源。
+        /// 顶点级三平面用「同一顶点按面朝向取不同投影」绕开了这个矛盾，代价是倒角面上的 UV
+        /// 由相邻两个投影混合（倒角面积占比极小，肉眼不可辨）。
+        /// </para>
+        /// <para>
+        /// 投影方向经过挑选，使木纹在每个面上都沿「木料自然走向」：
+        /// 竖直面（±X / ±Z 法向）纹理沿高度走，顶面沿琴体长度走。
+        /// </para>
+        /// </summary>
+        private static Vector2[] BuildTriplanarUV(Vector3[] verts)
+        {
+            var uv = new Vector2[verts.Length];
+            for (int i = 0; i + 2 < verts.Length; i += 3)
+            {
+                // 每 3 个连续顶点属于同一个角的 NX / NY / NZ 贴面顶点
+                // （结构见 BuildAllEdgesChamferedBox 的 v[k*3+0..2]）
+                uv[i]     = new Vector2(verts[i].z, verts[i].y) / TriplanarTiling;      // ±X 面：u=z, v=y（木纹竖直）
+                uv[i + 1] = new Vector2(verts[i + 1].z, verts[i + 1].x) / TriplanarTiling; // ±Y 面：u=z, v=x（木纹沿长度）
+                uv[i + 2] = new Vector2(verts[i + 2].x, verts[i + 2].y) / TriplanarTiling; // ±Z 面：u=x, v=y（木纹竖直）
+            }
+            return uv;
+        }
+
         /// <summary>写入网格数据，并按相邻三角形叉积做面积加权法线（共享顶点 → 柔和边缘高光）。</summary>
         private static void Apply(Mesh mesh, Vector3[] verts, List<int> triangles)
         {
@@ -272,6 +306,9 @@ namespace PianoTeacher3D.Piano
             mesh.vertices = verts;
             mesh.triangles = tris;
             mesh.normals = ComputeAreaWeightedNormals(verts, tris);
+            // 24 顶点 = AllEdges 倒角盒的结构（8 角 × 3 贴面顶点），才能用三平面 UV；
+            // 其它结构（TopOnly 12 顶点、手部网格等）给零 UV —— 它们不采样程序化纹理。
+            mesh.uv = verts.Length == 24 ? BuildTriplanarUV(verts) : new Vector2[verts.Length];
             mesh.RecalculateBounds();
         }
 
