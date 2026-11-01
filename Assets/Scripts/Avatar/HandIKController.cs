@@ -952,7 +952,10 @@ namespace PianoTeacher3D.Avatar
             // 令手背法线朝上（按 WristPitch 前倾）、手指朝前下方（按 roll 侧倾）。
             if (def != null && def.Hand.WristOrientationFromRest && hand is IHandOrientationRig basis)
             {
-                Vector3 desiredBack = delta * Vector3.up;
+                // 说明：ImportedFingerJointAxes 的 BackNormal 实际是「掌心朝外」的偏法线
+                // （RocketboxHandRig.BackNormal 由腕骨朝向推导，方向朝掌心外侧），
+                // 若要掌心朝下必须取反，否则手掌朝天、指尖越弯越高（实测 +130~168 mm）。
+                Vector3 desiredBack = -(delta * Vector3.up);
                 Vector3 flatForward = new Vector3(0f, -0.30f, -1f);
                 Vector3 desiredForward = Vector3.ProjectOnPlane(flatForward, desiredBack);
                 if (desiredForward.sqrMagnitude < 1e-6f) desiredForward = Vector3.ProjectOnPlane(Vector3.forward, desiredBack);

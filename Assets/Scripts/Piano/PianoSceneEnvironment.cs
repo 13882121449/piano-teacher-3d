@@ -395,6 +395,7 @@ namespace PianoTeacher3D.Piano
             BuildBackdrop();
             BuildDecorations();
             BuildContactShadowDecals();
+            BuildRoom();
         }
 
         /// <summary>
@@ -590,6 +591,68 @@ namespace PianoTeacher3D.Piano
         /// <summary>该几何在当前环境下是否应启用：「环境遮蔽观感」近似薄片只在对应档位启用，其余恒定启用。</summary>
         private bool ShouldEnable(Renderer r) =>
             !(_aoDecalRenderer != null && ReferenceEquals(r, _aoDecalRenderer) && !_aoApproxEnabled);
+
+        // ==================== 琴房外壳（Task 4） ====================
+
+        private static readonly Color WallColor = new Color(0.255f, 0.240f, 0.225f);
+        private static readonly Color CeilingColor = new Color(0.175f, 0.172f, 0.165f);
+        private static readonly Color RugColor = new Color(0.330f, 0.245f, 0.200f);
+        private static readonly Color WindowGlow = new Color(1.35f, 1.45f, 1.70f);
+
+        /// <summary>
+        /// 琴房外壳：后墙 / 侧墙 / 顶棚 / 窗 / 地毯 / 墙板。
+        /// <para>
+        /// 全部<b>低对比、无碰撞、不投射阴影</b>（唯一投影灯仍是主光），也不改动地面高度与既有装饰；
+        /// 目的是把「黑色虚空 + 一块背景板」变成可读的室内空间（设计文档 P2）。
+        /// </para>
+        /// </summary>
+        private void BuildRoom()
+        {
+            var wallMat = CreateLitMaterial("EnvWall", WallColor, 0.08f, 0f);
+            var ceilingMat = CreateLitMaterial("EnvCeiling", CeilingColor, 0.06f, 0f);
+            var rugMat = CreateLitMaterial("EnvRug", RugColor, 0.04f, 0f);
+
+            Register(CreateBox("RoomBackWall", new Vector3(0f, 1.5f, -2.90f),
+                new Vector3(7f, 3f, 0.10f), wallMat, castShadows: false, receiveShadows: true));
+            Register(CreateBox("RoomSideWall_L", new Vector3(-3.45f, 1.5f, 0.2f),
+                new Vector3(0.10f, 3f, 6.2f), wallMat, castShadows: false, receiveShadows: true));
+            Register(CreateBox("RoomSideWall_R", new Vector3(3.45f, 1.5f, 0.2f),
+                new Vector3(0.10f, 3f, 6.2f), wallMat, castShadows: false, receiveShadows: true));
+            Register(CreateBox("RoomCeiling", new Vector3(0f, 3.02f, 0.2f),
+                new Vector3(7f, 0.08f, 6.2f), ceilingMat, castShadows: false, receiveShadows: false));
+
+            Register(CreateBox("RoomWindowFrame", new Vector3(1.15f, 2.10f, -2.845f),
+                new Vector3(1.55f, 1.20f, 0.05f), wallMat, castShadows: false, receiveShadows: false));
+            var glow = CreateUnlitMaterial("EnvWindowGlow", WindowGlow);
+            Register(CreateBox("RoomWindow", new Vector3(1.15f, 2.10f, -2.815f),
+                new Vector3(1.38f, 1.04f, 0.01f), glow, castShadows: false, receiveShadows: false));
+            Register(CreateBox("RoomWindowBarV", new Vector3(1.15f, 2.10f, -2.805f),
+                new Vector3(0.03f, 1.04f, 0.02f), wallMat, castShadows: false, receiveShadows: false));
+            Register(CreateBox("RoomWindowBarH", new Vector3(1.15f, 2.10f, -2.805f),
+                new Vector3(1.38f, 0.03f, 0.02f), wallMat, castShadows: false, receiveShadows: false));
+
+            Register(CreateBox("RoomRug", new Vector3(0f, 0.004f, 0.25f),
+                new Vector3(2.70f, 0.006f, 1.90f), rugMat, castShadows: false, receiveShadows: true));
+
+            var panelMat = CreateLitMaterial("EnvWallPanel", new Color(0.135f, 0.125f, 0.118f), 0.10f, 0f);
+            Register(CreateBox("RoomPanel_L", new Vector3(-3.38f, 1.55f, -0.9f),
+                new Vector3(0.04f, 0.90f, 1.20f), panelMat, castShadows: false, receiveShadows: true));
+            Register(CreateBox("RoomPanel_R", new Vector3(3.38f, 1.55f, -0.9f),
+                new Vector3(0.04f, 0.90f, 1.20f), panelMat, castShadows: false, receiveShadows: true));
+        }
+
+        /// <summary>发光窗格材质：URP/Unlit 优先，找不到时退回 Sprites/Default。</summary>
+        private static Material CreateUnlitMaterial(string name, Color color)
+        {
+            Shader shader = GraphicsSettings.currentRenderPipeline != null
+                ? Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Sprites/Default")
+                : Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
+            if (shader == null) return null;
+            var m = new Material(shader) { name = name };
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", color);
+            if (m.HasProperty("_Color")) m.SetColor("_Color", color);
+            return m;
+        }
 
         // ==================== 构建辅助 ====================
 

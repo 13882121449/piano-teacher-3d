@@ -62,6 +62,36 @@ namespace PianoTeacher3D.Tests.EditMode
         // ==================== 幂等与几何规模（方案 7.2） ====================
 
         [Test]
+        public void Build_CreatesRoomShell_AndKeepsEnvironmentToggleIdempotent()
+        {
+            var go = new GameObject("Env", typeof(PianoSceneEnvironment));
+            try
+            {
+                var env = go.GetComponent<PianoSceneEnvironment>();
+                env.Build(null, QualityProfile.For(QualityTier.Standard));
+
+                var names = new System.Collections.Generic.HashSet<string>();
+                foreach (var tr in go.GetComponentsInChildren<Transform>(true)) names.Add(tr.name);
+
+                Assert.IsTrue(names.Contains("RoomBackWall"), "缺少后墙");
+                Assert.IsTrue(names.Contains("RoomSideWall_L"), "缺少左侧墙");
+                Assert.IsTrue(names.Contains("RoomSideWall_R"), "缺少右侧墙");
+                Assert.IsTrue(names.Contains("RoomRug"), "缺少地毯");
+                Assert.IsTrue(names.Contains("RoomWindow"), "缺少窗户");
+                Assert.IsTrue(names.Contains("RoomCeiling"), "缺少顶棚");
+
+                env.SetEnvironmentVisible(false);
+                env.SetEnvironmentVisible(false);   // 幂等
+                env.SetEnvironmentVisible(true);
+                Assert.IsNotNull(env.MainLight);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
         public void Build_IsIdempotent_AndKeepsGeometryMinimal()
         {
             var high = QualityProfile.For(QualityTier.High);
@@ -78,7 +108,7 @@ namespace PianoTeacher3D.Tests.EditMode
                 "重复 Build 不得重复创建灯光");
             Assert.AreEqual(4, lightCount, "应恰好为 主光 + 补光 + 轮廓光 + 键盘点光");
             Assert.Greater(rendererCount, 0);
-            Assert.Less(rendererCount, 20, "环境只应包含少量程序化几何，远低于 88 键规模（方案 7.2）");
+            Assert.Less(rendererCount, 40, "环境只应包含少量程序化几何（含琴房外壳约 12 个），远低于 88 键规模（方案 7.2）");
         }
 
         // ==================== 三点光照 + 键盘点光（方案 5.4 / 审查 1.3B） ====================

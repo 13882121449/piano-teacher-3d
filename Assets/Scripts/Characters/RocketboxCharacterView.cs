@@ -564,7 +564,7 @@ namespace PianoTeacher3D.Characters
             def.DisplayName = profile.DisplayName;
             // 标定（2026-11-01 实测）：真人骨架的腕部目标比程序化角色低约 30 mm，
             // 腕背伸 30° 才能让掌指关节落在键面正上方（见 RocketboxRestPoseTests）。
-            def.HandHeightOffset = -0.010f;
+            def.HandHeightOffset = -0.002f;
             def.HandDepthOffset = 0f;
             def.Hand.WristPitch = 8f;
             def.Cartoon = false;
