@@ -18,7 +18,10 @@ namespace PianoTeacher3D.Characters
     public sealed class PedalFootAnimator : MonoBehaviour
     {
         /// <summary>踩到底时脚尖抬起的角度（度）。钢琴延音踏板行程约 20–30 mm，映射到 10–15° 观感自然。</summary>
-        [SerializeField] private float _pressAngleDegrees = 13f;
+        [SerializeField] private float _pressAngleDegrees = 20f;
+
+        /// <summary>踩到底时踏板本体下压的角度（度）。脚被琴凳挡住时，至少踏板在动。</summary>
+        [SerializeField] private float _pedalTravelDegrees = 9f;
 
         /// <summary>角度跟随时间常数（秒）。太硬会像机器，太软会与音符脱节。</summary>
         [SerializeField] private float _smoothSeconds = 0.07f;
@@ -28,10 +31,15 @@ namespace PianoTeacher3D.Characters
 
         private Transform _foot;
         private Transform _toes;
+        private Transform _pedal;
+        private Quaternion _pedalRest;
         private Quaternion _restWorld;
         private Vector3 _pitchAxis;
         private float _angle;
         private float _targetAngle;
+
+        /// <summary>是否已找到可驱动的踏板模型（与骨架无关，程序化角色也有）。</summary>
+        public bool HasPedal => _pedal != null;
 
         /// <summary>是否已绑定到可驱动的脚骨。</summary>
         public bool IsBound => _foot != null;
@@ -68,6 +76,7 @@ namespace PianoTeacher3D.Characters
         public void Unbind()
         {
             if (_foot != null) _foot.rotation = _restWorld;
+            if (_pedal != null) _pedal.localRotation = _pedalRest;
             _foot = null;
             _toes = null;
             _angle = 0f;
@@ -78,7 +87,7 @@ namespace PianoTeacher3D.Characters
         /// </summary>
         public void Tick(bool pressed, float deltaTime)
         {
-            if (_foot == null) return;
+            if (_foot == null && _pedal == null) return;
 
             _targetAngle = pressed ? _pressAngleDegrees : 0f;
             if (Mathf.Approximately(_angle, _targetAngle) && Mathf.Approximately(_angle, 0f)) return;
@@ -88,7 +97,27 @@ namespace PianoTeacher3D.Characters
             if (Mathf.Abs(_angle - _targetAngle) < 0.05f) _angle = _targetAngle;
 
             // 绕水平俯仰轴负转 = 脚尖抬起（脚跟着地），这正是踩踏板的方向（符号按 Rocketbox 实测）
-            _foot.rotation = Quaternion.AngleAxis(-_angle, _pitchAxis) * _restWorld;
+            if (_foot != null) _foot.rotation = Quaternion.AngleAxis(-_angle, _pitchAxis) * _restWorld;
+
+            // 踏板本体：绕自身左右轴下压（远端下沉），角度与脚同步
+            if (_pedal != null)
+            {
+                float t01 = _pressAngleDegrees > 1e-3f ? _angle / _pressAngleDegrees : 0f;
+                _pedal.localRotation = Quaternion.AngleAxis(_pedalTravelDegrees * t01, Vector3.right) * _pedalRest;
+            }
+        }
+
+        /// <summary>
+        /// 绑定踏板模型（按名字在场景里找，找不到就静默跳过）。
+        /// <para>为什么单独一条链路：程序化角色没有 Humanoid 骨架，脚动不了，但踏板该动。</para>
+        /// </summary>
+        public void BindPedal(string pedalName = "Pedal_R")
+        {
+            if (_pedal != null) return;
+            var go = GameObject.Find(pedalName);
+            if (go == null) return;
+            _pedal = go.transform;
+            _pedalRest = _pedal.localRotation;
         }
 
         /// <summary>

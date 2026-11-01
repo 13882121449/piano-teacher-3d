@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
@@ -403,12 +403,13 @@ namespace PianoTeacher3D.Core
         {
             if (_pedalFoot == null) return;
 
+            if (!_pedalFoot.HasPedal) _pedalFoot.BindPedal();
+
             if (!_pedalFoot.IsBound)
             {
                 var animator = _avatar != null && _avatar.CurrentView != null ? _avatar.CurrentView.Animator : null;
-                if (animator == null) return;      // 程序化角色没有 Humanoid：保持不动
-                _pedalFoot.Bind(animator);
-                if (!_pedalFoot.IsBound) return;
+                // 程序化角色没有 Humanoid：脚动不了，但踏板本体仍要跟着踩
+                if (animator != null) _pedalFoot.Bind(animator);
             }
 
             bool playing = _timeline != null && _timeline.State == PlaybackState.Playing;

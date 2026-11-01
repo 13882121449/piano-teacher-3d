@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -11,6 +11,7 @@ using UnityEngine.TestTools;
 using UnityEngine.UI;
 using PianoTeacher3D.Avatar;
 using PianoTeacher3D.CameraControl;
+using PianoTeacher3D.Characters;
 using PianoTeacher3D.Core;
 using PianoTeacher3D.MIDI;
 using PianoTeacher3D.Piano;
@@ -511,6 +512,7 @@ public class VisualSnapshotTests
             "真人角色手部特写（演奏中，不暂停）：指节弯曲与指尖接触可见",
             string.Format("t={0:F2}s，播放中抓帧", v18Time),
             session, cameraCtrl, avatar, timeline));
+        DiagHandAndPedal(session, avatar);
         session.Pause();
 
         session.SetCameraMode(CameraMode.Full);
@@ -937,5 +939,94 @@ public class VisualSnapshotTests
         for (int i = 0; i < fileName.Length && char.IsDigit(fileName[i]); i++)
             leading = leading * 10 + (fileName[i] - '0');
         return leading;
+    }
+
+    /// <summary>
+    /// 诊断用：把「演奏中」的手部相位与踏板绑定状态打到日志里。
+    /// 只在测试里调用，不进入运行时路径。
+    /// </summary>
+    private static void DiagHandAndPedal(LessonSessionController session, AvatarManager avatar)
+    {
+        var view = avatar != null ? avatar.CurrentView : null;
+        var animator = view != null ? view.Animator : null;
+        Debug.Log(string.Format("[DIAG] view={0} animator={1} isHuman={2} avatar={3}",
+            view == null ? "null" : view.CharacterId,
+            animator == null ? "null" : animator.name,
+            animator != null && animator.isHuman,
+            animator == null || animator.avatar == null ? "null" : animator.avatar.name));
+
+        var pedals = UnityEngine.Object.FindObjectsByType<PedalFootAnimator>(FindObjectsSortMode.None);
+        for (int i = 0; i < pedals.Length; i++)
+        {
+            Debug.Log(string.Format("[DIAG] pedal[{0}] bound={1} angle={2:F1} enabled={3}",
+                i, pedals[i].IsBound, pedals[i].CurrentAngleDegrees, pedals[i].enabled));
+        }
+
+        if (avatar != null && avatar.LeftHand != null)
+        {
+            DumpChain("L", avatar.LeftHand);
+            DumpChain("R", avatar.RightHand);
+        }
+
+        var poses = UnityEngine.Object.FindObjectsByType<FingerPoseController>(FindObjectsSortMode.None);
+        for (int i = 0; i < poses.Length; i++)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[DIAG] pose[").Append(i).Append("] ");
+            for (int h = 0; h < 2; h++)
+            {
+                sb.Append(h == 0 ? "L:" : " R:");
+                for (int f = 0; f < 5; f++)
+                {
+                    sb.Append(poses[i].GetPhase(h == 0, f)).Append('/').Append(poses[i].GetFingerPitch(h == 0, f)).Append(' ');
+                }
+            }
+            Debug.Log(sb.ToString());
+        }
+
+        if (avatar != null && poses.Length > 0 && poses[0].TargetSource != null)
+        {
+            DumpTargets("L", poses[0], avatar.LeftHand, true);
+            DumpTargets("R", poses[0], avatar.RightHand, false);
+        }
+    }
+
+    /// <summary>诊断：把每根手指从指根到指尖的世界方向打出来（Y 为正表示朝上竖起）。</summary>
+    private static void DumpChain(string tag, IHandRig hand)
+    {
+        if (hand == null)
+        {
+            Debug.Log("[DIAG] " + tag + " hand=null");
+            return;
+        }
+
+        var tips = hand as IFingertipRig;
+        for (int f = 0; f < hand.Fingers.Count; f++)
+        {
+            var root = hand.Fingers[f];
+            var tip = tips != null ? tips.GetFingertip(f) : null;
+            if (root == null || tip == null) continue;
+
+            Vector3 d = tip.position - root.position;
+            float len = d.magnitude;
+            Vector3 n = len > 1e-5f ? d / len : Vector3.zero;
+            Debug.Log(string.Format("[DIAG] {0}f{1} dir=({2:F2},{3:F2},{4:F2}) len={5:F3} tipY={6:F3}",
+                tag, f, n.x, n.y, n.z, len, tip.position.y));
+        }
+    }
+
+    /// <summary>诊断：每根手指的「目标键面点」与「实际指尖」的高度差（负值=指尖已低于目标）。</summary>
+    private static void DumpTargets(string tag, FingerPoseController pose, IHandRig hand, bool left)
+    {
+        if (hand == null || pose.TargetSource == null) return;
+        var tips = hand as IFingertipRig;
+        for (int f = 0; f < hand.Fingers.Count; f++)
+        {
+            if (!pose.TargetSource.TryGetFingertipTarget(left, f, out Vector3 target)) continue;
+            var tip = tips != null ? tips.GetFingertip(f) : null;
+            if (tip == null) continue;
+            Debug.Log(string.Format("[DIAG] {0}tgt{1} tgtY={2:F3} tipY={3:F3} d={4:F3} phase={5}",
+                tag, f, target.y, tip.position.y, tip.position.y - target.y, pose.GetPhase(left, f)));
+        }
     }
 }

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using PianoTeacher3D.MIDI;
 
@@ -75,6 +75,16 @@ namespace PianoTeacher3D.Avatar
         /// </para>
         /// </summary>
         public float RestCurlDegrees = 70f;
+
+        /// <summary>
+        /// 空闲手指（没有分配音符）的弯曲总量（度）。
+        /// <para>
+        /// 为什么比 <see cref="RestCurlDegrees"/> 小：实测演奏中「没分到音符的手指」会垂到
+        /// 比正在按弦的手指还低（指尖 0.753 vs 0.780），看起来像五指乱戳而不是弹琴。
+        /// 空闲手指应当<b>悬在键面上方收着</b>，把弯曲量收回来指尖就抬起来。
+        /// </para>
+        /// </summary>
+        public float RestHoverCurlDegrees = 70f;
 
         /// <summary>
         /// 三关节 CCD 的初值总弯曲（度）。与 <see cref="RestCurlDegrees"/> 解耦：
