@@ -104,7 +104,7 @@ namespace PianoTeacher3D.Tests
 
             Vector3 motion = after - before;
             Assert.Greater(motion.magnitude, 0.005f, "弯曲 30° 指尖应有可见位移");
-            Assert.Less(Vector3.Dot(motion, Vector3.down), 0f,
+            Assert.Greater(Vector3.Dot(motion, Vector3.down), 0f,
                 "弯曲应让指尖朝掌心（−手背法线 = −Y）移动，而不是横移或扭转");
         }
 
