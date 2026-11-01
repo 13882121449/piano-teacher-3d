@@ -56,6 +56,13 @@ namespace PianoTeacher3D.Characters
             {
                 mat.SetTexture("_BumpMap", normal);
                 if (mat.HasProperty("_BumpScale")) mat.SetFloat("_BumpScale", 1f);
+
+                // 只 SetTexture 不打开关键字的话，Standard / URP Lit 会整张忽略法线贴图，
+                // 皮肤就变成「一块没有毛孔和皱纹的塑料」——这正是「纹理不符合物理常识」的来源。
+                mat.EnableKeyword("_NORMALMAP");
+
+                // 贴图是切线空间法线，导入时必须按 NormalMap 类型压缩，否则通道会被当成颜色处理
+                normal.wrapMode = TextureWrapMode.Repeat;
             }
 
             if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", SkinSmoothness);

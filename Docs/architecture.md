@@ -107,8 +107,17 @@
 - **允许做**：解析数据、调度事件、二分区间查询。
 - **不允许做**：不发声、不动画、不改时间轴；不执行被导入文件中的任何命令或脚本（只解析 MIDI 数据）。
 
-### 3.5 `PianoAudioSynth`（音频，对应方案 `AudioPlaybackService`）
+### 3.4b `PedalFootAnimator`（延音踏板 → 右脚）
 
+- **职责**：把「踏板是否踩下」翻译成右脚骨骼的局部旋转（`RightFoot` 绕自身 X 轴抬起 ≤13°，`RightToes` 反向补偿 40%，0.07 s 平滑）。只改旋转，不改位置，脚不会离地。
+- **数据来源**（`MidiParser` → `SustainSpan`）：优先用曲目里真实录下的 CC64；值 ≥64 视为踩下，踩下/抬起配对成秒制半开区间 `[Start, End)`。
+- **无 CC64 的曲目**：`PedalFootAnimator.BuildAutoSustainSpans` 按 legato 生成自动延音——有音符在响就踩住，全部松开就抬起；长音按 2.2 s 换踏板（每次抬起 0.03 s），避免「一口气踩到底」。内置 `demo.mid` 没有踏板事件，走的就是这条路径。
+- **依赖方向**：只依赖 `Animator`（Humanoid）与 `IReadOnlyList<SustainSpan>`；不读时间轴、不读调度器。
+- **允许做**：绑定/解绑骨架、平滑推进角度、生成自动延音区间。
+- **不允许做**：不推进时间、不发声、不改脚的位置；程序化角色没有 Humanoid 时必须静默不动（`IsBound == false`），不得抛异常。
+- **验证**：`Assets/Tests/EditMode/PedalSustainTests.cs`（区间配对、半开边界、自动延音分段）+ `Assets/Tests/PlayMode/PedalFootRocketboxTests.cs`（真实骨架：踩下旋转 >8°、抬起复位 <1°）。
+
+### 3.5 `PianoAudioSynth`（音频，对应方案 `AudioPlaybackService`）
 - **职责**：受控发声池（24 声部 `AudioSource` + `PianoVoiceAllocator`）；音高采样**首次发声时按需生成并缓存**（`GetClip(pitch)`，不再启动即预生成 88 段）；力度→音量（线性含底噪）+ 音色（声部低通截止频率随力度）；Note Off 在 0.12 s 内余弦淡出释放。
 - **公开接口要点**：`bool Initialized`、`string LastInitError`、`int ActiveVoiceCount`、`bool Muted`、`void Initialize()`、`void OnNoteOn(MidiNoteEvent)`、`void OnNoteOff(MidiNoteEvent)`、`void ReleaseAll()`、`void SetMasterVolume(float)`。
 - **依赖方向**：依赖 `MIDI.MidiNoteEvent` 与 `PianoKeyMap` 的音高范围常量；**不依赖**会话层/时间轴（时间由事件驱动）。

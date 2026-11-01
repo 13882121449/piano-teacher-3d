@@ -48,6 +48,10 @@ namespace PianoTeacher3D.Core
         private CharacterRegistry _characterRegistry;
         private HandIKController _handIK;
         private FingerPoseController _fingerPose;
+        /// <summary>延音踏板：右脚动作（CC64 驱动；曲目没有 CC64 时退化为自动延音）。</summary>
+        private PedalFootAnimator _pedalFoot;
+        /// <summary>当前曲目的踏板区间（秒制升序），换曲时重建。</summary>
+        private System.Collections.Generic.IReadOnlyList<SustainSpan> _sustainSpans;
         private CameraModeController _camera;
         private PianoSceneEnvironment _environment;
         private ErrorReporter _reporter;
@@ -304,6 +308,7 @@ namespace PianoTeacher3D.Core
             UpdateHandLeadTargets(current);
             _metronome?.Tick(current);
             _handIK?.Tick(current);
+            UpdatePedalFoot(current);
 
             if (_displayMode == DisplayMode.Teaching) ApplyTeachingKeySpan();
 
@@ -390,6 +395,40 @@ namespace PianoTeacher3D.Core
         /// 让手腕在音符开始前先移向对应琴键。取法与 <c>HandIKController.FindHandTarget</c> 保持一致
         /// （左手取最低音、右手取最高音），并按当前练习手过滤。
         /// </summary>
+        /// <summary>
+        /// 踏板 → 右脚。绑定推迟到这里：角色视图可能在会话构建之后才切换完成。
+        /// 停止/暂停时踏板抬起，避免脚一直悬着。
+        /// </summary>
+        private void UpdatePedalFoot(float current)
+        {
+            if (_pedalFoot == null) return;
+
+            if (!_pedalFoot.IsBound)
+            {
+                var animator = _avatar != null && _avatar.CurrentView != null ? _avatar.CurrentView.Animator : null;
+                if (animator == null) return;      // 程序化角色没有 Humanoid：保持不动
+                _pedalFoot.Bind(animator);
+                if (!_pedalFoot.IsBound) return;
+            }
+
+            bool playing = _timeline != null && _timeline.State == PlaybackState.Playing;
+            _pedalFoot.Tick(playing && IsPedalDown(current), Time.deltaTime);
+        }
+
+        /// <summary>查询给定时刻踏板是否按下（区间有序，命中即返回）。</summary>
+        private bool IsPedalDown(float current)
+        {
+            var spans = _sustainSpans;
+            if (spans == null || spans.Count == 0) return false;
+
+            for (int i = 0; i < spans.Count; i++)
+            {
+                if (spans[i].Start > current) break;   // 升序：后面的都在当前时刻之后
+                if (spans[i].Contains(current)) return true;
+            }
+            return false;
+        }
+
         private void UpdateHandLeadTargets(float current)
         {
             if (_handIK == null || _scheduler == null) return;
@@ -500,6 +539,9 @@ namespace PianoTeacher3D.Core
             _fingerPose.TargetSource = _handIK;          // 手指朝"它该按的那个键"对准
             _fingerPose.Initialize(_avatar.LeftHand, _avatar.RightHand);
             _handIK.PoseIssueSource = _fingerPose;       // 关节限位次数进入动作指标（附录 A.6.3）
+
+            // 延音踏板：脚部动作独立于手部链路，绑定在角色切换后完成（见 UpdatePedalFoot）
+            _pedalFoot = gameObject.AddComponent<PedalFootAnimator>();
 
             // 9. 摄像机控制 + 环境氛围
             var cam = Camera.main;
@@ -855,6 +897,12 @@ namespace PianoTeacher3D.Core
 
                 // 按当前练习模式装载音符（分手练习由过滤层完成，方案 6.3）
                 _scheduler.Load(PianoNoteFilter.FilterByHand(result.Notes, _practiceHand));
+
+                // 踏板：优先使用文件里录下的 CC64；没有就按 legato 生成自动延音，
+                // 这样内置 demo（不含踏板事件）也能看到右脚动作，而不是硬编一段假动画。
+                _sustainSpans = result.SustainSpans != null && result.SustainSpans.Count > 0
+                    ? result.SustainSpans
+                    : PedalFootAnimator.BuildAutoSustainSpans(result.Notes);
 
                 _metronome?.Load(result.TempoChanges, result.TotalDurationSeconds);
                 // 后台已分析过就复用，避免在主线程再算一遍（优化方案 §7-8「重活不留在主线程」）

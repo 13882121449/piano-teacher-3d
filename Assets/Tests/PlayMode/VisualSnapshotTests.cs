@@ -523,6 +523,20 @@ public class VisualSnapshotTests
             "Rocketbox 默认真人角色，停止态",
             session, cameraCtrl, avatar, timeline));
 
+        // ---- V20 真人 · 延音踏板踩下：证明右脚随踏板事件动作 ----
+        // 与 V19 同角色、同机位，唯一差别是「播放中且落在踏板区间内」，
+        // 因此两张图里脚部的差异就是踏板动作本身。
+        session.Play();
+        yield return new WaitForSeconds(1.2f);
+        yield return Capture(cam, Path.Combine(dir, "V20_rocketbox_pedal.png"));
+        records.Add(Snapshot("V20_rocketbox_pedal.png", "v4 阶段 1 / 延音踏板",
+            "真人角色演奏中：延音踏板踩下时右脚脚尖抬起、脚跟着地",
+            "与 V19 同机位，播放中命中踏板区间",
+            session, cameraCtrl, avatar, timeline));
+        session.Stop();
+        session.Seek(0f);
+        yield return new WaitForSeconds(0.5f);
+
         // 复位到内置角色，避免影响后续（主菜单截图）
         session.SwitchAvatar(0);
         yield return new WaitForSeconds(0.5f);
