@@ -421,6 +421,69 @@ git commit -m "feat(camera): 真人角色特写构图调参（头肩避让）"
 
 ---
 
+## Task 3B: 真人角色静止手型实测与修复
+
+**Files:**
+- Create: `Assets/Tests/PlayMode/RocketboxRestPoseTests.cs`
+- Modify（按诊断结果）: `Assets/Scripts/Avatar/FingerPoseController.cs`、`Assets/Scripts/Avatar/HandIKController.cs`、
+  `Assets/Scripts/Characters/ImportedFingerJointAxes.cs`
+
+**背景：** 阶段 0 的 V17 显示真人双手空闲时五指张开、几乎伸直并悬空。先用实测把问题归因到
+「相位 / 关节轴 / 收拢 / 腕高」中的哪一层，禁止直接调观感参数掩盖。
+
+- [ ] **Step 1: 写实测用例**
+
+创建 `Assets/Tests/PlayMode/RocketboxRestPoseTests.cs`：加载课程场景 → 激活 Rocketbox → `Stop()` → 等 1 s →
+读取左手三关节，输出每指 `FingerPhase`、PIP 弯曲角、指尖高于键面的毫米数；断言
+「空闲时 5 指均为 Rest」且「至少 3 指 PIP > 10°」。
+
+- [ ] **Step 2: 运行并读取日志**
+
+```powershell
+& "D:\Unity\Unity 2022.3.22f1c1\Editor\Unity.exe" -batchmode -nographics -projectPath "D:\WorkBuddy Project\钢琴3D教学\piano-teacher-3d" -runTests -testPlatform PlayMode -testFilter RocketboxRestPose -testResults "_verify_out\rocket_rest.xml" -logFile "_verify_out\rocket_rest.log" -quit
+```
+
+从 `_verify_out/rocket_rest.log` 读取 `[RocketboxRestPose]` 行，按结果分支：
+
+- **相位不是 Rest**：说明空闲时仍有指尖目标。检查 `HandIKController.UpdateFingertipTargets`
+  是否在无按下音高时仍保留 `has[f]`，以及 `FingerPoseController` 是否读到上一帧目标。
+- **PIP 弯曲 ≈ 0**：说明 `RestCurlDegrees` 没有作用到导入骨架。检查
+  `FingerPoseController.JointAxes` 是否为 `ImportedFingerJointAxes`，以及
+  `CurlLocalRotation` 的 `Rest` 是否被覆盖。
+- **PIP 弯曲 > 10° 但观感仍差**：说明问题在「指间收拢 / 腕高 / 相机俯角」。进入 Step 3 的收拢与腕高调整。
+
+- [ ] **Step 3: 最小修复**
+
+优先只改以下三类，不改 IK 阈值：
+
+1. **静止相位**：保证无按下音高时 `TryGetFingertipTarget` 返回 false（必要时在
+   `HandIKController.UpdateFingertipTargets` 的 `pitches.Count == 0` 分支显式清空并同步 reset 标志）。
+2. **静止收拢**：为导入手增加「静止指间收拢」——在 `FingerPoseController` 的 Rest 分支，
+   把每指指根绕「腕部规范基的 Y 轴」朝中指方向旋转一个小角度（默认 2°–4°，拇指单独 0°），
+   用 `ImportedFingerJointAxes.RootAimLocalRotation` 或新增 `RestAdductionLocalRotation` 实现；
+   不改按压阶段的 CCD。
+3. **静止腕高**：若指尖离键面 > 60 mm，按实际值把空闲腕高下调（仅空闲分支），
+   幅度不超过 20 mm，且不影响 `HandKeyPos` 的按键目标。
+
+- [ ] **Step 4: 复跑用例与视觉**
+
+```powershell
+python Tools/verify.py --timeout 900
+python Tools/verify.py --visual --timeout 900
+```
+
+Expected: `RocketboxRestPoseTests` 通过；V17/V18 中至少 3 指呈可见弯曲，指尖不再整体悬空；
+既有 473 + 124 用例不减少。
+
+- [ ] **Step 5: 提交**
+
+```powershell
+git add Assets/Tests/PlayMode/RocketboxRestPoseTests.cs Assets/Scripts/Avatar Docs/screenshots Docs/upgrade-2026-11-01.md
+git commit -m "fix(hand): 真人角色静止 C 形手与空闲相位修复"
+```
+
+---
+
 ## Task 4: 琴房环境（墙、窗、地毯、装饰）
 
 **Files:**

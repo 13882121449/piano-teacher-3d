@@ -150,6 +150,27 @@ namespace PianoTeacher3D.Avatar
         /// <summary>手腕静息俯仰（度，绕 X）：正值使掌心略朝键面。</summary>
         public float WristPitch = 8f;
 
+        /// <summary>
+        /// 腕部滚转每「手掌偏移单位」的度数（尺偏/桡偏）。符号因骨架而异：
+        /// 程序化角色为 +6；导入骨架的绑定姿态相反，需要 -6 才能让拇指侧抬起、小指侧落下。
+        /// </summary>
+        public float WristRollPerHandUnit = 6f;
+
+        /// <summary>
+        /// 腕部朝向是否以「静止姿态」为基准叠加（导入骨架必需）。
+        /// <para>
+        /// <c>false</c>：腕骨 localRotation 直接设为 <c>Euler(WristPitch, 0, roll)</c>。
+        /// 这是按程序化角色手写的本地帧标定的，对它有效。
+        /// <c>true</c>：把首次见到的腕骨 localRotation 存为基准，改为
+        /// <c>rest × Euler(WristPitch, 0, roll)</c>，只施加想要的俯仰/滚转增量。
+        /// </para>
+        /// <para>
+        /// 导入骨架（Rocketbox 等）的腕骨绑定姿态带有多自由度旋转，绝对覆写会把掌心滚转
+        /// 几十度：实测五指同时悬空 20–77 mm，且指尖高度沿拇指→小指单调抬高 57 mm。
+        /// </para>
+        /// </summary>
+        public bool WristOrientationFromRest;
+
         /// <summary>掌心到键面的额外高度偏移（米）：补偿不同角色手掌厚度。</summary>
         public float PalmKeyPlaneOffset;
 
@@ -212,6 +233,8 @@ namespace PianoTeacher3D.Avatar
             ThumbAbduction = other.ThumbAbduction;
             ThumbOpposition = other.ThumbOpposition;
             WristPitch = other.WristPitch;
+            WristRollPerHandUnit = other.WristRollPerHandUnit;
+            WristOrientationFromRest = other.WristOrientationFromRest;
             PalmKeyPlaneOffset = other.PalmKeyPlaneOffset;
             FingertipReachAdjustment = other.FingertipReachAdjustment;
 

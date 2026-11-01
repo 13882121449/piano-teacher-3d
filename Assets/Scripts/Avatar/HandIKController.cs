@@ -246,6 +246,13 @@ namespace PianoTeacher3D.Avatar
         private Piano.PianoKeyMap _keyMap;
         private readonly HashSet<int> _pressed = new();
 
+        // 腕骨「静止姿态」缓存（rest-relative 朝向用）：只在第一次施加朝向之前采样，
+        // 之后不再被 IK 写入污染。左右手分开存，因为两手绑定姿态不同。
+        private Quaternion _leftWristRestLocal = Quaternion.identity;
+        private Quaternion _rightWristRestLocal = Quaternion.identity;
+        private bool _leftWristRestCaptured;
+        private bool _rightWristRestCaptured;
+
         /// <summary>按下音符的时值（秒）：供和弦成形时长自适应（接触方案批次 2.5）。</summary>
         private readonly Dictionary<int, float> _pressedDurations = new();
 
@@ -930,14 +937,59 @@ namespace PianoTeacher3D.Avatar
                 // 与 roll 的分工：roll 负责尺偏/桡偏（方向相反），pitch 负责补偿够不到的落键角度。
                 pitch += Mathf.Abs(offset) * Mathf.Max(0f, OuterWristPitchBias);
 
-                roll = offset * MaxWristRollDegrees * (leftHand ? -1f : 1f);
+                roll = offset * (def != null ? def.Hand.WristRollPerHandUnit : MaxWristRollDegrees) * (leftHand ? -1f : 1f);
             }
 
             // 说明：不做位置补偿 —— 腕部位置是每帧递推的状态量，叠加抬高会形成累积漂移。
             // 俯仰带来的指根位移由 FingerPoseController 的指尖 IK 每帧重新求解（以实际指根为基准），
             // 掌体与键面之间仍有约 18 mm 余量，不会穿模。
-            var target = Quaternion.Euler(pitch, 0f, roll);
+            var delta = Quaternion.Euler(pitch, 0f, roll);
             float k = 1f - Mathf.Exp(-WristOrientationSpeed * Time.deltaTime);
+
+            // 【导入骨架】手臂用「旋转骨骼」解算，只约束肩→腕的连线，绕前臂轴的滚转是自由的，
+            // 掌心朝向完全由绑定姿态决定（实测坐姿下五指指尖高度横跨 72 mm、拇指侧整体抬高）。
+            // 因此这里不做「欧拉角写 localRotation」，而是按手骨自身的基向上做**世界空间瞄准**：
+            // 令手背法线朝上（按 WristPitch 前倾）、手指朝前下方（按 roll 侧倾）。
+            if (def != null && def.Hand.WristOrientationFromRest && hand is IHandOrientationRig basis)
+            {
+                Vector3 desiredBack = delta * Vector3.up;
+                Vector3 flatForward = new Vector3(0f, -0.30f, -1f);
+                Vector3 desiredForward = Vector3.ProjectOnPlane(flatForward, desiredBack);
+                if (desiredForward.sqrMagnitude < 1e-6f) desiredForward = Vector3.ProjectOnPlane(Vector3.forward, desiredBack);
+                desiredForward = Quaternion.AngleAxis(roll, desiredBack) * desiredForward.normalized;
+
+                var localBasis = Quaternion.LookRotation(basis.FingerForwardLocal, basis.BackNormalLocal);
+                var aim = Quaternion.LookRotation(desiredForward, desiredBack) * Quaternion.Inverse(localBasis);
+
+                hand.Wrist.rotation = Quaternion.Slerp(hand.Wrist.rotation, aim, k);
+                return;
+            }
+
+            // 【程序化角色】腕骨本地帧是手写标定的（初始 localRotation 接近单位四元数），
+            // 直接把 localRotation 设为 Euler(pitch, 0, roll) 即为预期姿态。
+            var target = delta;
+            if (def != null && def.Hand.WristOrientationFromRest)
+            {
+                if (leftHand)
+                {
+                    if (!_leftWristRestCaptured)
+                    {
+                        _leftWristRestLocal = hand.Wrist.localRotation;
+                        _leftWristRestCaptured = true;
+                    }
+                    target = _leftWristRestLocal * delta;
+                }
+                else
+                {
+                    if (!_rightWristRestCaptured)
+                    {
+                        _rightWristRestLocal = hand.Wrist.localRotation;
+                        _rightWristRestCaptured = true;
+                    }
+                    target = _rightWristRestLocal * delta;
+                }
+            }
+
             hand.Wrist.localRotation = Quaternion.Slerp(hand.Wrist.localRotation, target, k);
         }
 

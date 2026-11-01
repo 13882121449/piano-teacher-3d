@@ -562,9 +562,15 @@ namespace PianoTeacher3D.Characters
             if (def == null) return null;
             def.Id = profile.CharacterId;
             def.DisplayName = profile.DisplayName;
-            def.HandHeightOffset = 0f;
+            // 标定（2026-11-01 实测）：真人骨架的腕部目标比程序化角色低约 30 mm，
+            // 腕背伸 30° 才能让掌指关节落在键面正上方（见 RocketboxRestPoseTests）。
+            def.HandHeightOffset = -0.010f;
             def.HandDepthOffset = 0f;
+            def.Hand.WristPitch = 8f;
             def.Cartoon = false;
+            // 导入骨架的腕骨绑定姿态带旋转：腕部朝向必须按「静止姿态 × 增量」合成，
+            // 否则绝对覆写会让整只手滚转（实测指尖悬空 20–77 mm）。
+            def.Hand.WristOrientationFromRest = true;
             return def;
         }
 

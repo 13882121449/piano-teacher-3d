@@ -33,6 +33,27 @@ namespace PianoTeacher3D.Avatar
     }
 
     /// <summary>
+    /// 可选扩展接口：暴露腕骨局部空间的手背法线与手指前向。
+    /// <para>
+    /// 导入骨架的手臂由「旋转骨骼」解算（<c>RotationalArmChainSolver</c>），只约束
+    /// 「肩→腕」的连线方向，<b>绕前臂轴的滚转是自由的</b>，于是掌心朝向完全由骨架绑定姿态
+    /// 决定：实测 Rocketbox 坐姿下左右手滚转都不对，五指指尖高度横跨 72 mm。
+    /// </para>
+    /// <para>
+    /// 实现方给出两个腕骨局部轴后，<c>HandIKController</c> 才能把掌心明确地「摆平」
+    /// （手背朝上、手指朝前下），而不是靠猜一个 localRotation 欧拉角。
+    /// </para>
+    /// </summary>
+    public interface IHandOrientationRig
+    {
+        /// <summary>腕骨局部空间里「手背朝外」的方向（单位向量）。</summary>
+        Vector3 BackNormalLocal { get; }
+
+        /// <summary>腕骨局部空间里「手指指向」的方向（单位向量）。</summary>
+        Vector3 FingerForwardLocal { get; }
+    }
+
+    /// <summary>
     /// 可选扩展接口：暴露每指的 <b>MCP / PIP / DIP 三关节</b>与静止指长（评估文档附录 A.4.1 / A.4.4）。
     /// <para>
     /// <c>FingerPoseController</c> 据此做关节级姿态解算与受限指尖 IK；

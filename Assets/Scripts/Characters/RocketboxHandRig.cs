@@ -22,7 +22,7 @@ namespace PianoTeacher3D.Characters
     /// 它们都是模型根的子节点，随模型根一起销毁，因此不单独登记到资源作用域。
     /// </para>
     /// </summary>
-    public sealed class RocketboxHandRig : IHandRig, IFingerJointRig
+    public sealed class RocketboxHandRig : IHandRig, IFingerJointRig, IHandOrientationRig
     {
         /// <summary>每只手的手指数（0 = 拇指 … 4 = 小指）。</summary>
         public const int FingersPerHand = 5;
@@ -62,6 +62,12 @@ namespace PianoTeacher3D.Characters
 
         /// <summary>腕部局部空间中的拇指侧（规范基 +X，已乘 SideSign）。</summary>
         public Vector3 ThumbSide { get; private set; } = Vector3.right;
+
+        // 说明：显式实现，避免把「腕骨局部轴」和「世界轴」混用（BackNormal 的坐标系
+        // 在 DeriveCanonicalBasis 里已确定为腕骨局部空间）。
+        Vector3 IHandOrientationRig.BackNormalLocal => BackNormal;
+
+        Vector3 IHandOrientationRig.FingerForwardLocal => FingerDirection;
 
         /// <summary>左手 +1 / 右手 −1（用于把「拇指侧」换算成规范 X 轴）。</summary>
         public float SideSign => LeftHand ? 1f : -1f;

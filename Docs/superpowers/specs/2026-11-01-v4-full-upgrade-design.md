@@ -61,7 +61,7 @@
 | 步骤 | 动作 | 落点 |
 |---|---|---|
 | 0.1 | 新增 PlayMode 截图用例：显式 `RestoreCharacter(RocketboxFemaleId)` 后采集真人全景、特写空闲、特写演奏、主菜单 | `Assets/Tests/PlayMode/VisualSnapshotTests.cs` |
-| 0.2 | 输出 `V17_rocketbox_closeup_idle.png`、`V18_rocketbox_closeup_playing.png`、`V19_rocketbox_full.png`、`V20_default_mainmenu.png` | `Docs/screenshots/` |
+| 0.2 | 输出 `V17_rocketbox_closeup_idle.png`、`V18_rocketbox_closeup_playing.png`、`V19_rocketbox_full.png` | `Docs/screenshots/` |
 | 0.3 | 人工核对四项：手部是否自然弯曲、指尖是否贴键、头/躯干是否遮挡、坐姿是否穿模；结论写入升级记录 | `Docs/upgrade-2026-11-01.md` |
 
 **验收**：四张新图生成，`manifest.md` 自动更新；文档如实记录真人特写的缺陷清单。
@@ -78,6 +78,9 @@
 - **Rocketbox 导入角色**：全身是一张蒙皮网格，**不拆分、不隐藏身体**。优先用相机构图解决：
   提高俯角、拉近、把焦点下压到键面，尽量让头/躯干退出画面；若阶段 0 实拍仍明显入画，再评估
   世界空间遮罩着色器（仅 High 档）作为兜底，且必须保留蒙皮与手部完整。
+- **真人静止手型**：阶段 0 实拍显示 Rocketbox 双手空闲时张开、悬空；阶段 1 先做
+  「静止 C 形手」实测与修复（相位、三关节弯曲、指间收拢、指尖贴键），用 PlayMode 用例锁定，
+  再继续场景与主菜单。
 - 新增断言：特写模式下「双手掌与 88 键中的活动键范围」在视口内；躯干包围盒中心不在视口中心区域。
 - 对外参数保持现有 `CameraModeController` 接口；不新增第二个相机状态。
 
@@ -106,7 +109,8 @@
 
 - 结构：品牌区（标题 + 一句定位）→ 继续练习卡 → 曲库卡片网格 → 最近播放 → 底部快捷键说明。
 - 曲目卡显示：中文标题、作曲/来源、难度、时长、音符数；数据来自 `Songs/catalog.json`（见阶段 3）。
-- 新增“设置”入口：画质档位（自动/标准/高）、主音量、下落音符默认显示、键盘映射说明。
+- 阶段 1 先做“继续练习”入口与信息完整曲目卡；设置面板（画质 / 主音量 / 下落音符默认显示 / 键盘映射说明）
+  随阶段 2–3 接入，避免首屏一次堆太多低频控件。
 - 全部使用 `UITheme` 令牌；不硬编码颜色 / 字号 / 控件高度。
 - 空态 / 错误态仍用居中卡片，保留导入入口。
 
@@ -221,6 +225,7 @@ bool TryCollectFallingNotes(float from, float to, List<FallingNoteLane> result)
   失败时静默降级，不影响发声池。
 - 现有非谐分音、独立衰减、击弦瞬态、制音声、按音高声像保留。
 - 真实钢琴采样：**本次不引入**；如后续需要，按 `Docs/asset-licenses.md` 五项指标单独评估与登记。
+- 主菜单设置面板：画质（自动/标准/高）、主音量、下落音符默认显示、键盘映射说明；与音频同阶段接入。
 
 **验收**：主菜单显示 6+ 首带中文名的曲目；首曲可正常解析、分手、循环；音频初始化失败仍可静音继续。
 
@@ -321,7 +326,7 @@ PracticeInputController（键盘/鼠标）── PracticeNoteOn/Off ──→ �
 
 ## 8. 附：本设计对应的验收产物
 
-- `Docs/screenshots/V17_…` ~ `V20_…` 与更新后的 `manifest.md`
+- `Docs/screenshots/V17_…` ~ `V19_…` 与更新后的 `manifest.md`
 - `Docs/screenshots/baseline/`（更新后的基线）
 - `Docs/upgrade-2026-11-01.md`（执行记录与实测数据）
 - 新增测试文件与测试报告
