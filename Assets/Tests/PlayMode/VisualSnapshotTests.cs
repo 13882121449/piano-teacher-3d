@@ -473,6 +473,56 @@ public class VisualSnapshotTests
                 session.CurrentCharacterView != null ? session.CurrentCharacterView.CharacterId : "(null)"),
             session, cameraCtrl, avatar, timeline));
 
+        // ---- V17 / V18 / V19：真实默认角色（Rocketbox）的特写与全景 ----
+        // 为什么单独拍：生产默认 SelectedCharacterId = rocketbox.female01，但 batchmode
+        // 按设计跳过偏好，01–06 / V01–V14 拍的仍是内置角色。真人特写从未有过基线，
+        // 手部弯曲、指尖贴键、头/躯干遮挡只能靠这三张图判断。
+        session.SwitchAvatar(0);                 // 先离开外部角色，确保事务可重入
+        yield return new WaitForSeconds(0.4f);
+        if (foundProfile)
+        {
+            var reActivate = session.ActivateCharacter(rocketboxProfile);
+            Debug.Log(string.Format("[V17] Rocketbox 再次激活：成功={0} 原因={1}",
+                reActivate.Succeeded, string.IsNullOrEmpty(reActivate.Error) ? "(无)" : reActivate.Error));
+            yield return new WaitForSeconds(1.0f);
+        }
+
+        session.Stop();
+        session.ClearLoop();
+        session.SetPracticeHand(PracticeHand.Both);
+        session.SetHighlightMode(HighlightMode.Off);
+        session.SetCameraMode(CameraMode.Closeup);
+        session.Seek(0f);
+        yield return new WaitForSeconds(2.0f);
+        yield return Capture(cam, Path.Combine(dir, "V17_rocketbox_closeup_idle.png"));
+        records.Add(Snapshot("V17_rocketbox_closeup_idle.png", "v4 阶段 0 / 真实默认体验",
+            "真人角色手部特写（空闲）：手掌、五指、琴键同时可见；头/躯干不遮挡键面",
+            "Rocketbox 默认真人角色，停止态；用于判断手型与遮挡",
+            session, cameraCtrl, avatar, timeline));
+
+        float v18Time = notes.Count > 0 && NoteScan.TryFindChordTime(notes, 2, 48, 76, 0.06f, out float chord18, out _)
+            ? chord18
+            : total * 0.25f;
+        session.Seek(v18Time);
+        session.Play();
+        yield return new WaitForSeconds(0.30f);
+        yield return Capture(cam, Path.Combine(dir, "V18_rocketbox_closeup_playing.png"));
+        records.Add(Snapshot("V18_rocketbox_closeup_playing.png", "v4 阶段 0 / 真实默认体验",
+            "真人角色手部特写（演奏中，不暂停）：指节弯曲与指尖接触可见",
+            string.Format("t={0:F2}s，播放中抓帧", v18Time),
+            session, cameraCtrl, avatar, timeline));
+        session.Pause();
+
+        session.SetCameraMode(CameraMode.Full);
+        session.Stop();
+        session.Seek(0f);
+        yield return new WaitForSeconds(1.5f);
+        yield return Capture(cam, Path.Combine(dir, "V19_rocketbox_full.png"));
+        records.Add(Snapshot("V19_rocketbox_full.png", "v4 阶段 0 / 真实默认体验",
+            "真人角色全景：坐姿、琴凳、琴体、键面完整；无穿模与悬空",
+            "Rocketbox 默认真人角色，停止态",
+            session, cameraCtrl, avatar, timeline));
+
         // 复位到内置角色，避免影响后续（主菜单截图）
         session.SwitchAvatar(0);
         yield return new WaitForSeconds(0.5f);
