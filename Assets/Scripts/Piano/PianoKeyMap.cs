@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace PianoTeacher3D.Piano
@@ -345,9 +345,9 @@ namespace PianoTeacher3D.Piano
                 new Vector3(0.11f, 0.20f, 0.06f), woodDark);
 
             var pedalMesh = Track(PianoMeshFactory.CreateChamferedBox(0.04f, 0.016f, 0.12f, 0.004f, ChamferMode.AllEdges));
-            CreateCaseMeshPart(c, "Pedal_L", pedalMesh, new Vector3(mid - 0.09f, 0.185f, 0.12f), brass);
-            CreateCaseMeshPart(c, "Pedal_C", pedalMesh, new Vector3(mid, 0.185f, 0.12f), brass);
-            CreateCaseMeshPart(c, "Pedal_R", pedalMesh, new Vector3(mid + 0.09f, 0.185f, 0.12f), brass);
+            CreateCaseMeshPart(c, "Pedal_L", pedalMesh, new Vector3(mid - 0.09f, 0.110f, 0.12f), brass);
+            CreateCaseMeshPart(c, "Pedal_C", pedalMesh, new Vector3(mid, 0.110f, 0.12f), brass);
+            CreateCaseMeshPart(c, "Pedal_R", pedalMesh, new Vector3(mid + 0.09f, 0.110f, 0.12f), brass);
 
             // ==================== 结构细节（写实化二期） ====================
             // 这一组不改变任何演奏几何，只补「可辨识特征」——真实钢琴之所以一眼能认出来，
