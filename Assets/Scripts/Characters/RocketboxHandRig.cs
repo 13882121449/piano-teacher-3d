@@ -69,6 +69,10 @@ namespace PianoTeacher3D.Characters
 
         Vector3 IHandOrientationRig.FingerForwardLocal => FingerDirection;
 
+        Vector3 IHandOrientationRig.ThumbSideLocal => ThumbSide;
+
+        float IHandOrientationRig.SideSign => SideSign;
+
         /// <summary>左手 +1 / 右手 −1（用于把「拇指侧」换算成规范 X 轴）。</summary>
         public float SideSign => LeftHand ? 1f : -1f;
 

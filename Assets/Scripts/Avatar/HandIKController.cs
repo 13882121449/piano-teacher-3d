@@ -952,17 +952,42 @@ namespace PianoTeacher3D.Avatar
             // 令手背法线朝上（按 WristPitch 前倾）、手指朝前下方（按 roll 侧倾）。
             if (def != null && def.Hand.WristOrientationFromRest && hand is IHandOrientationRig basis)
             {
-                // 说明：ImportedFingerJointAxes 的 BackNormal 实际是「掌心朝外」的偏法线
-                // （RocketboxHandRig.BackNormal 由腕骨朝向推导，方向朝掌心外侧），
-                // 若要掌心朝下必须取反，否则手掌朝天、指尖越弯越高（实测 +130~168 mm）。
-                Vector3 desiredBack = -(delta * Vector3.up);
-                Vector3 flatForward = new Vector3(0f, -0.30f, -1f);
-                Vector3 desiredForward = Vector3.ProjectOnPlane(flatForward, desiredBack);
-                if (desiredForward.sqrMagnitude < 1e-6f) desiredForward = Vector3.ProjectOnPlane(Vector3.forward, desiredBack);
-                desiredForward = Quaternion.AngleAxis(roll, desiredBack) * desiredForward.normalized;
+                // 【为什么不用 LookRotation 拼基】
+                // 「手指前向 + 手背法线」两个约束无法确定绕手指轴的扭转：法线一旦被翻转 180°，
+                // 解出来的手就能左右互换（实测左手拇指朝外、看起来像右手，镜像错误来自这里）。
+                // 改为「先对齐手指方向，再绕该轴把拇指侧转到内侧」——拇指朝向是左右手唯一的判别依据。
+                //
+                // 内侧方向不写死：取另一只手腕相对本手腕的方向在水平面的分量。
+                // 这样不依赖琴/人物在世界里的朝向，换机位或换场景也不会翻手。
+                IHandRig other = leftHand ? _avatar.RightHand : _avatar.LeftHand;
+                Vector3 inward = Vector3.zero;
+                if (other != null && other.Wrist != null)
+                {
+                    inward = other.Wrist.position - hand.Wrist.position;
+                    inward.y = 0f;
+                }
+                if (inward.sqrMagnitude < 1e-6f)
+                    inward = leftHand ? Vector3.right : Vector3.left;   // 兜底：拇指指向身体中线
 
-                var localBasis = Quaternion.LookRotation(basis.FingerForwardLocal, basis.BackNormalLocal);
-                var aim = Quaternion.LookRotation(desiredForward, desiredBack) * Quaternion.Inverse(localBasis);
+                // 手指朝「远离演奏者、略微向下」，也就是指向键盘深处。
+                Vector3 desiredForward = new Vector3(0f, -0.30f, -1f).normalized;
+                if (Vector3.Dot(desiredForward, inward.normalized) != 0f)
+                    desiredForward = Vector3.ProjectOnPlane(desiredForward, inward.normalized).normalized;
+
+                Quaternion align = Quaternion.FromToRotation(basis.FingerForwardLocal.normalized, desiredForward);
+                // ThumbSideLocal 是「拇指 × SideSign」的规范 X 轴，右手要乘回去才是真拇指方向；
+                // 漏了这一步就会把右手拇指转到外侧（看起来左右手反了）。
+                Vector3 thumbNow = align * (basis.ThumbSideLocal * basis.SideSign);
+                Vector3 thumbFlat = Vector3.ProjectOnPlane(thumbNow, desiredForward);
+                Vector3 inwardFlat = Vector3.ProjectOnPlane(inward, desiredForward);
+                Quaternion aim = align;
+                if (thumbFlat.sqrMagnitude > 1e-8f && inwardFlat.sqrMagnitude > 1e-8f)
+                {
+                    float twist = Vector3.SignedAngle(thumbFlat, inwardFlat, desiredForward);
+                    // 注意：这个扭转是「把拇指转到内侧」的完整约束（可达 ±90°+），不能钳制；
+                    // roll（键盘两端的轻微尺偏/桡偏，±6°）只是叠加在它之上的小扰动。
+                    aim = Quaternion.AngleAxis(twist + roll, desiredForward) * align;
+                }
 
                 hand.Wrist.rotation = Quaternion.Slerp(hand.Wrist.rotation, aim, k);
                 return;

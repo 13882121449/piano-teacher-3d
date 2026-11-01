@@ -51,6 +51,16 @@ namespace PianoTeacher3D.Avatar
 
         /// <summary>腕骨局部空间里「手指指向」的方向（单位向量）。</summary>
         Vector3 FingerForwardLocal { get; }
+
+        /// <summary>
+        /// 腕骨局部空间里的「规范 X 轴」= 拇指方向 × <see cref="SideSign"/>（单位向量）。
+        /// 注意它不是纯粹的拇指方向：右手为 −拇指，用之前必须乘回 <see cref="SideSign"/>。
+        /// 加这条约束才能唯一确定绕手指轴的扭转（只有前向 + 背向时左右手会镜像）。
+        /// </summary>
+        Vector3 ThumbSideLocal { get; }
+
+        /// <summary>左手 +1 / 右手 −1：把规范 X 轴换算回拇指方向。</summary>
+        float SideSign { get; }
     }
 
     /// <summary>

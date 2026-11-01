@@ -162,7 +162,8 @@ namespace PianoTeacher3D.Characters
             // Unity 的 Vector3.Cross 与 Quaternion.AngleAxis 都按左手规则，两者叠乘后符号相反：
             // 取 cross(dir, curl) 会让正向弯曲把手指抬起来（实测指尖朝 +Y 而非掌心）。
             // 因此轴取反，保证 degrees ≥ 0 恒为屈曲方向。
-            axis = -axis.normalized;
+            // 正方向 = 屈曲（指尖朝掌心侧移动）。绕 −axis 旋转会让指节做伸展，静止手型反而张开。
+            axis = axis.normalized;
 
             _joints[joint] = new JointAxis
             {

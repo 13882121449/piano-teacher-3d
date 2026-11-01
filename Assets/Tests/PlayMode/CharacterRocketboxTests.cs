@@ -261,7 +261,8 @@ namespace PianoTeacher3D.Tests
                         Vector3 motion = after - before;
                         Assert.Greater(motion.magnitude, 0.002f,
                             $"{labels[h]}第 {f} 指弯曲 30° 后指尖几乎没动（{motion.magnitude * 1000f:0.#} mm）");
-                        Assert.Less(Vector3.Dot(motion, palmDirection), 0f,
+                        // palmDirection 是「掌心朝向」，指尖屈曲应朝这个方向走，dot 应为正。
+                        Assert.Greater(Vector3.Dot(motion, palmDirection), 0f,
                             $"{labels[h]}第 {f} 指弯曲方向错误：指尖没有朝掌心移动" +
                             $"（dot={Vector3.Dot(motion, palmDirection) * 1000f:0.##} mm）");
 
