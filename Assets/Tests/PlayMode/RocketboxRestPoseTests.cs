@@ -71,12 +71,20 @@ namespace PianoTeacher3D.Tests.PlayMode
             var left = avatar.LeftHand as IFingerJointRig;
             Assert.IsNotNull(left, "Rocketbox 左手应实现 IFingerJointRig");
 
-            var sb = new StringBuilder("[RocketboxRestPose]\n");
+            var sb = new StringBuilder("[RocketboxRestPose] " + characterId);
+            sb.AppendLine();
             int curledFingers = 0;
+            float indexTipMm = float.NaN;
 
             // 诊断：手位/朝向与各指关节高度（区分「整手偏高」与「掌心滚转」）
             var wrist = avatar.LeftHand.Wrist;
             var def = avatar.CurrentDefinition;
+            sb.AppendLine(string.Format(
+                "view={0} viewId={1} handType={2} defId={3}",
+                avatar.CurrentView != null ? avatar.CurrentView.GetType().Name : "null",
+                avatar.CurrentView != null ? avatar.CurrentView.CharacterId : "-",
+                avatar.LeftHand != null ? avatar.LeftHand.GetType().Name : "null",
+                def != null ? def.Id : "-"));
             var ori = avatar.LeftHand as IHandOrientationRig;
             string basisText = "n/a";
             if (ori != null)
@@ -120,9 +128,16 @@ namespace PianoTeacher3D.Tests.PlayMode
                     $"空闲时第 {f} 指应处于 Rest 相位，实际 {phase}（有目标才会进入 Approach/Press）");
 
                 if (pipBend > 10f) curledFingers++;
+                if (f == 1) indexTipMm = tipAboveKeysMm;
             }
 
             Debug.Log(sb.ToString());
+
+            // 食指（f=1）是主要演奏指：指尖落在键面 +2 mm 上下才谈得上「按到键」。
+            // 阈值放 −3~+8 mm：既要防「悬空 2 cm 够不着」，也要防「整只手扎进键面」。
+            Assert.IsTrue(indexTipMm > -3f && indexTipMm < 8f,
+                $"食指指尖应贴在键面（−3~+8 mm），实际 {indexTipMm:F1} mm；" +
+                $"腕高 hOffset={def?.HandHeightOffset:F3} 需要用 HandHeightOffsetFor 重新标定。");
 
             Assert.GreaterOrEqual(curledFingers, 3,
                 "静止手型至少 3 指应有可见弯曲（PIP > 10°）；实际只有 " + curledFingers +

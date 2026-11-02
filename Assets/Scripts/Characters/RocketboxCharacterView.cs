@@ -562,9 +562,10 @@ namespace PianoTeacher3D.Characters
             if (def == null) return null;
             def.Id = profile.CharacterId;
             def.DisplayName = profile.DisplayName;
-            // 标定（2026-11-01 实测）：真人骨架的腕部目标比程序化角色低约 30 mm，
-            // 腕背伸 30° 才能让掌指关节落在键面正上方（见 RocketboxRestPoseTests）。
-            def.HandHeightOffset = 0.028f;
+            // 标定：真人骨架的腕部目标比程序化角色低约 30 mm，腕背伸 30° 才能让掌指关节
+            // 落在键面正上方（见 RocketboxRestPoseTests）。三个角色骨架尺寸不同，
+            // 用同一个常量会让成人的指尖悬空、儿童的指尖扎进键面，因此按 id 分别标定。
+            def.HandHeightOffset = HandHeightOffsetFor(profile);
             def.HandDepthOffset = 0f;
             def.Hand.WristPitch = 8f;
             def.Cartoon = false;
@@ -758,5 +759,24 @@ namespace PianoTeacher3D.Characters
                 return false;
             }
         }
+        /// <summary>
+        /// 每个导入角色各自的腕高标定值（米）。
+        /// <para>
+        /// 判据不是「五个指尖都在键面上」——真人静止手型的拇指本来就比其余四指低 20 mm 上下
+        /// （拇指搭在键沿前方）。这里按<b>食指</b>指尖落点标定：目标 +2 mm 左右，
+        /// 中/无名指允许 −5~+5 mm，小指略高，拇指允许低到 −25 mm。
+        /// </para>
+        /// </summary>
+        private static float HandHeightOffsetFor(CharacterProfile profile)
+        {
+            if (profile == null) return 0.016f;
+            switch (profile.CharacterId)
+            {
+                case CharacterRegistry.RocketboxMaleId: return 0.008f;
+                case CharacterRegistry.RocketboxChildId: return 0.001f;
+                default: return 0.016f;   // 女性成人（默认）
+            }
+        }
+
     }
 }
