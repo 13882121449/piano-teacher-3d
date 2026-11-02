@@ -50,3 +50,6 @@ __pycache__/
 
 # 会话工作目录（不进版本库）
 .workbuddy/
+
+# brainstorming 可视化伴侣的临时产物
+.superpowers/
