@@ -289,3 +289,38 @@ python Tools/static_checks.py && python Tools/verify.py
 ```
 
 Expected: 静态 4 条 0 违规；EditMode 522+、PlayMode 162+ 全绿；视觉基线 26 张重采 + 3 张新增；`git status` 干净。
+
+---
+
+## 暂停点（2026-11-02 21:32）
+
+用户暂停项目。当前状态与下次接手的入口，按顺序写在这里。
+
+### 已完成
+
+- Task 1 资产：`Tools/fetch_rocketbox_avatar.py` 抓下 `Male_Adult_01`、`Female_Child_01`（FBX + 贴图 + 人像），Rocketbox 目录 23 MB → 52 MB。
+- Task 2 注册表：三个内置角色改为 Prefab 真人（`rocketbox.female01` / `rocketbox.male01` / `rocketbox.child01`，显示名 写实女性 / 写实男性 / 儿童）；`RocketboxTextureLibrary` 支持按前缀绑定；新增 `RocketboxModelImportPostprocessor` 强制 Humanoid；`BuildTransformIndex` 兼容 `Bip02` 前缀。
+- 验证：EditMode 522 通过；PlayMode 162 通过 / 4 跳过（加三个角色手型测试之前的基线）。
+
+### 两个卡点（下次开工先解这两个）
+
+1. **男性角色缺 `m002_opacity_color` 贴图**：资产门禁报「缺少主贴图 → 拒绝激活」。该文件走 GitHub blobs 反复 `IncompleteRead`（约 1.1 MB，三次重试都被截断），需要换获取方式（分段 Range 请求，或改用 `?ref=master` 的 HTML blob 页面）。
+2. **女性角色手型回归**：`RocketboxRestPoseTests` 实测指尖 −11.3/−19.0/−23.6/−19.2/−6.9 mm（原标定 −21/+14/0/+12/+18）。根因已定位：这段 FBX 之前的 meta 里 `rigImportErrors` 写着 *duplicate transform 'Bip01 L Finger0'*、`human: []`（等于**没有 Humanoid 映射**，全靠名字查骨骼）；现在 `avatarSetup: 1` 生成了合法 Avatar，蒙皮/骨骼解析路径变了，静止掌位跟着偏移，`HandHeightOffset = 0.028` 不再适用。**需要按角色标定**，不要再用一个全局常量。
+
+### 接手步骤
+
+```bash
+# 1. 补齐男性/儿童贴图（脚本已支持按前缀补抓）
+py Tools/fetch_rocketbox_avatar.py Male_Adult_01 --group Adults  --prefix m002
+py Tools/fetch_rocketbox_avatar.py Female_Child_01 --group Children --prefix cf001
+
+# 2. 三个角色的静止手型实测（会打印 L0..L4 的 tip/prox/mid/dist）
+Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode \
+  -testFilter "RocketboxRestPose" -testResults <abs>.xml -logFile <abs>.log   # 不要加 -quit
+
+# 3. 按实测值给每个角色单独的 HandHeightOffset（改 RocketboxCharacterView.BuildDefinition 的字典），
+#    目标：最低指尖落在 +2 mm 左右，且五指 PIP > 10°。
+# 4. 给 RocketboxRestPoseTests 加断言：minTip ∈ [-3, +10] mm，防止再次静默回归。
+```
+
+之后才是 Task 4（头像缩略图）到 Task 8（氛围 / Canvas / 贴图）。
