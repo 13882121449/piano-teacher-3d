@@ -324,3 +324,29 @@ Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode \
 ```
 
 之后才是 Task 4（头像缩略图）到 Task 8（氛围 / Canvas / 贴图）。
+
+## 进度快照（2026-11-03 00:50，暂停点）
+
+| 任务 | 状态 | 说明 |
+|---|---|---|
+| Task 1 资产 | ✅ | `m`ale01 / `child01` 的 FBX、贴图、人像已入库；`Tools/fetch_rocketbox_avatar.py` 支持分块下载（大贴图走 206 Range） |
+| Task 2 注册表 | ✅ | `BuiltInIds` 改为三个预制体 id，显示名「写实女性 / 写实男性 / 儿童」 |
+| Task 3 标定 | ✅ | 腕高按角色标定（女 0.016 / 男 0.008 / 童 0.001）；三角色静止手型用例全过，食指指尖 2.1 / 5.1 / 5.1 mm |
+| Task 4 头像缩略图 | ⬜ | 未开始 |
+| Task 5-7 UI 令牌 / 组件 / 三界面重做 | ⬜ | 未开始（方向 B 暖木古典已定案） |
+| Task 8 氛围 / Canvas / 降采样 | ⬜ | 未开始 |
+
+### 本轮修复的关键 bug
+
+`CharacterSwitchService` 的 no-op 判定只比较 `CharacterId`，而 `ProceduralCharacterView.CharacterId`
+在内置索引下回落到 `BuiltInIds[_index]`（就是 `rocketbox.female01`）。于是「请求真人女性」被判定为
+重复请求并 `CommitNoOp` 短路，画面永远停在方块人——这正是用户反复说「还是假写实」的根因。
+修复方式：同 id 时再加一层「视图种类」判定（`SameViewKind`，比较 `IsBuiltInBacked` 与
+`CharacterSource.ProceduralBuiltIn`）。
+
+### 下次接手
+
+1. 先重跑全量 PlayMode 确认这两个失败是否偶发：`PlaybackPerformance_5Seconds`、`CancelLoad_KeepsPreviousSongPlayable`
+   （本轮 128 过 / 2 败 / 4 跳；两者与角色改动无关，疑为负载下的计时抖动）。
+2. 跑 `CaptureLessonViews` 重采视觉基线，确认三个角色在首屏/特写里都换成了真人。
+3. 按 Task 4 → Task 5（UI 令牌）→ Task 6/7（三界面）顺序继续。
