@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -37,19 +37,19 @@ namespace PianoTeacher3D.Tests.PlayMode
             Assert.IsNotNull(session.CharacterRegistry,
                 "会话必须持有角色注册表（写实化批次 1：UI 与恢复共用同一实例）");
 
-            // 激活内置卡通角色：TryActivate 对 ProceduralBuiltIn 走 ActivateBuiltIn 路径，必然成功；
+            // 激活写实女性角色：走 Prefab 路径加载 Resources 里的 FBX；
             // 成功触发 OnCharacterViewChanged → ID 写进会话内存偏好（与生产持久化同一代码路径）
             var registry = session.CharacterRegistry;
-            Assert.IsTrue(registry.TryGet(CharacterRegistry.BuiltInCartoonId, out CharacterProfile cartoon),
-                "内置卡通角色必须在注册表中");
-            CharacterSwitchResult activate = session.ActivateCharacter(cartoon);
+            Assert.IsTrue(registry.TryGet(CharacterRegistry.RocketboxFemaleId, out CharacterProfile female),
+                "写实女性角色必须在注册表中");
+            CharacterSwitchResult activate = session.ActivateCharacter(female);
             Assert.IsTrue(activate.Succeeded, "内置角色切换必须成功：" + activate.Error);
-            Assert.AreEqual(CharacterRegistry.BuiltInCartoonId, session.CurrentCharacterView.CharacterId);
+            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, session.CurrentCharacterView.CharacterId);
 
             // 无参重载读会话内存偏好（刚被持久化为卡通 ID）→ 恢复回同一角色
             session.RestoreCharacter();
 
-            Assert.AreEqual(CharacterRegistry.BuiltInCartoonId, session.CurrentCharacterView.CharacterId,
+            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, session.CurrentCharacterView.CharacterId,
                 "恢复后必须回到持久化的角色");
         }
 

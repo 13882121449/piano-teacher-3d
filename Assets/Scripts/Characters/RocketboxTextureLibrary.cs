@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace PianoTeacher3D.Characters
 {
@@ -33,11 +33,18 @@ namespace PianoTeacher3D.Characters
         /// <summary>把贴图绑定到材质（幂等：已有主贴图时不覆盖，便于美术在 Inspector 覆写）。</summary>
         public static void Bind(Material mat, string materialName)
         {
+            Bind(mat, materialName, "f001");
+        }
+
+        /// <summary>把贴图绑定到材质，贴图前缀按角色区分（f001 / m002 / cf001）。</summary>
+        public static void Bind(Material mat, string materialName, string texturePrefix)
+        {
             if (mat == null) return;
 
             var semantic = ClassifySemantic(materialName);
-            var color = Load($"{ResourceRoot}f001_{semantic}_color");
-            var normal = Load($"{ResourceRoot}f001_{semantic}_normal");
+            var prefix = string.IsNullOrEmpty(texturePrefix) ? "f001" : texturePrefix;
+            var color = Load($"{ResourceRoot}{prefix}_{semantic}_color");
+            var normal = Load($"{ResourceRoot}{prefix}_{semantic}_normal");
 
             // 颜色：内置 Standard 用 _MainTex，URP/Lit 用 _BaseMap，两者都设（不存在的属性 SetTexture 是安全的空操作）
             if (color != null)

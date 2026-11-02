@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using PianoTeacher3D.Avatar;
 using UnityEngine;
@@ -608,7 +608,8 @@ namespace PianoTeacher3D.Characters
                     RemapShaderToActivePipeline(inst);   // URP 下内置 shader 渲染为洋红，须先迁移
                     // FBX 内的贴图路径指向建模机的临时目录，导入器永远解析不到 → 必须运行时绑定，
                     // 否则整套材质没有主贴图，角色是白模（资产门禁会据此拒绝该角色）
-                    RocketboxTextureLibrary.Bind(inst, src.name);
+                    RocketboxTextureLibrary.Bind(inst, src.name,
+                        PianoTeacher3D.Characters.CharacterRegistry.TexturePrefixFor(_profile.ResourcesPath));
                     _scope.Own(inst);
                     _ownMaterials.Add(inst);
                     instances[m] = inst;

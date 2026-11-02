@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using NUnit.Framework;
 using PianoTeacher3D.Characters;
 using UnityEngine;
@@ -101,8 +101,9 @@ namespace PianoTeacher3D.Tests
 
             var result = profile.Validate();
             Assert.IsTrue(result.Ok, result.Message);
-            Assert.AreEqual(CharacterSource.ProceduralBuiltIn, profile.Source);
-            Assert.AreEqual(0, profile.ProceduralIndex);
+            Assert.AreEqual(CharacterSource.Prefab, profile.Source);
+            Assert.AreEqual(-1, profile.ProceduralIndex);
+            Assert.IsFalse(string.IsNullOrEmpty(profile.ResourcesPath));
         }
 
         [Test]

@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Text;
 using NUnit.Framework;
 using UnityEngine;
@@ -21,8 +21,26 @@ namespace PianoTeacher3D.Tests.PlayMode
     /// </summary>
     public class RocketboxRestPoseTests
     {
+        /// <summary>三个内置真人角色各测一遍：儿童骨架更小，标定值不能沿用成人。</summary>
         [UnityTest]
         public IEnumerator Rocketbox_RestingHand_HasVisibleCurl()
+        {
+            yield return MeasureRestPose(CharacterRegistry.RocketboxFemaleId);
+        }
+
+        [UnityTest]
+        public IEnumerator RocketboxMale_RestingHand_HasVisibleCurl()
+        {
+            yield return MeasureRestPose(CharacterRegistry.RocketboxMaleId);
+        }
+
+        [UnityTest]
+        public IEnumerator RocketboxChild_RestingHand_HasVisibleCurl()
+        {
+            yield return MeasureRestPose(CharacterRegistry.RocketboxChildId);
+        }
+
+        private IEnumerator MeasureRestPose(string characterId)
         {
             SceneManager.LoadScene("PianoLesson");
             yield return null;
@@ -40,8 +58,8 @@ namespace PianoTeacher3D.Tests.PlayMode
             CharacterProfile profile = null;
             Assert.IsTrue(session.CharacterRegistry != null &&
                           session.CharacterRegistry.TryGet(
-                              CharacterRegistry.RocketboxFemaleId, out profile),
-                "角色库缺少 Rocketbox 档案");
+                              characterId, out profile),
+                "角色库缺少 Rocketbox 档案：" + characterId);
 
             var switchResult = session.ActivateCharacter(profile);
             Assert.IsTrue(switchResult.Succeeded,
