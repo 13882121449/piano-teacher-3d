@@ -57,19 +57,19 @@ namespace PianoTeacher3D.UI
         /// 底：场景背景（最深）。由 <c>Core/LessonSessionController</c> 直接使用，务必保留。
         /// 亮度 0.0060 —— 全表最低，其余层级严格递增。
         /// </summary>
-        public static readonly Color SceneBg = new Color(0.063f, 0.071f, 0.086f, 1f);
+        public static readonly Color SceneBg = new Color(0.086f, 0.063f, 0.055f, 1f);
 
         /// <summary>面：面板底色（带轻微透明，浮于场景之上）。</summary>
-        public static readonly Color PanelBg = new Color(0.106f, 0.118f, 0.141f, 0.96f);
+        public static readonly Color PanelBg = new Color(0.149f, 0.106f, 0.082f, 0.96f);
 
         /// <summary>浮：控件底色（按钮常态 / 玻璃卡之上的实体块）。</summary>
-        public static readonly Color Control = new Color(0.169f, 0.188f, 0.220f, 1f);
+        public static readonly Color Control = new Color(0.204f, 0.145f, 0.110f, 1f);
 
         /// <summary>控件悬停色（唯一允许的悬停提亮，不再另造第 4 级）。</summary>
-        public static readonly Color ControlHover = new Color(0.231f, 0.255f, 0.294f, 1f);
+        public static readonly Color ControlHover = new Color(0.267f, 0.192f, 0.145f, 1f);
 
         /// <summary>控件按下色（比常态更暗，与悬停形成两个方向）。</summary>
-        public static readonly Color ControlPressed = new Color(0.129f, 0.145f, 0.173f, 1f);
+        public static readonly Color ControlPressed = new Color(0.165f, 0.118f, 0.090f, 1f);
 
         // ==================== 强调色（暖金） ====================
 
@@ -79,9 +79,9 @@ namespace PianoTeacher3D.UI
 
         // ==================== 文字 ====================
 
-        public static readonly Color TextPrimary = new Color(0.937f, 0.945f, 0.953f, 1f);
-        public static readonly Color TextSecondary = new Color(0.639f, 0.690f, 0.729f, 1f);
-        public static readonly Color TextOnAccent = new Color(0.078f, 0.086f, 0.102f, 1f);
+        public static readonly Color TextPrimary = new Color(0.949f, 0.894f, 0.800f, 1f);
+        public static readonly Color TextSecondary = new Color(0.741f, 0.647f, 0.541f, 1f);
+        public static readonly Color TextOnAccent = new Color(0.086f, 0.071f, 0.055f, 1f);
 
         // ==================== 状态色 ====================
 
@@ -91,34 +91,34 @@ namespace PianoTeacher3D.UI
         // ==================== 新增令牌：层次 / 分割 / 状态（方案 3.3 / 审查 2.2A） ====================
 
         /// <summary>抬升面板底色：次级功能卡片、分段控件轨道之上的一级。</summary>
-        public static readonly Color PanelBgRaised = new Color(0.137f, 0.153f, 0.180f, 1f);
+        public static readonly Color PanelBgRaised = new Color(0.180f, 0.129f, 0.098f, 1f);
 
         /// <summary>顶栏 / 底栏底色（比普通面板更深，压住 3D 画面又不抢眼）。</summary>
-        public static readonly Color PanelBgDeep = new Color(0.086f, 0.098f, 0.118f, 0.97f);
+        public static readonly Color PanelBgDeep = new Color(0.118f, 0.086f, 0.067f, 0.97f);
 
         /// <summary>
         /// 玻璃卡底色：直接压在 3D 画面上的一层（左上视角提示卡）。
         /// alpha 0.72 仍保证 <see cref="TextSecondary"/> 对比度 ≥ 3:1。
         /// </summary>
-        public static readonly Color PanelBgGlass = new Color(0.106f, 0.118f, 0.141f, 0.72f);
+        public static readonly Color PanelBgGlass = new Color(0.149f, 0.106f, 0.082f, 0.72f);
 
         /// <summary>分割线（半透明，不与强调色争抢注意力）。</summary>
-        public static readonly Color Divider = new Color(0.850f, 0.878f, 0.918f, 0.16f);
+        public static readonly Color Divider = new Color(0.910f, 0.835f, 0.706f, 0.16f);
 
         /// <summary>
         /// 选中态底色（分段选择器选中项 / 开关开启项）。
         /// 比 <see cref="AccentDim"/> 更深，保证与 <see cref="TextPrimary"/> 的对比度 ≥ 4.5:1（实测 6.8:1）。
         /// </summary>
-        public static readonly Color Selected = new Color(0.412f, 0.310f, 0.125f, 1f);
+        public static readonly Color Selected = new Color(0.416f, 0.290f, 0.133f, 1f);
 
         /// <summary>警告色（功能降级但可继续）。</summary>
         public static readonly Color Warning = new Color(0.960f, 0.741f, 0.365f, 1f);
 
         /// <summary>禁用底色。</summary>
-        public static readonly Color Disabled = new Color(0.129f, 0.145f, 0.173f, 1f);
+        public static readonly Color Disabled = new Color(0.165f, 0.118f, 0.090f, 1f);
 
         /// <summary>禁用文字色。</summary>
-        public static readonly Color TextDisabled = new Color(0.478f, 0.522f, 0.565f, 1f);
+        public static readonly Color TextDisabled = new Color(0.541f, 0.478f, 0.412f, 1f);
 
         /// <summary>错误文字色（比底色更亮，保证暗色面板上的对比度）。</summary>
         public static readonly Color TextError = new Color(0.949f, 0.639f, 0.639f, 1f);

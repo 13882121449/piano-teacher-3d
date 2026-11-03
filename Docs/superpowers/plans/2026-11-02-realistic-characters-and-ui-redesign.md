@@ -350,3 +350,35 @@ Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode \
    （本轮 128 过 / 2 败 / 4 跳；两者与角色改动无关，疑为负载下的计时抖动）。
 2. 跑 `CaptureLessonViews` 重采视觉基线，确认三个角色在首屏/特写里都换成了真人。
 3. 按 Task 4 → Task 5（UI 令牌）→ Task 6/7（三界面）顺序继续。
+
+## 进度快照（2026-11-03 14:43，暖木 UI 第一轮）
+
+| 任务 | 状态 | 说明 |
+|---|---|---|
+| Task 4 头像缩略图 | ✅ | 三张人像卡显示真人脸；`V21` 复采后不再是纯色占位 |
+| Task 5 UI 令牌 | ✅ | `UITheme` 调色板整体换成暖木古典 |
+| Task 6 顶栏 / 播放条 | ⬜ | 顶栏已是 56 单行；播放条仍是旧结构，留待单独一轮 |
+| Task 7 主菜单 / 角色选择 | ✅ | 卡片式四入口 + 选曲/角色/设置三个浮层 |
+| Task 8 氛围 / Canvas / 降采样 | ⬜ | 未开始 |
+
+### 本轮实际改动
+
+- **暖木令牌**（`Assets/Scripts/UI/UITheme.cs`）：只改数值不动令牌名 —— `SceneBg=(0.086,0.063,0.055)`、`PanelBg=(0.149,0.106,0.082)`、`Control=(0.204,0.145,0.110)`、`TextPrimary=#F2E4CC`、`TextSecondary=#BDA58A`、`PanelBgRaised=(0.180,0.129,0.098)`、`PanelBgDeep=(0.118,0.086,0.067)`、`Divider=(0.910,0.835,0.706,.16)`、`Selected=(0.416,0.290,0.133)`；Accent 系列不动。
+- **主菜单四入口**（`Assets/Scripts/UI/MainMenuUI.cs`）：`HeroBand`（88 高，标题 + 副标题 + 右侧「曲库 N 首 · 最近 M 首」）→ 四张 216×96 入口卡（继续练习 / 选曲 / 角色 / 设置）→ 原有曲库网格与最近播放整体下移 `EntriesBlock=120`。三个浮层：`OpenSongPicker`（行高随曲目数伸缩，最多 8 行 + 导入按钮）、`OpenCharacterPreview`（三张 120×124 人像卡 + 成人/儿童标签）、`OpenSettings`（6 档画质中文标签 + 全屏开关 + 快捷键表，`PlayerPrefs` 持久化）。
+- **全屏暖底**：主菜单此前没有底座，露出的是场景相机的冷色天空盒，暖木配色只生效一半；现在先铺 `SceneBg` 再叠内容。
+- **人像比例**（`Assets/Editor/RocketboxTextureSetup.cs`）：源图 384×512 被 Unity 默认 `npotScale: ToNearest` 拉成 512×512，脸横向变宽；新增 `_portrait` 规则（`npotScale = None`、`maxSize = 512`）。
+- **新增截图**：`V24_menu_characters.png`、`V25_menu_settings.png`、`V26_menu_songs.png`（由 `VisualSnapshotTests.CaptureMenuOverlay` 采集，点入口卡 → 截浮层 → 点「关闭」）。
+
+### 本轮踩到的坑
+
+1. **`Start()` 里读不到参考分辨率**：`RectTransform.width` 此时等于窗口像素（640），不是 1280，四张入口卡因「宽度不够」整排隐藏。改成跨帧判断：`Update()` 里比较 `Width(_content)` 与上次布局值，变化超过 1 px 就 `RebuildContent()`。
+2. **`Image.color` 会与 sprite 相乘**：给缩略图挂上人像后必须把 `color` 回白，否则整张脸被面板底色染成暗棕。
+3. **画质档位有 6 档**：`ProjectSettings/QualitySettings.asset` 是 Very Low…Ultra，`m_CurrentQuality: 5`；只显示 3 档会让当前档位落在范围外，一个 chip 都高亮不出来。
+4. **`UIKit.Card` 的 onClick 是 `UnityEngine.Events.UnityAction`**，`UITheme` 也没有 `StretchBottom`（只有 `StretchX/StretchTop/StretchAll`）。
+
+### 下次接手
+
+1. Task 6：播放条压成 72 单行 + 「更多」面板。必须同时改 `LessonControlsUI.LayoutPlayerRows()`、14 个控件的位置/命名、以及 `VisualSnapshotTests` 里**按对象名点击**的用例（`Btn_曲目分析` 等），否则回归会红。
+2. Task 8：URP Volume（Bloom 0.15 / Vignette 0.2）、Canvas 拆分、贴图降采样；再跑 `python Tools/static_checks.py && python Tools/verify.py` 全量回归。
+3. Task 6 Step 4 还欠 1920×1080 那一档截图（现有 26 张都是 1280×720）。
+

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -599,6 +599,22 @@ public class VisualSnapshotTests
             v10Record.Time = -1f;
             v10Record.CameraState = "不适用（主菜单场景无 CameraModeController）";
             records.Add(v10Record);
+
+            // ---- V24–V26 主菜单卡片式四入口的三个浮层（Task 7 Step 1）----
+            yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
+                "V24_menu_characters.png", "Card_角色", "主菜单 / 角色浮层",
+                "三张人像预览卡（写实女性 / 写实男性 / 儿童）+「进入课程后可切换」说明",
+                "主菜单点「角色」入口卡后截图");
+
+            yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
+                "V25_menu_settings.png", "Card_设置", "主菜单 / 设置浮层",
+                "画质三档 chips（取自 QualitySettings.names）+ 全屏开关 + 快捷键说明",
+                "主菜单点「设置」入口卡后截图");
+
+            yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
+                "V26_menu_songs.png", "Card_选曲", "主菜单 / 选曲浮层",
+                "曲目清单（最多 8 行，含文件大小）+ 底部「导入 MIDI…」",
+                "主菜单点「选曲」入口卡后截图");
         }
 
         // ==================================================================
@@ -611,6 +627,37 @@ public class VisualSnapshotTests
             Assert.Ignore("以下用例未生成（原因已写入 Docs/screenshots/manifest.md 的「未生成 / 降级的用例」）：\n - "
                 + string.Join("\n - ", skipped.ToArray()));
         }
+    }
+
+    // ==================================================================
+    // 主菜单浮层截图（Task 7 Step 1：卡片式四入口 → 选曲 / 角色 / 设置）
+    // ==================================================================
+
+    /// <summary>点入口卡打开浮层 → 截图 → 关闭；找不到入口卡时记入 <paramref name="skipped"/>，不算失败。</summary>
+    private static IEnumerator CaptureMenuOverlay(string dir, Camera cam, List<ShotRecord> records,
+        List<string> skipped, string fileName, string entryName, string doc, string check, string note)
+    {
+        if (!ClickButton(entryName))
+        {
+            skipped.Add(fileName + "：主菜单没有找到可点击的入口卡 " + entryName);
+            yield break;
+        }
+
+        yield return null;
+        yield return new WaitForSeconds(0.4f);
+        yield return Capture(cam, Path.Combine(dir, fileName));
+
+        var record = Snapshot(fileName, doc, check, note, null, null, null, null);
+        record.Avatar = "不适用（主菜单浮层）";
+        record.AvatarIndex = -1;
+        record.Song = "不适用（未进入课程）";
+        record.Time = -1f;
+        record.CameraState = "不适用（主菜单场景无 CameraModeController）";
+        records.Add(record);
+
+        ClickButton("Btn_关闭");
+        yield return null;
+        yield return new WaitForSeconds(0.2f);
     }
 
     // ==================================================================

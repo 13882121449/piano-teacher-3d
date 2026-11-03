@@ -29,6 +29,10 @@ namespace PianoTeacher3D.EditorTools
             public bool Srgb;
             public bool AlphaIsTransparency;
             public TextureImporterCompression Compression;
+            /// <summary>非 2 次幂缩放策略。None = 保持原始像素比例（缩略图必须用它，见 _portrait 规则）</summary>
+            public TextureImporterNPOTScale NPOT;
+            /// <summary>最大尺寸；≤0 表示沿用脚本里的 1024 默认值</summary>
+            public int MaxSize;
         }
 
         private static readonly Rule[] Rules =
@@ -42,6 +46,12 @@ namespace PianoTeacher3D.EditorTools
             // specular：线性数据，sRGB 关（本期不绑定到材质，但保持配置正确以备后续使用）
             new Rule { Suffix = "_specular", Type = TextureImporterType.Default, Srgb = false,
                        AlphaIsTransparency = false, Compression = TextureImporterCompression.Compressed },
+            // 人像缩略图：颜色数据，但**必须关掉 NPOT 缩放**。
+            // 源图 384×512（3:4），Unity 默认 NPOT=ToNearest 会把它拉伸成 512×512，
+            // 脸被横向拉宽三分之一——角色库卡片上看起来像「胖了」。
+            new Rule { Suffix = "_portrait", Type = TextureImporterType.Default, Srgb = true,
+                       AlphaIsTransparency = false, Compression = TextureImporterCompression.CompressedHQ,
+                       NPOT = TextureImporterNPOTScale.None, MaxSize = 512 },
         };
 
         [MenuItem("Tools/PianoTeacher3D/Rocketbox 贴图导入配置")]
@@ -90,8 +100,13 @@ namespace PianoTeacher3D.EditorTools
                 }
                 if (importer.mipmapEnabled != true) { importer.mipmapEnabled = true; dirty = true; }
 
-                // 1024 已是我们降采样后的尺寸，显式锁住防止后续被误设更大
-                if (importer.maxTextureSize != 1024) { importer.maxTextureSize = 1024; dirty = true; }
+                // 非 2 次幂：缩略图必须保留原始比例，否则 384×512 会被拉伸成 512×512
+                if (importer.npotScale != rule.Value.NPOT) { importer.npotScale = rule.Value.NPOT; dirty = true; }
+
+                // 模型贴图 1024 已是我们降采样后的尺寸，显式锁住防止后续被误设更大；
+                // 缩略图按规则单独给 512。
+                int maxSize = rule.Value.MaxSize > 0 ? rule.Value.MaxSize : 1024;
+                if (importer.maxTextureSize != maxSize) { importer.maxTextureSize = maxSize; dirty = true; }
 
                 if (dirty)
                 {
