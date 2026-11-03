@@ -263,10 +263,10 @@ namespace PianoTeacher3D.UI
             /// <summary>顶栏左右内边距。</summary>
             public const float TopBarPadding = Space16;
 
-            /// <summary>底栏总高度：16 上内边距 + 44 进度行 + 16 行距 + 40 控制行 + 16 下内边距。</summary>
-            public const float MainBarHeightNormal = 132f;
+            /// <summary>底栏总高度：16 上内边距 + 40 控制行 + 16 下内边距（单行 72）。</summary>
+            public const float MainBarHeightNormal = 72f;
 
-            /// <summary>底栏紧凑高度（手部特写：隐藏进度行，仅保留 40 控制行 + 上下 16）。</summary>
+            /// <summary>底栏紧凑高度（手部特写：隐藏时间标签，底栏仍是 72 单行）。</summary>
             public const float MainBarHeightCompact = 72f;
 
             /// <summary>

@@ -50,6 +50,9 @@ namespace PianoTeacher3D.UI
         private Button _playBtn;
         private Button _restartBtn;
         private UISegmentedControl _cameraSeg;
+        private RectTransform _morePanel;
+        private Button _moreBtn;
+        private bool _moreOpen;
 
         // ---- 底栏控制行：练习工具 chips ----
         private UISegmentedControl _handSeg;
@@ -112,7 +115,9 @@ namespace PianoTeacher3D.UI
 
         // ---- 底栏控制行几何（全部为 4 的倍数，组内 8 / 组间 12）----
         private const float HandWidth = 144f;
-        private const float SpeedWidth = 60f;
+        // 72 而不是 60：「速度: 1.0×」在 1920×1080 一档下会把 × 挤出胶囊右边，
+        // 50%/150%/200% 这类三字符倍速更容易被裁，留出余量。
+        private const float SpeedWidth = 72f;
         private const float LoopWidth = 68f;
         private const float LoopRangeWidth = 140f;
         private const float HighlightWidth = 88f;
@@ -121,6 +126,13 @@ namespace PianoTeacher3D.UI
         private const float DisplayWidth = 84f;
         private const float AnalysisWidth = 68f;
         private const float CameraWidth = 180f;
+
+        // ---- 「更多」浮层：放低频工具，底栏只留播放 / 时间 / 进度 / 手型 / 速度 / 循环 ----
+        private const float MoreWidth = 64f;               // 底栏上的「更多」胶囊宽度
+        private const float MorePanelWidth = 468f;
+        private const float MorePanelHeight = 96f;        // 12 + 32 + 8 + 32 + 12
+        private const float MorePanelGap = UITheme.Space8; // 与底栏之间的缝
+        private const float MorePad = UITheme.Space12;
 
         private static readonly float[] SpeedOptions = { 0.5f, 1f, 1.5f };
         private static readonly string[] SpeedLabels = { "0.5×", "1.0×", "1.5×" };
@@ -557,13 +569,57 @@ namespace PianoTeacher3D.UI
                 new Vector2(UITheme.Layout.PrimaryActionWidth, UITheme.HeightButton),
                 TogglePlay, "播放 / 暂停当前曲目", "空格");
 
+            // ---- 「更多」浮层：把低频工具从底栏挪出去，底栏才能压成 72 单行 ----
+            _morePanel = UITheme.CreatePanel(_playerBar, "MorePanel", Vector2.zero,
+                new Vector2(MorePanelWidth, MorePanelHeight), UITheme.PanelBgRaised, UITheme.RadiusMedium);
+            var moreBg = _morePanel.GetComponent<Image>();
+            if (moreBg != null) UITheme.SetOutline(moreBg, true, UITheme.Divider, 1f);
+
+            // 搬进浮层的控件都保留原名：PlayMode 截图用例按名字点击，
+            // ClickButton 会自己把未激活的祖先打开，所以不需要改用例的查找逻辑。
+            ReparentInto(_cameraSeg.Rect, _morePanel);
+            ReparentInto(_restartBtn.GetComponent<RectTransform>(), _morePanel);
+            ReparentInto(_highlightChip.GetComponent<RectTransform>(), _morePanel);
+            ReparentInto(_metronomeChip.GetComponent<RectTransform>(), _morePanel);
+            ReparentInto(_displayChip.GetComponent<RectTransform>(), _morePanel);
+            ReparentInto(_analysisBtn.GetComponent<RectTransform>(), _morePanel);
+            ReparentInto(_beatDots.rectTransform, _morePanel);
+            ReparentInto(_loopRangeGroup, _morePanel);
+
+            _moreBtn = UIKit.Chip(_playerBar, "MoreChip", MoreWidth, ToggleMore,
+                "更多工具：视角 / 高亮 / 节拍器 / 展示 / 曲目分析 / 重播 / 循环范围", "");
+            _moreBtn.gameObject.name = "Btn_更多";
+            _moreBtn.name = "Btn_更多";
+            UIKit.SetChip(_moreBtn, "更多", "", false, true);
+            _morePanel.gameObject.SetActive(false);
+
             UITheme.ChainHorizontal(_handSeg.GetSegment(0), _handSeg.GetSegment(1), _handSeg.GetSegment(2),
                 _speedChip, _loopChip, _highlightChip, _metronomeChip, _displayChip, _analysisBtn,
                 _cameraSeg.GetSegment(0), _cameraSeg.GetSegment(1), _cameraSeg.GetSegment(2),
                 _restartBtn, _playBtn);
         }
 
-        /// <summary>底栏控制行布局：左侧 chips 从左往右、右侧主控从右往左，两侧不会互相挤压。</summary>
+        /// <summary>把已建好的控件搬进浮层（保留对象名与事件）。</summary>
+        private static void ReparentInto(RectTransform child, RectTransform parent)
+        {
+            if (child == null || parent == null) return;
+            child.SetParent(parent, false);
+            child.localScale = Vector3.one;
+            child.localRotation = Quaternion.identity;
+        }
+
+        /// <summary>展开 / 收起「更多」浮层；浮层挂在底栏上，位置在底栏正上方。</summary>
+        private void ToggleMore()
+        {
+            _moreOpen = !_moreOpen;
+            if (_morePanel != null) _morePanel.gameObject.SetActive(_moreOpen);
+            if (_moreBtn != null) UIKit.SetChip(_moreBtn, "更多", "", _moreOpen, true);
+        }
+
+        /// <summary>
+        /// 底栏单行布局（72 高）：左侧 播放 / 当前时间 / 进度轨 / 总时长，
+        /// 右侧 手型分段 / 速度 / 循环 / 更多。低频工具全部收进「更多」浮层。
+        /// </summary>
         private void LayoutPlayerRows()
         {
             if (_playerBar == null) return;
@@ -571,80 +627,97 @@ namespace PianoTeacher3D.UI
             float pad = UITheme.Layout.PlayerPadding;
             float rowH = UITheme.Layout.PlayerControlRowHeight;
             float chipH = UITheme.Layout.ChipHeight;
-            float controlY = pad + Mathf.Round((rowH - chipH) * 0.5f);   // 32 高控件在 40 行里居中
+            float chipY = pad + Mathf.Round((rowH - chipH) * 0.5f);
+            float btnY = pad + Mathf.Round((rowH - UITheme.HeightButton) * 0.5f);
+            float centerY = pad + rowH * 0.5f;
 
-            // ---- 进度行 ----
-            if (_compact)
+            // ---- 右簇（从右往左）：更多 → 循环 → 速度 → 手型 ----
+            float rx = pad;
+            UITheme.PlaceRight(_moreBtn.GetComponent<RectTransform>(), rx, chipY, MoreWidth, chipH);
+            rx += MoreWidth + UITheme.Layout.ChipGapGroup;
+            UITheme.PlaceRight(_loopChip.GetComponent<RectTransform>(), rx, chipY, LoopWidth, chipH);
+            rx += LoopWidth + UITheme.Layout.ChipGapInner;
+            UITheme.PlaceRight(_speedChip.GetComponent<RectTransform>(), rx, chipY, SpeedWidth, chipH);
+            rx += SpeedWidth + UITheme.Layout.ChipGapInner;
+            UITheme.PlaceRight(_handSeg.Rect, rx, chipY, HandWidth, chipH);
+            rx += HandWidth;
+            float rightInset = rx + UITheme.Layout.ChipGapGroup;
+
+            // ---- 左簇：播放 → 当前时间 → 进度轨 → 总时长 ----
+            UITheme.Place(_playBtn.GetComponent<RectTransform>(), pad, btnY,
+                UITheme.Layout.PrimaryActionWidth, UITheme.HeightButton);
+
+            // 手部特写（_compact）把时间标签让出来，轨道直接顶到播放键右边
+            bool showTime = !_compact;
+            float x = pad + UITheme.Layout.PrimaryActionWidth + UITheme.Layout.ChipGapGroup;
+            float timeY = pad + Mathf.Round((rowH - 32f) * 0.5f);
+            if (showTime)
             {
-                _timeText.gameObject.SetActive(false);
-                _totalText.gameObject.SetActive(false);
-                _progress.gameObject.SetActive(false);
+                _timeText.gameObject.SetActive(true);
+                UITheme.Place(_timeText.rectTransform, x, timeY,
+                    UITheme.Layout.TimeLabelWidth, 32f);
+                x += UITheme.Layout.TimeLabelWidth + UITheme.Space8;
             }
             else
             {
-                _timeText.gameObject.SetActive(true);
-                _totalText.gameObject.SetActive(true);
-                _progress.gameObject.SetActive(true);
-
-                float progressY = pad + rowH + UITheme.Layout.PlayerRowGap;
-                float rowCenter = progressY + UITheme.Layout.PlayerProgressRowHeight * 0.5f;
-                float sliderH = UITheme.Layout.ProgressBarHeight * 2f + UITheme.Space12;
-
-                UITheme.Place(_timeText.rectTransform, pad, progressY,
-                    UITheme.Layout.TimeLabelWidth, UITheme.Layout.PlayerProgressRowHeight);
-                UITheme.PlaceRight(_totalText.rectTransform, pad, progressY,
-                    UITheme.Layout.TimeLabelWidth, UITheme.Layout.PlayerProgressRowHeight);
-
-                float gap = UITheme.Space8;
-                float inset = pad + UITheme.Layout.TimeLabelWidth + gap;
-                UITheme.StretchX(_progress.GetComponent<RectTransform>(), inset, inset,
-                    rowCenter - sliderH * 0.5f, sliderH);
+                _timeText.gameObject.SetActive(false);
             }
 
-            // ---- 控制行（左）：练习工具分三组 ----
-            bool narrow = _lastNarrow;
-            float x = pad;
-            PlaceRowItem(_handSeg.Rect, ref x, HandWidth, UITheme.Layout.ChipGapInner, controlY, chipH);
-            PlaceRowItem(_speedChip.GetComponent<RectTransform>(), ref x, SpeedWidth,
-                UITheme.Layout.ChipGapGroup, controlY, chipH);
-
-            PlaceRowItem(_loopChip.GetComponent<RectTransform>(), ref x, LoopWidth,
-                UITheme.Layout.ChipGapInner, controlY, chipH);
-            if (_loopRangeGroup.gameObject.activeSelf)
+            _totalText.gameObject.SetActive(showTime);
+            float rightEdge = rightInset;
+            if (showTime)
             {
-                UITheme.Place(_loopRangeGroup, x, controlY, LoopRangeWidth, chipH);
-                x += LoopRangeWidth + UITheme.Layout.ChipGapInner;
+                UITheme.PlaceRight(_totalText.rectTransform, rightInset, timeY,
+                    UITheme.Layout.TimeLabelWidth, 32f);
+                rightEdge = rightInset + UITheme.Layout.TimeLabelWidth + UITheme.Space8;
             }
 
+            float sliderH = UITheme.Layout.ProgressBarHeight * 2f + UITheme.Space12;
+            _progress.gameObject.SetActive(true);
+            UITheme.StretchX(_progress.GetComponent<RectTransform>(), x, rightEdge,
+                centerY - sliderH * 0.5f, sliderH);
+
+            // ---- 「更多」浮层：贴在底栏右上角外侧 ----
+            if (_morePanel != null)
+            {
+                _morePanel.anchorMin = new Vector2(1f, 1f);
+                _morePanel.anchorMax = new Vector2(1f, 1f);
+                _morePanel.pivot = new Vector2(1f, 1f);
+                _morePanel.sizeDelta = new Vector2(MorePanelWidth, MorePanelHeight);
+                _morePanel.anchoredPosition = new Vector2(-pad, MorePanelHeight + MorePanelGap);
+                LayoutMorePanel();
+            }
+        }
+
+        /// <summary>
+        /// 「更多」浮层内部：两行工具，行内 8、行间 8。
+        /// 注意 <see cref="UITheme.Place"/> 的原点在**左下角**，所以上面一行用更大的 y。
+        /// </summary>
+        private void LayoutMorePanel()
+        {
+            float chipH = UITheme.Layout.ChipHeight;
+            float rowTop = MorePanelHeight - MorePad - chipH;   // 60
+            float rowBottom = MorePad;                          // 12
+
+            float x = MorePad;
+            PlaceRowItem(_cameraSeg.Rect, ref x, CameraWidth, UITheme.Layout.ChipGapInner, rowTop, chipH);
+            PlaceRowItem(_restartBtn.GetComponent<RectTransform>(), ref x, UITheme.SizeIconButton,
+                UITheme.Layout.ChipGapInner, rowTop, UITheme.SizeIconButton);
             PlaceRowItem(_highlightChip.GetComponent<RectTransform>(), ref x, HighlightWidth,
-                UITheme.Layout.ChipGapInner, controlY, chipH);
+                UITheme.Layout.ChipGapInner, rowTop, chipH);
             PlaceRowItem(_metronomeChip.GetComponent<RectTransform>(), ref x, MetronomeWidth,
-                UITheme.Layout.ChipGapInner, controlY, chipH);
+                0f, rowTop, chipH);
+
+            x = MorePad;
+            PlaceRowItem(_displayChip.GetComponent<RectTransform>(), ref x, DisplayWidth,
+                UITheme.Layout.ChipGapInner, rowBottom, chipH);
+            PlaceRowItem(_analysisBtn.GetComponent<RectTransform>(), ref x, AnalysisWidth,
+                UITheme.Layout.ChipGapInner, rowBottom, chipH);
             if (_beatDots.gameObject.activeSelf)
-                PlaceRowItem(_beatDots.rectTransform, ref x, BeatDotsWidth, UITheme.Layout.ChipGapInner,
-                    controlY, chipH);
-
-            if (!narrow)
-            {
-                PlaceRowItem(_displayChip.GetComponent<RectTransform>(), ref x, DisplayWidth,
-                    UITheme.Layout.ChipGapGroup, controlY, chipH);
-                PlaceRowItem(_analysisBtn.GetComponent<RectTransform>(), ref x, AnalysisWidth,
-                    0f, controlY, chipH);
-            }
-
-            // ---- 控制行（右）：主按钮 → 重播 → 视角分段 ----
-            float rightY = pad + Mathf.Round((rowH - UITheme.HeightButton) * 0.5f);
-            float rx = pad;
-            UITheme.PlaceRight(_playBtn.GetComponent<RectTransform>(), rx, rightY,
-                UITheme.Layout.PrimaryActionWidth, UITheme.HeightButton);
-            rx += UITheme.Layout.PrimaryActionWidth + UITheme.Layout.ChipGapGroup;
-
-            UITheme.PlaceRight(_restartBtn.GetComponent<RectTransform>(), rx,
-                pad + Mathf.Round((rowH - UITheme.SizeIconButton) * 0.5f),
-                UITheme.SizeIconButton, UITheme.SizeIconButton);
-            rx += UITheme.SizeIconButton + UITheme.Layout.ChipGapGroup;
-
-            UITheme.PlaceRight(_cameraSeg.Rect, rx, controlY, CameraWidth, chipH);
+                PlaceRowItem(_beatDots.rectTransform, ref x, BeatDotsWidth,
+                    UITheme.Layout.ChipGapInner, rowBottom, chipH);
+            if (_loopRangeGroup.gameObject.activeSelf)
+                UITheme.Place(_loopRangeGroup, x, rowBottom, LoopRangeWidth, chipH);
         }
 
         private static void PlaceRowItem(RectTransform rt, ref float x, float width, float gapAfter,
@@ -1012,10 +1085,7 @@ namespace PianoTeacher3D.UI
 
             UITheme.StretchX(_playerBar, margin, margin, margin, barH);
 
-            // 窄窗口：低频控件先让位（进度行与主按钮始终保留）
-            if (_displayChip != null) _displayChip.gameObject.SetActive(!narrow);
-            if (_analysisBtn != null) _analysisBtn.gameObject.SetActive(!narrow);
-
+            // 低频控件已收进「更多」浮层：窄窗口不再需要为它们让位，底栏单行始终完整
             LayoutPlayerRows();
             LayoutHandHint();
             LayoutAnalysisPanel();

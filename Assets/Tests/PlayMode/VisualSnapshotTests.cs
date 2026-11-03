@@ -44,8 +44,18 @@ using PianoTeacher3D.Tests.PlayMode;
 [Category("Visual")]
 public class VisualSnapshotTests
 {
-    private const int W = 1280;
-    private const int H = 720;
+    /// <summary>
+    /// 快照分辨率。默认 1280×720（设计参考分辨率）；用环境变量 <c>PIANO_SNAPSHOT_W</c> /
+    /// <c>PIANO_SNAPSHOT_H</c> 可在不改代码的前提下再采一档（例如 1920×1080 核对宽屏下底栏不重叠）。
+    /// </summary>
+    private static readonly int W = SnapshotSize("PIANO_SNAPSHOT_W", 1280);
+    private static readonly int H = SnapshotSize("PIANO_SNAPSHOT_H", 720);
+
+    private static int SnapshotSize(string variable, int fallback)
+    {
+        string raw = Environment.GetEnvironmentVariable(variable);
+        return int.TryParse(raw, out int value) && value >= 640 && value <= 3840 ? value : fallback;
+    }
 
     /// <summary>读不到 ProjectSettings/ProjectVersion.txt 时的兜底版本锁定值。</summary>
     private const string ProjectVersionFallback = "2022.3.22f1c1";
@@ -59,7 +69,12 @@ public class VisualSnapshotTests
             yield break;
         }
 
-        string dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Docs", "screenshots"));
+        // 输出目录可用 PIANO_SNAPSHOT_DIR 覆盖：采宽屏一档时写到 _verify_out/ 下，
+        // 不覆盖 Docs/screenshots 里 1280×720 的正式基线。
+        string dirOverride = Environment.GetEnvironmentVariable("PIANO_SNAPSHOT_DIR");
+        string dir = string.IsNullOrWhiteSpace(dirOverride)
+            ? Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Docs", "screenshots"))
+            : Path.GetFullPath(dirOverride);
         Directory.CreateDirectory(dir);
 
         // 方案 11.2 / 审查 6.1：固定窗口尺寸，并把「实际值」写进 manifest（不假设一定是 1280×720）
@@ -140,7 +155,20 @@ public class VisualSnapshotTests
         session.Stop();
         session.ClearLoop();
         session.SetHighlightMode(HighlightMode.Off);
-        session.SwitchAvatar(0);
+        // 注意：SwitchAvatar(int) 是「程序化内置角色」的旧下标路径，走它会把写实角色换回方块人；
+        // 视觉基线要的是 Rocketbox 真人，所以这里按角色 ID 走注册表 + 切换事务。
+        if (session.CharacterRegistry != null &&
+            session.CharacterRegistry.TryGet(PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId,
+                out var baselineProfile))
+        {
+            var baselineResult = session.ActivateCharacter(baselineProfile);
+            Debug.Log($"[V12] 归位角色 rocketbox.female01：成功={baselineResult.Succeeded} 原因={baselineResult.Error}");
+        }
+        else
+        {
+            Debug.LogWarning("[V12] 注册表里没有 rocketbox.female01，回落到程序化角色 0");
+            session.SwitchAvatar(0);
+        }
         session.SetPracticeHand(PracticeHand.Both);
         yield return new WaitForSeconds(1.0f);
 
@@ -384,6 +412,19 @@ public class VisualSnapshotTests
         session.Seek(total * 0.3f);
         session.Play();
         yield return new WaitForSeconds(1.5f);
+
+        // 「曲目分析」现在收在底栏的「更多」浮层里：先展开浮层（顺带采一张 V27），再点分析
+        bool moreOpened = ClickButton("Btn_更多");
+        yield return new WaitForSeconds(0.4f);
+        if (moreOpened)
+        {
+            yield return Capture(cam, Path.Combine(dir, "V27_more_panel.png"));
+            records.Add(Snapshot("V27_more_panel.png", "方案 3.1 底栏单行",
+                "低频工具收进「更多」浮层，底栏只留 播放 / 时间 / 进度 / 手型 / 速度 / 循环",
+                "浮层贴底栏右上角，两行工具：视角·重播·高亮·节拍器 / 展示·分析·拍点·循环范围",
+                session, cameraCtrl, avatar, timeline));
+        }
+
         bool analysisOpened = ClickButton("Btn_曲目分析");
         yield return new WaitForSeconds(1.2f);
         bool diagnosticsOpened = ClickButton("Btn_开发诊断");
@@ -409,9 +450,11 @@ public class VisualSnapshotTests
         }
 
         // ---- V13 教学模式：隐藏手部，只高亮被按下的琴键（左手冷蓝 / 右手暖橙）----
-        // 先收起分析面板（V12 展开过），避免遮挡键盘区域
+        // 先收起分析面板与「更多」浮层（V12 展开过），避免遮挡键盘区域
         ClickButton("Btn_曲目分析");
-        yield return new WaitForSeconds(0.6f);
+        yield return new WaitForSeconds(0.4f);
+        if (moreOpened) ClickButton("Btn_更多");
+        yield return new WaitForSeconds(0.4f);
 
         session.SetDisplayMode(DisplayMode.Teaching);
         session.SetCameraMode(CameraMode.Closeup);

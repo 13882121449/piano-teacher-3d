@@ -382,3 +382,42 @@ Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode \
 2. Task 8：URP Volume（Bloom 0.15 / Vignette 0.2）、Canvas 拆分、贴图降采样；再跑 `python Tools/static_checks.py && python Tools/verify.py` 全量回归。
 3. Task 6 Step 4 还欠 1920×1080 那一档截图（现有 26 张都是 1280×720）。
 
+## 进度快照（2026-11-03 19:10，底栏单行 + 「更多」浮层）
+
+| 任务 | 状态 | 说明 |
+|---|---|---|
+| Task 6 顶栏 / 播放条 | ✅ | 播放条 132 → **72 单行**；视角 / 高亮 / 节拍器 / 展示 / 曲目分析 / 重播 / 循环范围收进「更多」浮层 |
+| Task 6 Step 4 两档截图 | ✅ | 1280×720（正式基线 26 张 + 新增 `V27_more_panel.png`）与 1920×1080 都采过 |
+| Task 8 氛围 / Canvas / 降采样 | ⬜ | 未开始 |
+| 已知问题：V12/V27 里的「粉红气球人」 | ⚠️ | 未定位，见下 |
+
+### 本轮实际改动
+
+- **底栏单行**（`Assets/Scripts/UI/UITheme.cs`）：`Layout.MainBarHeightNormal` 132 → `72f`（16 上边距 + 40 控制行 + 16 下边距），`MainBarHeightCompact` 也是 72（紧凑档只隐藏时间标签）。
+- **单行布局**（`Assets/Scripts/UI/LessonControlsUI.cs`）：`LayoutPlayerRows()` 重写——左簇 `播放(96) + 时间 44 + 进度轨`，右簇从右往左 `更多(64) / 循环(68) / 速度(72) / 手型(144)`；`_progress` 用 `StretchX` 吃掉中间全部余量。
+- **「更多」浮层**：`_morePanel`（468×96，两行 32 高 chip）挂在底栏右上角，`anchorMin=anchorMax=(1,1)`、`pivot=(1,1)`、`anchoredPosition=(-16, 96+8)`；`ReparentInto()` 把 `_cameraSeg / _restartBtn / _highlightChip / _metronomeChip / _displayChip / _analysisBtn / _beatDots / _loopRangeGroup` 搬进浮层，`ToggleMore()` 控制显隐并把「更多」chip 置为按下态；对象名 `Btn_更多` / `Btn_曲目分析` 保持不变，PlayMode 用例仍按名点击。
+- **截图可配置**（`Assets/Tests/PlayMode/VisualSnapshotTests.cs`）：`W/H` 改为可由 `PIANO_SNAPSHOT_W` / `PIANO_SNAPSHOT_H` 覆盖，输出目录可由 `PIANO_SNAPSHOT_DIR` 覆盖——采宽屏一档时写到 `_verify_out/shots_1920/`，**不覆盖** `Docs/screenshots` 的正式基线。
+- **新增快照**：`V27_more_panel.png`（浮层展开态），采集点插在 V12 之前，采完再点「更多」收起，后续用例状态不变。
+
+### 本轮踩到的坑
+
+1. **`UITheme.Place` 的原点在左下角**（`anchorMin=anchorMax=(0,0)`、`offsetMin=(x,y)`），`PlaceRight` 是右下角，只有 `PlaceTopLeft/PlaceTopRight` 才是「从顶上往下算」。第一次写浮层时按「从上往下」排两行，结果两行顺序反了——`MorePanelHeight` 定死 96 后，第一行用 `rowTop = 96 - 12 - 32 = 52`、第二行 `rowBottom = 12` 才对。
+2. **1920×1080 一档暴露了胶囊过窄**：「速度: 1.0×」的 `×` 被挤出右边（`SpeedWidth=60` 在 1.5 倍缩放下不够，`50%/150%/200%` 更危险），改成 72 后两档都放得下。
+3. **`Session.SwitchAvatar(int)` / `CycleAvatar()` 是「程序化内置角色」的旧下标路径**，不经过 `CharacterSwitchService` 的 8 步事务；截图用例里先 `CycleAvatar` 切到人偶、再 `ActivateCharacter` 切回写实角色时，两者状态会不同步。
+
+### 已知问题（下次接手第一条）
+
+`V12_analysis_expanded.png` / `V27_more_panel.png` 里显示的是**粉红气球人（程序化 rig）**，而同一场景、同一角色的 `V15_rocketbox_character.png` 是写实真人。已排除/已确认：
+
+- `[V12] 归位角色 rocketbox.female01：成功=True` —— 切换事务本身返回成功；
+- `V15` 的 `[DIAG] view=rocketbox.female01 … avatar=Female_Adult_01Avatar` 说明写实视图确实存在；
+- 对三个内置 rig 调 `SetBuiltInActive(i, false)` 也压不下去（那条试验代码已撤掉，只留 `[V12]` 一行日志）；
+- `06_avatar_cartoon.png` 里程序化卡通是绿色 + 蓝帽子，V12/V27 的粉红人是另一个 rig。
+
+下一步怀疑方向：`SetDisplayMode(DisplayMode.Showcase)` 之后 `AfterAvatarChanged()` 的调用顺序，或 `AvatarManager.ExternalRigSource` 在展示模式下被清空导致 `_rigs[_currentIndex]` 重新可见。
+
+### 另外两条遗留
+
+1. Task 8：URP Volume（Bloom 0.15 / Vignette 0.2 / Color Adjustments）、主光 4800K + 冷侧光、Canvas 拆分（播放条单独动态画布）、贴图降采样。
+2. 全量回归：`python Tools/static_checks.py`（已过：4 条 0 违规）→ `python Tools/verify.py`（EditMode 522+ / PlayMode 162+），再 `git status` 收尾。
+
