@@ -562,6 +562,10 @@ namespace PianoTeacher3D.Core
             RenderSettings.ambientEquatorColor = new Color(0.44f, 0.45f, 0.50f); // 地平：中性
             RenderSettings.ambientGroundColor = new Color(0.28f, 0.28f, 0.31f);  // 地面反射：暗偏暖
 
+            // 后处理：全局 Volume（Bloom / Vignette / 色彩微调）+ 相机 renderPostProcessing。
+            // 放在相机参数就绪之后、相机控制之前——控制器只负责摆机位，不该关心后期。
+            PianoTeacher3D.Core.ScenePostProcessing.Ensure(cam, transform);
+
             _camera = gameObject.AddComponent<CameraModeController>();
             _camera.Initialize(cam, _avatar, _keyMap);
             _camera.SetPracticeHand(_practiceHand);
