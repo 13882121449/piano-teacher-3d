@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using PianoTeacher3D.CameraControl;
@@ -270,7 +270,9 @@ public class UIThemeTokenTests
     [Test]
     public void LayoutTokens_KeepMainBarAboveMinimumUsableHeight()
     {
-        Assert.Greater(UITheme.Layout.MainBarHeightNormal, UITheme.Layout.MainBarHeightCompact);
+        // 底栏压成单行后（进度行并入同一行 + 「更多」浮层工具），常态与紧凑态同高；
+        // 紧凑态只是把次要控件收进浮层，不再减少栏高。
+        Assert.GreaterOrEqual(UITheme.Layout.MainBarHeightNormal, UITheme.Layout.MainBarHeightCompact);
         Assert.GreaterOrEqual(UITheme.Layout.MainBarHeightCompact, UITheme.HeightPrimary);
         Assert.Greater(UITheme.Layout.ToolbarHeightExpanded, UITheme.Layout.ToolbarHeightCollapsed);
         Assert.Greater(UITheme.Layout.AnalysisPanelWidth, 0f);
@@ -557,14 +559,14 @@ public class UIThemeTokenTests
     [Test]
     public void PlayerBar_InternalRowsAddUpExactly()
     {
-        // 132 = 16 上内边距 + 44 进度行 + 16 行距 + 40 控制行 + 16 下内边距
-        float sum = UITheme.Layout.PlayerPadding + UITheme.Layout.PlayerProgressRowHeight +
-                    UITheme.Layout.PlayerRowGap + UITheme.Layout.PlayerControlRowHeight +
+        // 72 = 16 上内边距 + 40 单行控件 + 16 下内边距（进度条与控制按钮同一行；
+        // PlayerProgressRowHeight 是两行时代的遗留令牌，已不参与栏高计算）
+        float sum = UITheme.Layout.PlayerPadding + UITheme.Layout.PlayerControlRowHeight +
                     UITheme.Layout.PlayerPadding;
         Assert.AreEqual(UITheme.Layout.MainBarHeightNormal, sum, 0.001f,
             "底栏高度必须由内部行高精确相加得出，不允许出现无法解释的留白");
 
-        // 紧凑态：隐藏进度行，只留控制行 + 上下内边距
+        // 紧凑态：栏高不变，多余控件进「更多」浮层
         float compact = UITheme.Layout.PlayerPadding * 2f + UITheme.Layout.PlayerControlRowHeight;
         Assert.AreEqual(UITheme.Layout.MainBarHeightCompact, compact, 0.001f);
     }

@@ -234,8 +234,8 @@ namespace PianoTeacher3D.UI
             {
                 var sprite = UITheme.GetRoundedSprite(UITheme.RadiusLarge);
                 if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
-                img.color = UITheme.PanelBgRaised;
-                UITheme.SetOutline(img, true, UITheme.Divider, 1f);
+                img.color = UITheme.CardBg;
+                UITheme.SetOutline(img, true, UITheme.CardBorder, 1f);
             }
 
             // 底部 2px 阴影条（左右各内缩一个圆角，避免露出直角）
@@ -263,7 +263,7 @@ namespace PianoTeacher3D.UI
             metaText.horizontalOverflow = HorizontalWrapMode.Wrap;
             metaText.verticalOverflow = VerticalWrapMode.Truncate;
 
-            UIHoverFeedback.Attach(btn, UITheme.PanelBgRaised, UITheme.ControlHover, 2f);
+            UIHoverFeedback.Attach(btn, UITheme.CardBg, UITheme.ControlHover, 2f);
             if (!string.IsNullOrEmpty(tooltip)) UITheme.SetButtonTooltip(btn, tooltip);
             return btn;
         }

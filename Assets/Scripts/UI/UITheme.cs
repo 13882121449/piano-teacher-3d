@@ -93,6 +93,15 @@ namespace PianoTeacher3D.UI
         /// <summary>抬升面板底色：次级功能卡片、分段控件轨道之上的一级。</summary>
         public static readonly Color PanelBgRaised = new Color(0.180f, 0.129f, 0.098f, 1f);
 
+        /// <summary>
+        /// 可点击卡片的底色。比 <see cref="PanelBgRaised"/> 再亮一档：主菜单背景接近纯黑，
+        /// 卡片若与背景亮度差 &lt; 0.05 就会「存在但看不见」（实测截图里四张入口卡几乎与背景融为一体）。
+        /// </summary>
+        public static readonly Color CardBg = new Color(0.239f, 0.184f, 0.137f, 1f);
+
+        /// <summary>卡片描边：暖棕，保证在深色背景上能勾出卡片轮廓（1px）。</summary>
+        public static readonly Color CardBorder = new Color(0.451f, 0.341f, 0.239f, 1f);
+
         /// <summary>顶栏 / 底栏底色（比普通面板更深，压住 3D 画面又不抢眼）。</summary>
         public static readonly Color PanelBgDeep = new Color(0.118f, 0.086f, 0.067f, 0.97f);
 
