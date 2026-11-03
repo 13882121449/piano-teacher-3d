@@ -421,3 +421,40 @@ Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode \
 1. Task 8：URP Volume（Bloom 0.15 / Vignette 0.2 / Color Adjustments）、主光 4800K + 冷侧光、Canvas 拆分（播放条单独动态画布）、贴图降采样。
 2. 全量回归：`python Tools/static_checks.py`（已过：4 条 0 违规）→ `python Tools/verify.py`（EditMode 522+ / PlayMode 162+），再 `git status` 收尾。
 
+## 进度快照（2026-11-03 21:20，暂停点）
+
+用户暂停（m03907）。工作区干净，HEAD `bf8a0f6`。下次接手从这里往下读。
+
+### 今天完成的（按提交顺序）
+
+| commit | 内容 |
+|---|---|
+| `510e5c6` | 三角色换真人 + 切换短路修复（`SameViewKind`）+ 按角色腕高标定 |
+| `41e930a` | 角色库三张竖版人像卡（132×184，头部贴图裁 3:4） |
+| `c55f588` | chip / 分段项改实心底色（不再是「一排空按钮」） |
+| `757b4bb` | 暖木令牌 + 主菜单卡片式四入口与三个浮层 |
+| `db4de93` | 底栏压成 72 单行 + 「更多」工具浮层 |
+| `71e87f5` | 卡片抬亮一档 + 暖棕描边；`UIThemeTokenTests` 同步到底栏单行设计 |
+| `bf8a0f6` | 全局 Volume（Bloom 0.16 / Vignette 0.18 / 对比 +9 饱和 +3）+ 相机后处理 |
+
+对应计划：Task 3 ✅、Task 4 ✅、Task 6 ✅、Task 7 ✅、Task 8 Step 1 ✅。
+
+### 验证到哪一步
+
+- EditMode **485/485**（`71e87f5` 之后跑过）。
+- PlayMode：`CaptureLessonViews` 5/5 通过（后处理接入后重采 26 张基线）。
+- **全量 PlayMode 还没在后处理接入之后跑过** —— 下次第一件事就是补这一轮。
+
+### 下次接手顺序
+
+1. 全量回归：`taskkill //F //IM Unity.exe` → 删 `Temp/UnityLockfile` → EditMode + PlayMode 全量；
+   若 PlayMode 报截图差异，先看 `Docs/screenshots/manifest.md` 里的哈希表再决定重采。
+2. Task 8 Step 2：Canvas 拆分（播放条一个动态 Canvas，其余静态），改完采 1280×720 / 1920×1080 两档。
+3. 收尾：`python Tools/static_checks.py` + `python Tools/verify.py`，更新 `Docs/upgrade-2026-11-01.md`。
+
+### 已知遗留
+
+- `PlayerProgressRowHeight` 成了遗留令牌（底栏单行后不再参与求和），断言已写注释；
+  要么下次删掉，要么在 `UITheme.Layout` 里标 `[Obsolete]`。
+- 手部：静止与演奏姿态都已标定，但「按键手指仍略高于键面」是 CCD 目标的几何限制，
+  要彻底解决得改指尖目标点（计划外的独立任务）。
