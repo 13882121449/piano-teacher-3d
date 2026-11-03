@@ -206,8 +206,10 @@ namespace PianoTeacher3D.UI
                     feedback.SetInteractable(enabled);
                     feedback.SetOutlineState(selected, UITheme.BorderSelected);
                     // 选中项悬停保持金色底（避免一悬停就失去「当前值」的视觉）
-                    feedback.SetColors(UITheme.Transparent,
-                        !enabled ? UITheme.Transparent : (selected ? UITheme.Selected : UITheme.ControlHover));
+                    // 未选中项给实心 Control 底（与 chip 一致）：透明底在深色场景里只剩一圈描边，
+                    // 观感上是「空白灰按钮」，分不清是禁用还是没选中。
+                    feedback.SetColors(UITheme.Control,
+                        !enabled ? UITheme.Disabled : (selected ? UITheme.Selected : UITheme.ControlHover));
                 }
             }
         }

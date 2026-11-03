@@ -1128,9 +1128,16 @@ namespace PianoTeacher3D.UI
             btn.colors = colors;
         }
 
-        /// <summary>chip 底色：开启 <see cref="Selected"/>，关闭透明；禁用 <see cref="Disabled"/>。</summary>
+        /// <summary>
+        /// chip 底色：开启 <see cref="Selected"/>，关闭 <see cref="Control"/>，禁用 <see cref="Disabled"/>。
+        /// <para>
+        /// 关闭态曾经是<b>全透明</b>——在深色场景上几乎看不见，只剩一圈 1px 描边，
+        /// 实际观感是「一排灰方块的空白按钮」。改成实心底色后，关闭态与开启态
+        /// 靠「深灰底 / 金色底」区分，文字始终压在实色上，对比度稳定。
+        /// </para>
+        /// </summary>
         public static Color ChipBackground(bool active, bool enabled)
-            => !enabled ? Disabled : (active ? Selected : Transparent);
+            => !enabled ? Disabled : (active ? Selected : Control);
 
         /// <summary>
         /// 绘制 chip（带状态后缀的只读/可点小控件）：常态透明 + 1px <see cref="Divider"/> 边，
@@ -1158,7 +1165,7 @@ namespace PianoTeacher3D.UI
         }
 
         /// <summary>
-        /// 绘制分段项：未选中透明（悬停出 <see cref="ControlHover"/>），
+        /// 绘制分段项：未选中 <see cref="Control"/> 实心底（与 chip 一致，透明底在深色场景里只剩一圈细边、像空按钮），
         /// 选中 <see cref="Selected"/> 底 + 1px <see cref="BorderSelected"/> 边 + 粗体，
         /// 因此「当前值」同时靠底色、描边、字重三重表达，不只靠颜色。
         /// </summary>
@@ -1170,7 +1177,7 @@ namespace PianoTeacher3D.UI
             {
                 var sprite = GetRoundedSprite(radius);
                 if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
-                img.color = !enabled ? Disabled : (selected ? Selected : Transparent);
+                img.color = !enabled ? Disabled : (selected ? Selected : Control);
                 SetOutline(img, selected, BorderSelected, 1f);
             }
             var label = GetLabel(btn);
