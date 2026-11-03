@@ -539,6 +539,22 @@ public class VisualSnapshotTests
         session.Seek(0f);
         yield return new WaitForSeconds(0.5f);
 
+        // ---- V21 角色库面板：三张真人像卡（v4 阶段 1 / Task 4）----
+        var avatarPanel = PianoTeacher3D.UI.AvatarSelectionUI.Instance;
+        if (avatarPanel != null)
+        {
+            avatarPanel.ShowPanel(true);
+            yield return null;
+            yield return new WaitForSeconds(0.4f);
+            yield return Capture(cam, Path.Combine(dir, "V21_avatar_select.png"));
+            records.Add(Snapshot("V21_avatar_select.png", "v4 阶段 1 / 角色库",
+                "三张竖版人像卡：写实女性 / 写实男性 / 儿童，缩略图取自模型头部贴图",
+                "打开角色库面板后截图（面板默认收起）",
+                session, cameraCtrl, avatar, timeline));
+            avatarPanel.ShowPanel(false);
+            yield return null;
+        }
+
         // 复位到内置角色，避免影响后续（主菜单截图）
         session.SwitchAvatar(0);
         yield return new WaitForSeconds(0.5f);

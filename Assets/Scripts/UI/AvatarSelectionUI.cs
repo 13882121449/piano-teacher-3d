@@ -34,12 +34,14 @@ namespace PianoTeacher3D.UI
         public static int AvatarCount => AvatarNames.Length;
 
         // 面板尺寸：4 张卡片一行（4 × 108 + 3 × 8 = 456），加左右各 16 的内边距
-        private const float PanelWidth = 488f;
-        private const float PanelHeight = 324f;   // 多出 24：允许「切换失败原因」换行显示两行
-        private const float CardWidth = 108f;
-        private const float CardHeight = 132f;
-        private const float CardGap = 8f;
-        private const float CardTop = 96f;
+        // 3 张竖版人像卡：132×184（图 132×140 + 名称 18 + 标签 16 + 内边距）
+        private const float PanelWidth = 460f;
+        private const float PanelHeight = 372f;   // 多出 24：允许「切换失败原因」换行显示两行
+        private const float CardWidth = 132f;
+        private const float CardHeight = 184f;
+        private const float CardGap = 12f;
+        private const float CardTop = 92f;
+        private const float ThumbHeight = 132f;
 
         private Core.LessonSessionController _session;
         private AvatarManager _avatarManager;
@@ -251,7 +253,7 @@ namespace PianoTeacher3D.UI
                 {
                     label.alignment = TextAnchor.MiddleCenter;
                     label.fontSize = UITheme.FontCaption;
-                    UITheme.Place(label.rectTransform, 4f, CardHeight - 40f, CardWidth - 8f, 18f);
+                    UITheme.Place(label.rectTransform, 4f, 26f, CardWidth - 8f, 18f);
                 }
                 _cardLabels.Add(label);   // 保持与 _cards 索引一一对应（可能为 null）
 
@@ -259,7 +261,7 @@ namespace PianoTeacher3D.UI
                 var tag = UITheme.CreateText(card.transform, BuildTag(profile), Vector2.zero,
                     new Vector2(CardWidth - 8f, 16f), UITheme.FontStatusLabel, UITheme.TextSecondary,
                     TextAnchor.MiddleCenter);
-                UITheme.Place(tag.rectTransform, 4f, CardHeight - 58f, CardWidth - 8f, 16f);
+                UITheme.Place(tag.rectTransform, 4f, 8f, CardWidth - 8f, 16f);
                 _cardTags.Add(tag);
             }
 
@@ -326,13 +328,19 @@ namespace PianoTeacher3D.UI
             var go = new GameObject("Thumb");
             go.transform.SetParent(parent, false);
             var rt = go.AddComponent<RectTransform>();
-            UITheme.Place(rt, 6f, CardHeight - 34f, CardWidth - 12f, 28f);
+            UITheme.Place(rt, 4f, CardHeight - ThumbHeight - 8f, CardWidth - 8f, ThumbHeight);
 
             var image = go.AddComponent<Image>();
-            image.preserveAspect = false;
+            image.preserveAspect = true;
             image.raycastTarget = false;
 
-            if (profile.Thumbnail != null)
+            var portrait = LoadPortrait(profile);
+            if (portrait != null)
+            {
+                image.sprite = portrait;
+                image.color = Color.white;
+            }
+            else if (profile.Thumbnail != null)
             {
                 var sprite = Sprite.Create(profile.Thumbnail,
                     new Rect(0f, 0f, profile.Thumbnail.width, profile.Thumbnail.height),
@@ -347,6 +355,30 @@ namespace PianoTeacher3D.UI
                 image.color = PlaceholderColor(profile.Style);
             }
             return image;
+        }
+
+        /// <summary>
+        /// 取角色的人像缩略图：优先用 <c>Resources</c> 里同名的 <c>*_portrait</c> 贴图
+        /// （真人角色的脸部来自模型自身的头部贴图，不是另画的美术图）。
+        /// 用静态字典缓存，重复开关面板不会重复创建 Sprite。
+        /// </summary>
+        private static readonly Dictionary<string, Sprite> PortraitCache = new Dictionary<string, Sprite>();
+
+        private Sprite LoadPortrait(CharacterProfile profile)
+        {
+            if (profile == null) return null;
+            var path = CharacterRegistry.PortraitResourcesPath(profile.CharacterId);
+            if (string.IsNullOrEmpty(path)) return null;
+            if (PortraitCache.TryGetValue(path, out var cached)) return cached;
+
+            var tex = Resources.Load<Texture2D>(path);
+            if (tex == null) return null;
+
+            var sprite = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height),
+                new Vector2(0.5f, 0.5f), 100f);
+            _sprites.Add(sprite);
+            PortraitCache[path] = sprite;
+            return sprite;
         }
 
         /// <summary>缩略图占位色：按风格区分，让「有没有真实预览图」一眼可辨。</summary>
@@ -434,8 +466,14 @@ namespace PianoTeacher3D.UI
                     label.fontStyle = on ? FontStyle.Bold : FontStyle.Normal;
                 }
 
-                if (_cardThumbs[i] != null && profile != null && profile.Thumbnail == null)
+                // 只有「真的没有图」时才铺占位色；人像缩略图是有 sprite 的，
+                // 若仍按 profile.Thumbnail 判断会把真人像整张染成风格色（选中态尤其明显）。
+                if (_cardThumbs[i] != null && _cardThumbs[i].sprite == null)
                     _cardThumbs[i].color = PlaceholderColor(profile.Style) * (on ? 1f : 0.7f);
+
+                // 选中卡的底是强调色，标签必须换成深色，否则浅灰文字在金色上几乎看不见。
+                if (_cardTags.Count > i && _cardTags[i] != null)
+                    _cardTags[i].color = on ? UITheme.TextOnAccent : UITheme.TextSecondary;
 
                 if (_licenseText != null)
                 {

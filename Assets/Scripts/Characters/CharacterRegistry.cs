@@ -47,6 +47,21 @@ namespace PianoTeacher3D.Characters
         /// <summary>儿童的 Resources 路径（不含扩展名）。</summary>
         public const string RocketboxChildResourcesPath = "Characters/Rocketbox/Female_Child_01";
 
+        /// <summary>
+        /// 人像缩略图的 Resources 路径（不含扩展名）。
+        /// 贴图与 FBX 同目录，因此直接复用角色的 Resources 路径加 <c>_portrait</c> 后缀。
+        /// </summary>
+        public static string PortraitResourcesPath(string profileId)
+        {
+            switch (profileId)
+            {
+                case RocketboxMaleId: return RocketboxMaleResourcesPath + "_portrait";
+                case RocketboxChildId: return RocketboxChildResourcesPath + "_portrait";
+                case RocketboxFemaleId: return RocketboxResourcesPath + "_portrait";
+                default: return string.Empty;
+            }
+        }
+
         /// <summary>模型名 → 贴图前缀（Rocketbox 每个角色的贴图前缀都不同：f001 / m002 / cf001）。</summary>
         private static readonly Dictionary<string, string> TexturePrefixes = new Dictionary<string, string>(StringComparer.Ordinal)
         {
