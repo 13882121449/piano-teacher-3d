@@ -1,4 +1,4 @@
-# 写实角色替换与界面重做 实施计划
+﻿# 写实角色替换与界面重做 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -458,3 +458,44 @@ Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode \
   要么下次删掉，要么在 `UITheme.Layout` 里标 `[Obsolete]`。
 - 手部：静止与演奏姿态都已标定，但「按键手指仍略高于键面」是 CCD 目标的几何限制，
   要彻底解决得改指尖目标点（计划外的独立任务）。
+
+## 进度快照（2026-11-04 20:30，计划全部完成）
+
+`feature/v4-full-upgrade`，当前 HEAD 见 `git log`，工作区干净。
+
+### 本次（2026-11-04）落地
+
+| commit | 内容 |
+|---|---|
+| `97df44b` | 底栏逐帧控件拆子 Canvas（`UITheme.IsolateDynamic`）；入口卡改名 `EntryCard_*` 与曲库卡 `Card_*` 分离；`CameraVisibilityTests` 只认根画布；截图用例跟随新命名 |
+| `4881d4c` | `SongLoadJob.Cancel` 立即发布终态（`Interlocked` CAS 闸门），不再等线程池调度 |
+
+配套修复的三个真实缺陷：
+
+1. **点「设置」入口卡却进不了课**：`MainMenuLibraryTests` 靠对象名前缀 `Card_` 找曲库卡，
+   而主菜单四张入口卡复用了同一前缀 → 取「最后一张卡」时点到了设置浮层，场景永远停在 `MainMenu`。
+   修法是给入口卡独立前缀，测试语义与实现重新对齐。
+2. **相机遮挡用例算出 `yMax=2.0`**：`CameraVisibilityTests.TryGetCanvasViewportSpace` 取
+   「第一个启用的 Overlay Canvas」当屏幕坐标系，拆出的子 Canvas（只有几十像素高）被选中后
+   视口换算整体失真。加 `isRootCanvas` 过滤后 10/10 通过。
+3. **取消加载会卡在「正在加载」**：终态原本只由 worker 发布，线程池被占满时 worker 可能还没开始跑，
+   主线程只能等。改为 `Cancel` 也抢同一个 CAS 闸门，取消立即生效；已结束的作业不抢终态。
+
+### 计划完成度
+
+Task 1 ✅ 资产 / Task 2 ✅ 注册表 / Task 3 ✅ 三角色手型标定 / Task 4 ✅ 人像卡 /
+Task 5 ✅ 设计令牌与 UIKit / Task 6 ✅ 顶栏 56 + 播放条 72 + 「更多」面板 /
+Task 7 ✅ 主菜单四入口卡与角色浮层 / Task 8 ✅ 全局 Volume + Canvas 拆分 + 全量回归。
+
+### 验证口径（本轮末次全量）
+
+- `python Tools/static_checks.py`：4 条规则 0 违规。
+- EditMode：**485 / 485 通过**（`tmp/z_edit.xml`）。
+- PlayMode：**134 项 → 130 通过 / 0 失败 / 4 跳过**（`tmp/z_play.xml`）。
+- 视觉基线 27 张，新增 `V24_menu_characters` / `V25_menu_settings` / `V26_menu_songs` / `V27_more_panel`。
+
+### 遗留（已知、非本轮范围）
+
+- `PlayerProgressRowHeight` 是底栏单行化之后的遗留令牌，断言里已注释说明。
+- 按键手指仍略高于键面的几何限制（CCD 指尖目标点），需单独立项。
+- `static_checks` 信息性报告：99 处 catch 无出口（P1-9 存量），15 处只记 Warning。
