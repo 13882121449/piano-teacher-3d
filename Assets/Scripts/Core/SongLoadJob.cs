@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -64,6 +64,7 @@ namespace PianoTeacher3D.Core
         private volatile SongLoadStage _stage = SongLoadStage.Queued;
         private volatile bool _done;
         private int _disposed;
+        private int _finished;   // 终态闸门：0 = 未发布，1 = 已发布（取消 / worker 收尾共用）
 
         /// <summary>待加载的源文件路径。</summary>
         public string SourcePath { get; }
@@ -106,6 +107,12 @@ namespace PianoTeacher3D.Core
         {
             try { _cts.Cancel(); }
             catch (ObjectDisposedException) { /* 已释放：视为已完成，无需再取消 */ }
+
+            // 取消要「立即可见」：线程池被占满时后台作业可能连 first stage 都还没进，
+            // 主线程若只能等 IsDone，用户会一直卡在「正在加载」直到 worker 被调度。
+            // 已结束的作业不抢终态（那会丢掉刚解析好的结果），交给主线程按原结果收尾。
+            if (_done) return;
+            Finish(SongLoadStage.Cancelled);
         }
 
         private void Run(CancellationToken token)
@@ -154,8 +161,11 @@ namespace PianoTeacher3D.Core
         /// </summary>
         private void Finish(SongLoadStage stage)
         {
+            // 终态只发布一次：取消与 worker 收尾可能同时到达，先到者定义结果。
+            // 用 CAS 做闸门，避免「取消后又被 worker 写成 Ready」。
+            if (Interlocked.CompareExchange(ref _finished, 1, 0) != 0) return;
             _stage = stage;
-            _done = true;
+            _done = true;   // 必须最后写：主线程看到 IsDone 时结果字段已发布
         }
 
         /// <summary>读取文件信息（大小 / 存在性）；失败不抛异常（错误由校验阶段统一映射）。</summary>
