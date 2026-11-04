@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
@@ -437,6 +437,9 @@ namespace PianoTeacher3D.Tests.PlayMode
             {
                 Canvas canvas = canvases[i];
                 if (canvas == null || !canvas.isActiveAndEnabled) continue;
+                // 只认根画布：播放条把逐帧变化的进度/时间拆成了子 Canvas（UITheme.IsolateDynamic），
+                // 子画布的 rect 只有几十像素高，当成屏幕坐标系会把视口矩形算成 2.0 这种离谱值。
+                if (!canvas.isRootCanvas) continue;
                 if (canvas.renderMode != RenderMode.ScreenSpaceOverlay) continue;
 
                 RectTransform rt = canvas.transform as RectTransform;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -645,17 +645,17 @@ public class VisualSnapshotTests
 
             // ---- V24–V26 主菜单卡片式四入口的三个浮层（Task 7 Step 1）----
             yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
-                "V24_menu_characters.png", "Card_角色", "主菜单 / 角色浮层",
+                "V24_menu_characters.png", "EntryCard_角色", "主菜单 / 角色浮层",
                 "三张人像预览卡（写实女性 / 写实男性 / 儿童）+「进入课程后可切换」说明",
                 "主菜单点「角色」入口卡后截图");
 
             yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
-                "V25_menu_settings.png", "Card_设置", "主菜单 / 设置浮层",
+                "V25_menu_settings.png", "EntryCard_设置", "主菜单 / 设置浮层",
                 "画质三档 chips（取自 QualitySettings.names）+ 全屏开关 + 快捷键说明",
                 "主菜单点「设置」入口卡后截图");
 
             yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
-                "V26_menu_songs.png", "Card_选曲", "主菜单 / 选曲浮层",
+                "V26_menu_songs.png", "EntryCard_选曲", "主菜单 / 选曲浮层",
                 "曲目清单（最多 8 行，含文件大小）+ 底部「导入 MIDI…」",
                 "主菜单点「选曲」入口卡后截图");
         }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using PianoTeacher3D.Characters;
@@ -189,26 +189,30 @@ namespace PianoTeacher3D.UI
                 hasRecent
                     ? (UnityEngine.Events.UnityAction)(() => LoadLesson(recentPath))
                     : (UnityEngine.Events.UnityAction)null,
-                hasRecent ? $"回到《{recentName}》继续练习" : "本次运行还没有打开过曲目");
+                hasRecent ? $"回到《{recentName}》继续练习" : "本次运行还没有打开过曲目",
+                "EntryCard_");
             resume.interactable = hasRecent;
             PlaceEntry(resume.GetComponent<RectTransform>(), 0);
 
             var pick = UIKit.Card(_content, "选曲",
                 $"曲库 {SongsCount()} 首 · 导入 MIDI",
                 new Vector2(EntryCardWidth, EntryCardHeight), OpenSongPicker,
-                "打开曲目清单：选一首开始，或导入本机 .mid 文件");
+                "打开曲目清单：选一首开始，或导入本机 .mid 文件",
+                "EntryCard_");
             PlaceEntry(pick.GetComponent<RectTransform>(), 1);
 
             var cast = UIKit.Card(_content, "角色",
                 "写实女性 · 写实男性 · 儿童",
                 new Vector2(EntryCardWidth, EntryCardHeight), OpenCharacterPreview,
-                "三个内置真人角色的人像预览（进入课程后可切换）");
+                "三个内置真人角色的人像预览（进入课程后可切换）",
+                "EntryCard_");
             PlaceEntry(cast.GetComponent<RectTransform>(), 2);
 
             var settings = UIKit.Card(_content, "设置",
                 "画质 · 全屏 · 快捷键",
                 new Vector2(EntryCardWidth, EntryCardHeight), OpenSettings,
-                "画质档位、全屏开关与快捷键说明");
+                "画质档位、全屏开关与快捷键说明",
+                "EntryCard_");
             PlaceEntry(settings.GetComponent<RectTransform>(), 3);
         }
 

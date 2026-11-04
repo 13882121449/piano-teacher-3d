@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -712,6 +712,26 @@ namespace PianoTeacher3D.UI
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
             scaler.matchWidthOrHeight = 1f; // 匹配高度：窄窗口优先折行/折叠，不压缩按钮高度
             go.AddComponent<GraphicRaycaster>();
+            return canvas;
+        }
+
+        /// <summary>
+        /// 把一个「逐帧变化」的控件拆到子 Canvas。
+        /// <para>
+        /// 一个 Canvas 就是一个批次：进度条每帧改 fill、时间标签每帧改文本，
+        /// 都会把这个 Canvas 的合批网格标脏重建。播放条上静态的背景板与六个按钮
+        /// 本来不该跟着重建，所以把变化源独立出去——只加 Canvas 组件、不换父节点，
+        /// 因此 <see cref="Place"/> / <see cref="StretchX"/> 这些坐标语义完全不变。
+        /// </para>
+        /// </summary>
+        public static Canvas IsolateDynamic(Component target)
+        {
+            if (target == null) return null;
+            var go = target.gameObject;
+            var canvas = go.GetComponent<Canvas>();
+            if (canvas == null) canvas = go.AddComponent<Canvas>();
+            // 不覆盖排序：子 Canvas 仍按层级顺序绘制，只是单独成批
+            canvas.overrideSorting = false;
             return canvas;
         }
 

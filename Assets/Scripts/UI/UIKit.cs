@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -224,11 +224,11 @@ namespace PianoTeacher3D.UI
         /// 悬停底色转 <see cref="UITheme.ControlHover"/> 并升起 2px；卡内有 2px 阴影条。
         /// </summary>
         public static Button Card(Transform parent, string title, string meta, Vector2 size,
-            UnityEngine.Events.UnityAction onClick, string tooltip = null)
+            UnityEngine.Events.UnityAction onClick, string tooltip = null, string namePrefix = "Card_")
         {
             var btn = UITheme.CreateButton(parent, "", Vector2.zero, size, onClick,
                 UITheme.FontSubtitle, ButtonStyle.Secondary);
-            btn.gameObject.name = "Card_" + (string.IsNullOrEmpty(title) ? "Song" : title);
+            btn.gameObject.name = (namePrefix ?? "Card_") + (string.IsNullOrEmpty(title) ? "Song" : title);
 
             if (btn.targetGraphic is Image img)
             {

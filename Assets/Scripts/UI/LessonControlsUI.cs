@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -676,6 +676,12 @@ namespace PianoTeacher3D.UI
             _progress.gameObject.SetActive(true);
             UITheme.StretchX(_progress.GetComponent<RectTransform>(), x, rightEdge,
                 centerY - sliderH * 0.5f, sliderH);
+
+            // 逐帧变化的三个控件各自拆成子 Canvas：进度条 fill 与两个时间标签每帧都在改，
+            // 若与静态背景/按钮同批，整条底栏的合批网格都会跟着重建。
+            UITheme.IsolateDynamic(_progress);
+            UITheme.IsolateDynamic(_timeText);
+            UITheme.IsolateDynamic(_totalText);
 
             // ---- 「更多」浮层：贴在底栏右上角外侧 ----
             if (_morePanel != null)
