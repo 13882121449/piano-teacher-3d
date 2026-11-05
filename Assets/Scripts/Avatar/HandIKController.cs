@@ -149,6 +149,28 @@ namespace PianoTeacher3D.Avatar
         /// 这里给竖直分量一个更小的独立上限，避免把手腕抬到手指够不到键面。
         /// </summary>
         public float MaxPalmCorrectionY = 0.022f;
+        /// <summary>
+        /// H3：按可达上界解析求解掌位偏移。
+        /// <para>
+        /// 2026-11-06 实测（bench 三曲）：开启后键面 P95 9.9→6.1 / 6.8→2.8 mm（黑键、音阶改善），
+        /// 但 P50 从 +1.8→−1.6、−2.6→−5.5、−4.9→−6.2 mm（整体压得更深），穿键帧 241→245，
+        /// 和弦曲 P95 5.7→6.7 反而变差 —— 等于「用穿透换悬空」，不是干净收益，默认关闭。
+        /// 保留实现供 H3b（几何感知指法分配，先保证目标本身就够得到）落地后重新评估。
+        /// </para>
+        /// </summary>
+        public bool PalmReachSolve = false;
+
+        /// <summary>可达判定余量：目标距离 &lt; 指长 × 该系数即视为可达（留一点弯曲余量）。</summary>
+        [Range(0.6f, 0.99f)] public float PalmReachMargin = 0.92f;
+
+        /// <summary>掌位解算的单帧最大偏移（米）。</summary>
+        public float MaxPalmReachOffset = 0.06f;
+
+        /// <summary>Tikhonov 阻尼（相对样本数），防止单指病态时把整只手拽飞。</summary>
+        public float PalmReachDamping = 0.08f;
+
+        /// <summary>掌位偏移的跟随速度（1/s）。</summary>
+        public float PalmReachSpeed = 9f;
         public float TargetMaxSpeed = 4.0f;       // 大跳变时的目标变化速率上限（米/秒）；0 = 不限速
         public float TargetJumpThreshold = 0.20f; // 目标变化小于该值（同手位内旋律跳进）时直接精确对齐
 
@@ -298,7 +320,8 @@ namespace PianoTeacher3D.Avatar
 
         // 手掌修正（指尖贴键的几何反馈量，仅作用于 XZ）
         private Vector3 _leftPalmCorrection;
-        private Vector3 _rightPalmCorrection;
+        private Vector3 _rightPalmCorrection;        private Vector3 _leftReachOffset;
+        private Vector3 _rightReachOffset;
 
         // 腕高自适应（接触方案批次 2.4）：每手独立的「腕高偏移」反馈量与连续悬空帧计数。
         // 偏移量有界（±MaxWristHeightAdaptation）且按指数平滑跟随；无按下音时目标归零、
@@ -519,7 +542,8 @@ namespace PianoTeacher3D.Avatar
             _hasLeftIdleAnchor = false;
             _hasRightIdleAnchor = false;
             _leftPalmCorrection = Vector3.zero;   // 复位手掌修正，避免 Seek 后从旧修正量滑过去
-            _rightPalmCorrection = Vector3.zero;
+            _rightPalmCorrection = Vector3.zero;            _leftReachOffset = Vector3.zero;
+            _rightReachOffset = Vector3.zero;
             _hasLeftSmoothed = false;    // 复位目标平滑，Seek 后重新对齐而非从旧目标滑过去（左右手各自复位）
             _hasRightSmoothed = false;
             _leftHadPrevTarget = false;  // 复位分组判定，避免 Seek 后的首个采样被误判为「跨手大位移」
@@ -648,6 +672,82 @@ namespace PianoTeacher3D.Avatar
         /// 作为手腕目标的修正量（只修正 XZ，高度交给手指弯曲，避免手腕被压到键面以下触发姿态钳制）。
         /// 修正量有界且按指数阻尼跟随，因此不会抖动，也不会突破单帧位移硬约束。
         /// </summary>
+        /// <summary>
+        /// H3 掌位解析解：把「够不到」的目标距离残差写成线性最小二乘，直接解出手掌该往哪挪。
+        /// <para>
+        /// 对每根按住的指头：<c>d = |target − mcp|</c>，<c>reach = 指长</c>，残差 <c>e = d − reach·margin ≥ 0</c>
+        /// 表示「差这么远才够得到」。把手掌平移 <c>δ</c> 时，<c>e</c> 的一阶变化约为 <c>−u·δ</c>（<c>u</c> = 指向目标单位向量），
+        /// 于是问题化为 <c>min ‖Aδ − e‖²</c>（A 的行就是各指头的 u），用正规方程 + Tikhonov 阻尼闭式求解。
+        /// </para>
+        /// <para>
+        /// 与既有 <see cref="PalmCorrectionGain"/> 增益闭环的区别：后者是「朝残差方向按比例挪」，
+        /// 会和指骨 CCD 形成正反馈（实测 R2 20.9→24.6 mm，越修越偏）；这里是**先算掌位、再解指骨**的顺序修正，
+        /// 只处理「几何上根本够不到」的部分，不动「够得到但姿态不好」的部分。
+        /// </para>
+        /// </summary>
+        private Vector3 SolvePalmReachOffset(bool leftHand)
+        {
+            if (!PalmReachSolve) return Vector3.zero;
+
+            var hand = leftHand ? _avatar.LeftHand : _avatar.RightHand;
+            if (hand == null) return Vector3.zero;
+            if (!(hand is IFingerJointRig rig)) return Vector3.zero;
+
+            var targets = leftHand ? _leftFingerTargets : _rightFingerTargets;
+            var has = leftHand ? _leftFingerHasTarget : _rightFingerHasTarget;
+
+            // 正规方程 AᵀA δ = Aᵀe 的对称 3×3 累加
+            double a00 = 0, a01 = 0, a02 = 0, a11 = 0, a12 = 0, a22 = 0;
+            double b0 = 0, b1 = 0, b2 = 0;
+            int used = 0;
+
+            for (int f = 0; f < 5; f++)
+            {
+                if (!has[f]) continue;
+                if (!rig.TryGetJoints(f, out var proximal, out _, out _)) continue;
+                float reach = rig.GetFingerLength(f);
+                if (reach <= 1e-4f) continue;
+
+                Vector3 toTarget = targets[f] - proximal.position;
+                float distance = toTarget.magnitude;
+                if (distance < 1e-5f) continue;
+
+                float deficit = distance - reach * PalmReachMargin;
+                if (deficit <= 0f) continue;          // 够得到：不参与（把姿态问题留给手指解算）
+
+                // 只在「挪一点手就够得到」的量级上求解。
+                // 实测：拇指目标常常差 70 mm（L0 rootDist 138.8 vs 指长 68.6），远超手掌可移动范围；
+                // 让它参与最小二乘会把整只手拽向拇指，反而使其余手指变差（R2 21.0→34.8 mm）。
+                // 这种量级的偏差是指法分配/键位数据问题，不该由掌位补偿。
+                if (deficit > MaxPalmReachOffset) continue;
+
+                Vector3 u = toTarget / distance;
+                a00 += u.x * u.x; a01 += u.x * u.y; a02 += u.x * u.z;
+                a11 += u.y * u.y; a12 += u.y * u.z; a22 += u.z * u.z;
+                b0 += u.x * deficit; b1 += u.y * deficit; b2 += u.z * deficit;
+                used++;
+            }
+
+            if (used == 0) return Vector3.zero;
+
+            double lambda = PalmReachDamping * used;
+            a00 += lambda; a11 += lambda; a22 += lambda;
+
+            // 3×3 对称正定：按余子式求逆（det 有下界阻尼保证）
+            double c00 = a11 * a22 - a12 * a12;
+            double c01 = a02 * a12 - a01 * a22;
+            double c02 = a01 * a12 - a02 * a11;
+            double det = a00 * c00 + a01 * c01 + a02 * c02;
+            if (Mathf.Abs((float)det) < 1e-12f) return Vector3.zero;
+
+            double inv = 1.0 / det;
+            double ix = (c00 * b0 + c01 * b1 + c02 * b2) * inv;
+            double iy = (c01 * b0 + (a00 * a22 - a02 * a02) * b1 + (a01 * a02 - a00 * a12) * b2) * inv;
+            double iz = (c02 * b0 + (a01 * a02 - a00 * a12) * b1 + (a00 * a11 - a01 * a01) * b2) * inv;
+
+            var offset = new Vector3((float)ix, (float)iy, (float)iz);
+            return Vector3.ClampMagnitude(offset, MaxPalmReachOffset);
+        }
         private void UpdatePalmCorrection(bool leftHand)
         {
             IHandRig hand = leftHand ? _avatar.LeftHand : _avatar.RightHand;
@@ -827,6 +927,15 @@ namespace PianoTeacher3D.Avatar
             // 指尖贴键的手掌修正（方案 5.3 第二阶段）：把手腕朝「消灭指尖平均误差」的方向平移。
             // 只修正 XZ（高度由手指弯曲负责），并夹在键盘允许范围内，避免把手腕推出琴键区触发姿态钳制。
             rawTarget += leftHand ? _leftPalmCorrection : _rightPalmCorrection;
+
+            // H3 掌位解析解：只补「几何上够不到」的那部分位移，阻尼跟随避免抖动。
+            {
+                Vector3 wantReach = SolvePalmReachOffset(leftHand);
+                float kReach = 1f - Mathf.Exp(-PalmReachSpeed * Time.deltaTime);
+                if (leftHand) _leftReachOffset = Vector3.Lerp(_leftReachOffset, wantReach, kReach);
+                else _rightReachOffset = Vector3.Lerp(_rightReachOffset, wantReach, kReach);
+                rawTarget += leftHand ? _leftReachOffset : _rightReachOffset;
+            }
             if (_hasLimits)
             {
                 rawTarget = new Vector3(

@@ -31,7 +31,7 @@
 <!-- SECTION:local-check:BEGIN -->
 ### 本机自检（由 Environment_Matrix_Checklist 自动写入）
 
-- 时间：2026-11-05 23:59:30
+- 时间：2026-11-06 00:13:49
 - Unity：2022.3.22f1c1
 - 图形设备：Direct3D11（NVIDIA GeForce RTX 4060 Laptop GPU）
 - 分辨率：640×480 @ 96 dpi
