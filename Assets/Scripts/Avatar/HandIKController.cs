@@ -33,6 +33,14 @@ namespace PianoTeacher3D.Avatar
         /// 这是「手指弯曲后指尖仍落在键上」的几何前提；手太低会让手指必须向后反折。
         /// </summary>
         public float HandHeight = 0.799f;
+        /// <summary>
+        /// 空闲时（无音符、无预置）腕高额外下沉量（米）。
+        /// 为什么需要：演奏帧的指尖目标会把手指拉低到键面（门禁 P50 ≈ 0），
+        /// 但一停止演奏，手指回到静止弯曲（RestCurlDegrees），指尖就抬高 40–50 mm，
+        /// 特写里整只手像悬在半空。真实的钢琴静止手型是「掌 C 型、指腹轻搭在键面上」，
+        /// 所以空闲时把腕整体压低，让静止手型也贴住键面。
+        /// </summary>
+        public float IdleHandDrop = 0f;
 
         /// <summary>
         /// 腕部相对键根的深度偏移（米）。取 0.232 使掌指关节位于键面按压点<b>后方约 55 mm</b>（靠演奏者一侧）：
@@ -269,6 +277,8 @@ namespace PianoTeacher3D.Avatar
         public float BlackKeyTargetLift = 0f;
         /// <summary>按住黑键时抬腕的高度（米）：黑键键面比白键高 22 mm，试 11 mm 实测无效（R2 残差 20.9→21.0 mm），默认关。</summary>
         public float BlackKeyHandLift = 0f;
+        /// <summary>绕手指轴扭转的钳制上限（度）。只用于防止法线与手指近平行时的病态跳变。</summary>
+        public float MaxWristTwistDegrees = 120f;
 
         private const int MaxRecordedIssues = 8;
 
@@ -893,6 +903,7 @@ namespace PianoTeacher3D.Avatar
                     rawTarget = leftHand
                         ? (_hasLeftIdleAnchor ? _leftIdleAnchor : DefaultHandPos(1f))
                         : (_hasRightIdleAnchor ? _rightIdleAnchor : DefaultHandPos(-1f));
+
                 }
             }
 
@@ -1097,20 +1108,24 @@ namespace PianoTeacher3D.Avatar
                     desiredForward = Vector3.ProjectOnPlane(desiredForward, inward.normalized).normalized;
 
                 Quaternion align = Quaternion.FromToRotation(basis.FingerForwardLocal.normalized, desiredForward);
-                // ThumbSideLocal 是「拇指 × SideSign」的规范 X 轴，右手要乘回去才是真拇指方向；
-                // 漏了这一步就会把右手拇指转到外侧（看起来左右手反了）。
-                Vector3 thumbNow = align * (basis.ThumbSideLocal * basis.SideSign);
-                Vector3 thumbFlat = Vector3.ProjectOnPlane(thumbNow, desiredForward);
-                Vector3 inwardFlat = Vector3.ProjectOnPlane(inward, desiredForward);
+
+                // 第二自由度：「手背朝上」（= 掌心朝键面）。
+                // 上一版用「拇指朝内」做扭转约束，方向并不唯一：拇指可以朝内而手掌侧立，
+                // 结果右手被拧成 90°（特写里右手五指横着伸出去）；改成硬钳制后又翻成掌心朝镜头。
+                // 手背法线是**无左右手差异**的量（不像拇指），拿它做约束两侧自然对称，
+                // 也不会出现「解出来的手左右互换」——镜像错误来自拇指侧向量的符号，不是来自两个约束本身。
+                Vector3 backNow = align * basis.BackNormalLocal.normalized;
+                Vector3 backFlat = Vector3.ProjectOnPlane(backNow, desiredForward);
+                Vector3 upFlat = Vector3.ProjectOnPlane(Vector3.up, desiredForward);
+
                 Quaternion aim = align;
-                if (thumbFlat.sqrMagnitude > 1e-8f && inwardFlat.sqrMagnitude > 1e-8f)
+                if (backFlat.sqrMagnitude > 1e-8f && upFlat.sqrMagnitude > 1e-8f)
                 {
-                    float twist = Vector3.SignedAngle(thumbFlat, inwardFlat, desiredForward);
-                    // 注意：这个扭转是「把拇指转到内侧」的完整约束（可达 ±90°+），不能钳制；
-                    // roll（键盘两端的轻微尺偏/桡偏，±6°）只是叠加在它之上的小扰动。
+                    float twist = Vector3.SignedAngle(backFlat, upFlat, desiredForward);
+                    // 钳制只防病态（法线几乎与手指同向时 SignedAngle 会跳），正常解在 ±120° 内。
+                    twist = Mathf.Clamp(twist, -MaxWristTwistDegrees, MaxWristTwistDegrees);
                     aim = Quaternion.AngleAxis(twist + roll, desiredForward) * align;
                 }
-
                 hand.Wrist.rotation = Quaternion.Slerp(hand.Wrist.rotation, aim, k);
                 return;
             }

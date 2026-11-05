@@ -772,9 +772,9 @@ namespace PianoTeacher3D.Characters
             if (profile == null) return 0.016f;
             switch (profile.CharacterId)
             {
-                case CharacterRegistry.RocketboxMaleId: return 0.008f;
-                case CharacterRegistry.RocketboxChildId: return 0.001f;
-                default: return 0.016f;   // 女性成人（默认）
+                case CharacterRegistry.RocketboxMaleId: return 0.016f;
+                case CharacterRegistry.RocketboxChildId: return -0.029f;
+                default: return -0.022f;   // 女性成人（默认）
             }
         }
 
