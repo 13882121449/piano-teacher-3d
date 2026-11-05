@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
@@ -52,6 +52,17 @@ namespace PianoTeacher3D.Tests.PlayMode
         private const float BaselineChord = 0.963f;
         private const float BaselineFastScale = 0.948f;
         private const float BaselineLargeMotion = 0.95f;
+
+        /// <summary>
+        /// 键面距离门禁（H0）：<c>KeyTopDistance</c> 是「指尖到键顶面的有符号距离」，正=悬空、负=压入。
+        /// <para>
+        /// 实测基线（2026-10-31，三首基准曲：P50 3.6–9.1 mm、P95 10.2–17.7 mm）取上包络 + 1 mm 余量，
+        /// 作用是<b>防回退</b>而不是达标：方案目标（P50 ≤ 3 mm、P95 ≤ 8 mm、悬空帧 ≤ 2%、穿键帧 = 0）
+        /// 需要 H2 解析 IK 与 H3 掌位闭环落地后才能收紧到此值，见 master plan H0。
+        /// </para>
+        /// </summary>
+        private const float BaselineKeySurfaceP50 = 0.0100f;
+        private const float BaselineKeySurfaceP95 = 0.0185f;
 
         private LessonSessionController _session;
         private HandIKController _handIK;
@@ -157,6 +168,36 @@ namespace PianoTeacher3D.Tests.PlayMode
                 AssertGroup(song, "和弦", report.ChordHitRate, report.ChordTargetSamples, BaselineChord);
                 AssertGroup(song, "快速音阶", report.FastScaleHitRate, report.FastScaleTargetSamples, BaselineFastScale);
                 AssertGroup(song, "跨手", report.LargeMotionHitRate, report.LargeMotionTargetSamples, BaselineLargeMotion);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Bench_KeySurfaceDistance_NotAboveRecordedBaseline()
+        {
+            var files = BenchFiles();
+            if (files.Count == 0) Assert.Ignore("未找到基准曲目集（先运行 Tools/make_bench_midi.py）");
+
+            foreach (var file in files)
+            {
+                HandMotionReport report = null;
+                yield return PlayWholeSong(file, (r, _) => report = r);
+
+                string song = Path.GetFileNameWithoutExtension(file);
+                Assert.IsNotNull(report, "应产出动作报告");
+                if (report.TargetSamples <= 0) continue;
+
+                float p50 = report.KeyTopDistance.P50;
+                float p95 = report.KeyTopDistance.P95;
+                float hoverRate = report.HoveringFrames / (float)report.TargetSamples;
+
+                Debug.Log($"[BENCH-H0] {song} 键面P50={p50 * 1000f:0.#}mm（门禁≤{BaselineKeySurfaceP50 * 1000f:0.#}）" +
+                          $" 键面P95={p95 * 1000f:0.#}mm（门禁≤{BaselineKeySurfaceP95 * 1000f:0.#}）" +
+                          $" 悬空率={hoverRate * 100f:0.#}% 穿键帧={report.FingerPenetrationFrames}");
+
+                Assert.LessOrEqual(p50, BaselineKeySurfaceP50,
+                    $"{song}：键面距离 P50 回退（{p50 * 1000f:0.#}mm > 基线 {BaselineKeySurfaceP50 * 1000f:0.#}mm）");
+                Assert.LessOrEqual(p95, BaselineKeySurfaceP95,
+                    $"{song}：键面距离 P95 回退（{p95 * 1000f:0.#}mm > 基线 {BaselineKeySurfaceP95 * 1000f:0.#}mm）");
             }
         }
 

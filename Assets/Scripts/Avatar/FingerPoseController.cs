@@ -68,6 +68,15 @@ namespace PianoTeacher3D.Avatar
         public float MaxRootPitchDegrees = 36f;
 
         /// <summary>
+        /// 铰链平面朝「世界上方向」混合的比例：1 = 竖直平面，0 = 跟随手掌滚转（默认，保持既有手型）。
+        /// <para>
+        /// 2026-11-05 A/B（bench_chords，静置 0.8 s 后逐指残差）：0 → 1 后残差从 20.6 mm 变 20.9 mm，
+        /// 无收益。说明「按键手指离键面」不是铰链平面滚转造成的，参数保留但默认关闭。
+        /// </para>
+        /// </summary>
+        public float AimPlaneUpBlend = 0f;
+
+        /// <summary>
         /// 静止手型的三关节总弯曲（度）。规格值 70 = MCP 25 + PIP 30 + DIP 15（标准 C 形手）。
         /// <para>
         /// 旧值 26° 偏平（视觉上像「举手」），悬空/压键指标也说明指尖离键面偏远。
@@ -489,8 +498,14 @@ namespace PianoTeacher3D.Avatar
                 aimDirection = flat * Mathf.Cos(pitch) + Vector3.down * Mathf.Sin(pitch);
 
                 // 滚转由手掌决定（手背朝上），不让手指各自旋转
+                // 铰链平面：默认取手掌上方向（手背朝上）。手掌带滚转时该平面会倾斜，
+                // 而琴键目标始终在竖直平面内 —— 20° 滚转就能造成 20 mm 级「够不到」
+                // （实测 R2 残差几乎全落在 palmUp 方向上）。AimPlaneUpBlend 把平面朝世界上方
+                // 混合回去：1 = 竖直平面（目标必在面内），0 = 完全跟随手掌。
                 Vector3 palmUp = finger.parent.rotation * Vector3.up;
-                aimUp = palmUp.sqrMagnitude > 1e-6f ? palmUp : Vector3.up;
+                palmUp = palmUp.sqrMagnitude > 1e-6f ? palmUp : Vector3.up;
+                aimUp = Vector3.Slerp(palmUp, Vector3.up, Mathf.Clamp01(AimPlaneUpBlend));
+                if (aimUp.sqrMagnitude < 1e-6f) aimUp = Vector3.up;
                 aim = true;
 
                 SolveJointAngles(proximal, intermediate, distal, l2, worldTarget, angles,
