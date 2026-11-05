@@ -143,6 +143,12 @@ namespace PianoTeacher3D.Avatar
         public float PalmCorrectionSpeed = 14f;
         /// <summary>手掌修正增益（0..1）：把平均误差的多少比例用于平移手掌。</summary>
         [Range(0f, 1f)] public float PalmCorrectionGain = 0.8f;
+        /// <summary>
+        /// 手掌修正的竖直上限（米）。手掌修正原本只修 XZ，竖直误差全留给手指弯曲；
+        /// 但实测竖直分量占绝对主导（20.9 mm 里 20.5 mm），手指靠弯曲解不出来。
+        /// 这里给竖直分量一个更小的独立上限，避免把手腕抬到手指够不到键面。
+        /// </summary>
+        public float MaxPalmCorrectionY = 0.022f;
         public float TargetMaxSpeed = 4.0f;       // 大跳变时的目标变化速率上限（米/秒）；0 = 不限速
         public float TargetJumpThreshold = 0.20f; // 目标变化小于该值（同手位内旋律跳进）时直接精确对齐
 
@@ -239,6 +245,8 @@ namespace PianoTeacher3D.Avatar
         /// </para>
         /// </summary>
         public float BlackKeyTargetLift = 0f;
+        /// <summary>按住黑键时抬腕的高度（米）：黑键键面比白键高 22 mm，试 11 mm 实测无效（R2 残差 20.9→21.0 mm），默认关。</summary>
+        public float BlackKeyHandLift = 0f;
 
         private const int MaxRecordedIssues = 8;
 
@@ -811,6 +819,11 @@ namespace PianoTeacher3D.Avatar
             if (WristHeightAdaptation)
                 rawTarget.y += leftHand ? _leftWristHeightAdapt : _rightWristHeightAdapt;
 
+            // 黑键抬手（H4-lite，2026-11-05）：黑键键面比白键高 22 mm，实测按住黑键时指尖比键面低 20 mm 左右。
+            // 抬「指尖目标」无效（试过 12 mm，残差 20.9→21.1），因为目标抬高只会让手指更伸展；
+            // 真实演奏是把手抬起来越过白键去够黑键，所以这里直接抬腕目标。
+            if (hasTarget && Piano.PianoKeyMap.IsBlackKey(targetPitch.Value))
+                rawTarget.y += BlackKeyHandLift;
             // 指尖贴键的手掌修正（方案 5.3 第二阶段）：把手腕朝「消灭指尖平均误差」的方向平移。
             // 只修正 XZ（高度由手指弯曲负责），并夹在键盘允许范围内，避免把手腕推出琴键区触发姿态钳制。
             rawTarget += leftHand ? _leftPalmCorrection : _rightPalmCorrection;
