@@ -107,19 +107,19 @@
 <!-- SECTION:resource-load:BEGIN -->
 ### 资源加载采样（方案 11.4「资源加载耗时和失败率采样」）
 
-- 时间：2026-11-06 00:39:24
+- 时间：2026-11-12 15:27:28
 - Unity：2022.3.22f1c1
-- 图形设备：Direct3D11（NVIDIA GeForce RTX 4060 Laptop GPU）
+- 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
-- 是否批处理（-batchmode）：是；是否 -nographics：否
+- 是否批处理（-batchmode）：是；是否 -nographics：是
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
 - 曲目目录：`StreamingAssets/Songs`；曲目数：1
-- 最慢单曲：52.9 ms；失败数：0
+- 最慢单曲：65.3 ms；失败数：0
 
 | 曲目 | 加载耗时 (ms) | 结果 |
 |---|---|---|
-| demo.mid | 52.9 | 成功 |
+| demo.mid | 65.3 | 成功 |
 
 **口径说明**：耗时用 `System.Diagnostics.Stopwatch` 包裹 `LessonSessionController.LoadSong`，包含校验 + 解析 + 一次性提交；示例曲为毫秒级，5 秒上限只用于捕获卡死，不代表目标设备上的加载性能。
 <!-- SECTION:resource-load:END -->
@@ -132,20 +132,20 @@
 - GPU / 图形 API：NVIDIA GeForce RTX 4060 Laptop GPU / Direct3D11
 - 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
 - Unity / 画质档：2022.3.22f1c1 / High
-- 采样窗口：预热 2.0 s + 采样 10.0 s（598 帧）
+- 采样窗口：预热 2.0 s + 采样 20.0 s（1200 帧）
 
 | 指标 | 数值 |
 |---|---|
-| 平均帧时间 | 16.72 ms |
+| 平均帧时间 | 16.67 ms |
 | p50 帧时间 | 16.67 ms |
-| p95 帧时间 | 16.76 ms |
-| p99 帧时间 | 16.96 ms |
-| 最大帧时间 | 44.77 ms |
-| 平均 FPS | 59.8 |
-| 1% low FPS | 46.1 |
-| 托管内存（GC.GetTotalMemory） | 3.6 → 3.7 MB（增量 +0.09 MB） |
-| Mono 已用 / 总分配 | 3.7 / 89.6 MB |
-| Mesh / Material / AudioClip / GameObject | 107 / 46 / 90 / 644 |
+| p95 帧时间 | 16.71 ms |
+| p99 帧时间 | 16.90 ms |
+| 最大帧时间 | 17.32 ms |
+| 平均 FPS | 60.0 |
+| 1% low FPS | 58.8 |
+| 托管内存（GC.GetTotalMemory） | 7.9 → 4.5 MB（增量 -3.38 MB） |
+| Mono 已用 / 总分配 | 4.5 / 66.5 MB |
+| Mesh / Material / AudioClip / GameObject | 161 / 87 / 17 / 529 |
 
 **口径说明**
 
@@ -154,6 +154,8 @@
 - 1% low FPS = 最慢 1% 帧的平均帧时间的倒数。
 - 资源计数为 `Resources.FindObjectsOfTypeAll` 的运行时总数（含内置对象），只用于同机版本间趋势对比。
 - 结论边界：Development Build + 真实图形设备；Editor 批处理数据不可与之混用。
+- 原始数据：`_verify_out/1112_windows_v3/player_play.json`
+- 性能门槛通过。此前一次启动异常已保留在优化验证 v3 的记录中。
 <!-- SECTION:player-play:END -->
 
 <!-- SECTION:player-switch:BEGIN -->
@@ -164,20 +166,20 @@
 - GPU / 图形 API：NVIDIA GeForce RTX 4060 Laptop GPU / Direct3D11
 - 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
 - Unity / 画质档：2022.3.22f1c1 / High
-- 采样窗口：预热 2.0 s + 采样 10.0 s（599 帧）
+- 采样窗口：预热 2.0 s + 采样 20.0 s（1200 帧）
 
 | 指标 | 数值 |
 |---|---|
-| 平均帧时间 | 16.71 ms |
+| 平均帧时间 | 16.67 ms |
 | p50 帧时间 | 16.67 ms |
-| p95 帧时间 | 16.76 ms |
-| p99 帧时间 | 17.10 ms |
-| 最大帧时间 | 24.92 ms |
-| 平均 FPS | 59.8 |
-| 1% low FPS | 50.0 |
-| 托管内存（GC.GetTotalMemory） | 3.6 → 3.7 MB（增量 +0.12 MB） |
-| Mono 已用 / 总分配 | 3.7 / 89.3 MB |
-| Mesh / Material / AudioClip / GameObject | 107 / 46 / 90 / 593 |
+| p95 帧时间 | 16.70 ms |
+| p99 帧时间 | 16.80 ms |
+| 最大帧时间 | 17.10 ms |
+| 平均 FPS | 60.0 |
+| 1% low FPS | 59.1 |
+| 托管内存（GC.GetTotalMemory） | 7.9 → 4.5 MB（增量 -3.36 MB） |
+| Mono 已用 / 总分配 | 4.5 / 67.4 MB |
+| Mesh / Material / AudioClip / GameObject | 161 / 82 / 17 / 638 |
 
 **口径说明**
 
@@ -186,6 +188,8 @@
 - 1% low FPS = 最慢 1% 帧的平均帧时间的倒数。
 - 资源计数为 `Resources.FindObjectsOfTypeAll` 的运行时总数（含内置对象），只用于同机版本间趋势对比。
 - 结论边界：Development Build + 真实图形设备；Editor 批处理数据不可与之混用。
+- 原始数据：`_verify_out/1112_windows_v3/player_switch.json`
+- 性能门槛通过。此前一次启动异常已保留在优化验证 v3 的记录中。
 <!-- SECTION:player-switch:END -->
 
 <!-- SECTION:player-soak:BEGIN -->

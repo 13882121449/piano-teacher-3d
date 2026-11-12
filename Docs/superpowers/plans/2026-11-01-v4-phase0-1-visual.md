@@ -28,7 +28,7 @@
 
 **Files:**
 - Modify: `Assets/Tests/PlayMode/VisualSnapshotTests.cs`
-- Create: `Docs/upgrade-2026-11-01.md`
+- Create: `Docs/reports/upgrade-2026-11-01.md`
 
 **目的：** 现有 01–06 / V01–V14 在 batchmode 下拍的是内置“气球人”，而生产默认是 Rocketbox。先拍真人特写，确认手部、坐姿、遮挡是否真的可用。
 
@@ -111,7 +111,7 @@ Expected: `已生成 25 张截图`（原 22 张 + V17/V18/V19；如果 V15 激�
 
 - [ ] **Step 4: 写升级记录**
 
-创建 `Docs/upgrade-2026-11-01.md`：
+创建 `Docs/reports/upgrade-2026-11-01.md`：
 
 ```markdown
 # v4 全面升级执行记录（2026-11-01）
@@ -143,7 +143,7 @@ Expected: `已生成 25 张截图`（原 22 张 + V17/V18/V19；如果 V15 激�
 - [ ] **Step 5: 提交**
 
 ```powershell
-git add Assets/Tests/PlayMode/VisualSnapshotTests.cs Docs/screenshots Docs/upgrade-2026-11-01.md
+git add Assets/Tests/PlayMode/VisualSnapshotTests.cs Docs/screenshots Docs/reports/upgrade-2026-11-01.md
 git commit -m "test(visual): 新增真人角色特写/全景真实默认基线"
 ```
 
@@ -415,7 +415,7 @@ Expected: 9 场景全通过。
 - [ ] **Step 4: 提交**
 
 ```powershell
-git add Assets/Scripts/Camera/CameraModeController.cs Docs/screenshots Docs/upgrade-2026-11-01.md
+git add Assets/Scripts/Camera/CameraModeController.cs Docs/screenshots Docs/reports/upgrade-2026-11-01.md
 git commit -m "feat(camera): 真人角色特写构图调参（头肩避让）"
 ```
 
@@ -478,7 +478,7 @@ Expected: `RocketboxRestPoseTests` 通过；V17/V18 中至少 3 指呈可见弯�
 - [ ] **Step 5: 提交**
 
 ```powershell
-git add Assets/Tests/PlayMode/RocketboxRestPoseTests.cs Assets/Scripts/Avatar Docs/screenshots Docs/upgrade-2026-11-01.md
+git add Assets/Tests/PlayMode/RocketboxRestPoseTests.cs Assets/Scripts/Avatar Docs/screenshots Docs/reports/upgrade-2026-11-01.md
 git commit -m "fix(hand): 真人角色静止 C 形手与空闲相位修复"
 ```
 
@@ -995,7 +995,7 @@ git commit -m "feat(ui): 主菜单继续练习入口"
 **Files:**
 - Modify: `Assets/Tests/PlayMode/VisualSnapshotTests.cs`
 - Update: `Docs/screenshots/*.png`、`Docs/screenshots/baseline/*.png`、`Docs/screenshots/manifest.md`
-- Update: `Docs/visual-regression.md`、`Docs/upgrade-2026-11-01.md`
+- Update: `Docs/visual-regression.md`、`Docs/reports/upgrade-2026-11-01.md`
 
 - [ ] **Step 1: 主镜头使用 Rocketbox**
 
@@ -1035,10 +1035,10 @@ Copy-Item "Docs\screenshots\*.png" "Docs\screenshots\baseline\" -Force
 - [ ] **Step 5: 更新文档与提交**
 
 更新 `Docs/visual-regression.md` 的基线数量与“主镜头角色 = Rocketbox”说明；
-更新 `Docs/upgrade-2026-11-01.md` 的阶段 1 记录。
+更新 `Docs/reports/upgrade-2026-11-01.md` 的阶段 1 记录。
 
 ```powershell
-git add Docs/screenshots Docs/visual-regression.md Docs/upgrade-2026-11-01.md Assets/Tests/PlayMode/VisualSnapshotTests.cs
+git add Docs/screenshots Docs/visual-regression.md Docs/reports/upgrade-2026-11-01.md Assets/Tests/PlayMode/VisualSnapshotTests.cs
 git commit -m "test(visual): 主镜头切换真人角色并重采 v4 基线"
 ```
 
@@ -1052,4 +1052,4 @@ git commit -m "test(visual): 主镜头切换真人角色并重采 v4 基线"
 - [ ] 编译 0 错误 0 警告；EditMode 473+ 全绿；PlayMode 124+ 通过 + 5 跳过。
 - [ ] `python Tools/static_checks.py` 与 `check_architecture.py` 全绿。
 - [ ] `--visual` 生成 25 张图并人工确认；`baseline/` 更新。
-- [ ] `Docs/upgrade-2026-11-01.md` 如实记录未达标项。
+- [ ] `Docs/reports/upgrade-2026-11-01.md` 如实记录未达标项。

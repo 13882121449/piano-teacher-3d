@@ -147,6 +147,31 @@ namespace PianoTeacher3D.Tests.PlayMode
         // ==================================================================
 
         [UnityTest]
+        public IEnumerator DampedJoint_WithResidualVelocity_RespectsUpperLimit()
+        {
+            _fingerPose.enabled = false;
+            yield return null;
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var type = typeof(FingerPoseController);
+            var angles = (float[])type.GetField("_leftJointAngle", flags).GetValue(_fingerPose);
+            var velocities = (float[])type.GetField("_leftJointVelocity", flags).GetValue(_fingerPose);
+            var primed = (bool[])type.GetField("_leftJointPrimed", flags).GetValue(_fingerPose);
+            var rig = (IFingerJointRig)_avatar.LeftHand;
+            Assert.IsTrue(rig.TryGetJoints(1, out var joint, out _, out _));
+
+            // 复现接近上限时仍带有屈曲速度的瞬态，稳态角度测试无法覆盖此情形。
+            angles[3] = _fingerPose.MaxMcpDegrees;
+            velocities[3] = 100f;
+            primed[3] = true;
+            _fingerPose.UseDampedJointMotion = true;
+            type.GetMethod("ApplyJoint", flags).Invoke(_fingerPose,
+                new object[] { joint, 0, _fingerPose.MaxMcpDegrees, _fingerPose.MaxMcpDegrees, true, 1 });
+
+            Assert.LessOrEqual(angles[3], _fingerPose.MaxMcpDegrees, "实际角度必须受关节上限约束");
+            Assert.LessOrEqual(velocities[3], 0f, "触及上限时应消除继续屈曲的速度");
+        }
+
+        [UnityTest]
         public IEnumerator PressedChord_CurlsAssignedFingersWithinLimits()
         {
             int[] chord = { 48, 52, 55, 60 };

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using UnityEngine;
 using PianoTeacher3D.MIDI;
 using PianoTeacher3D.Piano;
@@ -59,6 +60,7 @@ namespace PianoTeacher3D.Core
         // ==================== 服务（方案 9.1 / 9.2） ====================
         private readonly SongLibraryService _library = new SongLibraryService();
         private readonly UserPreferences _prefs = new UserPreferences();
+        private Task<string> _preferencesWrite;
 
         /// <summary>照片外观管线（方案 9.2）；构造时不产生任何网络或用户数据写入。</summary>
         private CharacterCustomizationService _customization;
@@ -320,17 +322,18 @@ namespace PianoTeacher3D.Core
                 OnProgressChanged?.Invoke(current, _timeline.TotalDuration);
             }
 
+            if (_preferencesWrite != null && _preferencesWrite.IsCompleted) CompletePreferenceWrite();
             if (_prefsDirty && Time.unscaledTime >= _prefsNextSaveAt) SavePreferences();
         }
 
         private void OnApplicationQuit()
         {
-            if (_prefsDirty) SavePreferences();
+            FlushPreferences();
         }
 
         private void OnDisable()
         {
-            if (_prefsDirty) SavePreferences();
+            FlushPreferences();
 
             // 角色注册表归会话所有（写实化批次 1）：域重载 / 场景卸载时释放自建档案缓存，
             // 防止 Resources 引用跨域残留；Dispose 幂等，重复调用安全。
@@ -902,6 +905,7 @@ namespace PianoTeacher3D.Core
 
                 // 按当前练习模式装载音符（分手练习由过滤层完成，方案 6.3）
                 _scheduler.Load(PianoNoteFilter.FilterByHand(result.Notes, _practiceHand));
+                _audio?.PrepareSong(result.Notes);
 
                 // 踏板：优先使用文件里录下的 CC64；没有就按 legato 生成自动延音，
                 // 这样内置 demo（不含踏板事件）也能看到右脚动作，而不是硬编一段假动画。
@@ -1601,17 +1605,37 @@ namespace PianoTeacher3D.Core
 
         private void SavePreferences()
         {
+            if (_preferencesWrite != null) return;
+            // 先在主线程生成不可变快照，后台只执行文件操作。连续改动由下一次写入合并。
+            string path = UserPreferences.FilePath;
+            string snapshot = _prefs.CreateSaveSnapshot();
             _prefsDirty = false;
             _prefsNextSaveAt = 0f;
+            _preferencesWrite = Task.Run(() => UserPreferences.WriteSnapshot(path, snapshot));
+        }
+
+        private void CompletePreferenceWrite()
+        {
             try
             {
-                _prefs.Save();
+                _prefs.LoadDiagnostic = _preferencesWrite.GetAwaiter().GetResult();
+                if (_prefs.LoadDiagnostic != null)
+                    Debug.LogWarning(_prefs.LoadDiagnostic);
             }
             catch (Exception ex)
             {
-                // 偏好写失败不应影响教学流程（只提示，不炸）
                 Debug.LogWarning($"[PianoTeacher3D] 用户偏好保存失败：{ex.GetType().Name}");
             }
+            finally { _preferencesWrite = null; }
+        }
+
+        private void FlushPreferences()
+        {
+            // 退出或卸载时先收尾旧快照，再保存最新设置，避免两次写入争用同一个临时文件。
+            if (_preferencesWrite != null) CompletePreferenceWrite();
+            if (!_prefsDirty) return;
+            SavePreferences();
+            CompletePreferenceWrite();
         }
 
         private static PracticeHand NormalizeHand(int raw) =>

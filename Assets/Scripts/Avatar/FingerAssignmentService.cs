@@ -11,6 +11,9 @@ namespace PianoTeacher3D.Avatar
     {
         /// <summary>取某手某指当前的指尖目标世界坐标（无目标时返回 false）。索引 0 = 拇指。</summary>
         bool TryGetFingertipTarget(bool leftHand, int fingerIndex, out Vector3 target);
+
+        /// <summary>取已分配音高对应的实际键面按压点。</summary>
+        bool TryGetKeyPressPoint(int pitch, out Vector3 point);
     }
 
     /// <summary>

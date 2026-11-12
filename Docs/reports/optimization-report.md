@@ -1,8 +1,7 @@
 # Piano Teacher 3D — 方案落地交付报告
 
 > 执行日期：2026-10-16 · 引擎：Unity 2022.3.22f1c1（中国版）· 平台：Windows 桌面端
-> 依据文档：[`../../APP《产品与工程综合优化方案》.md`](../../APP《产品与工程综合优化方案》.md)（下称「方案」）、
-> [`../../PianoTeacher3D-项目审查与优化建议.md`](../../PianoTeacher3D-项目审查与优化建议.md)（下称「审查」）
+> 依据文档：《产品与工程综合优化方案》（下称「方案」）与《PianoTeacher3D 项目审查与优化建议》（下称「审查」）。这两份早期资料未纳入仓库。
 > 执行方式：6 个并行子任务（相机 / UI / 手部与人物 / 曲库与错误 / 钢琴与音频 / 场景光照）分片改造 →
 > 会话层（`LessonSessionController`）统一集成 → 3 个收尾子任务（测试补齐 / 压力长跑 / 文档）→ 逐轮编译与测试验证。
 
@@ -213,14 +212,14 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots   # 像�
 | `Docs/visual-regression.md` | 18 张截图用例 + 相机 9 场景断言 + **人工看图发现的问题与修复记录** |
 | `Docs/quality-and-roadmap.md` | 画质档位、性能排查顺序、验收门槛现状、Sprint 0–5 路线图、7 条关键取舍 |
 | `Docs/completion-review.md` | 方案与审查**逐条**核对表（含「计划中」项与对应阶段） |
-| `Docs/optimization-report.md` | ← 本文档 |
+| `Docs/reports/optimization-report.md` | ← 本文档 |
 
 ---
 
 # 附录 A · 第二轮：手部对应关系 / 显示模式 / 左右手方向（2026-10-16）
 
 > 本轮针对三个具体问题做了修复与新增。完整的技术说明（现象 / 根因 / 改动 / 验证方法）见
-> [`Docs/hand-correspondence-and-display-modes.md`](hand-correspondence-and-display-modes.md)。
+> [`Docs/hand-correspondence-and-display-modes.md`](../hand-correspondence-and-display-modes.md)。
 
 ## A.1 三项改动一览
 
@@ -258,7 +257,7 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots   # 像�
 # 附录 B：手部重绘与姿态自然化（评估文档附录 A 落地记录，2026-10-18）
 
 本轮按《系统性技术评估与后续优化方案 · 手部重绘增强版》附录 A 逐条实施。
-完整设计契约见 [`Docs/hand-mesh-design.md`](hand-mesh-design.md)，指标口径见 [`Docs/hand-alignment.md`](hand-alignment.md)。
+完整设计契约见 [`Docs/hand-mesh-design.md`](../hand-mesh-design.md)，指标口径见 [`Docs/hand-alignment.md`](../hand-alignment.md)。
 
 ## B.1 逐条对照
 

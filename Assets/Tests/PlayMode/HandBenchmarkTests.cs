@@ -201,6 +201,128 @@ namespace PianoTeacher3D.Tests.PlayMode
             }
         }
 
+        [UnityTest, Explicit("逐指接触诊断，固定 60 Hz 播放三首基准曲")]
+        public IEnumerator Bench_ContactByFinger() => MeasureFingerContact();
+
+        [UnityTest, Explicit("写实角色逐指接触诊断")]
+        public IEnumerator Bench_RocketboxContactByFinger()
+        {
+            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            Assert.AreEqual(Characters.CharacterRegistry.RocketboxFemaleId, _session.CurrentCharacterView.CharacterId);
+            yield return null;
+            yield return MeasureFingerContact();
+        }
+
+        private IEnumerator MeasureFingerContact()
+        {
+            var files = BenchFiles();
+            Assert.IsNotEmpty(files);
+            var avatar = Object.FindFirstObjectByType<AvatarManager>();
+            Assert.IsNotNull(avatar);
+            var pressedField = typeof(HandIKController).GetField("_pressed",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var pressed = (HashSet<int>)pressedField.GetValue(_handIK);
+            int previousCaptureRate = Time.captureFramerate;
+            Time.captureFramerate = 60;
+            try
+            {
+                foreach (var file in files)
+                {
+                    _session.LoadSong(file);
+                    yield return null;
+                    Assert.IsTrue(_session.HasSong, file);
+                    _session.Seek(0f);
+                    _session.Play();
+                    var horizontal = new List<float>[10];
+                    var vertical = new List<float>[10];
+                    for (int i = 0; i < 10; i++)
+                    {
+                        horizontal[i] = new List<float>();
+                        vertical[i] = new List<float>();
+                    }
+                    int sampledFrames = 0;
+                    int penetrationFrames = 0;
+                    int hoverFrames = 0;
+                    int hoverBeyondPlanFrames = 0;
+                    int infeasibleFrames = 0;
+                    float maxSpanGap = 0f;
+                    int unassigned = 0;
+                    var origins = new Vector3[10];
+                    var keys = new Vector3[10];
+                    var reaches = new float[10];
+                    int frames = Mathf.CeilToInt(_session.TotalDuration * 60f) + 18;
+                    for (int frame = 0; frame < frames; frame++)
+                    {
+                        yield return null;
+                        bool penetration = false;
+                        bool hover = false;
+                        bool hoverBeyondPlan = false;
+                        bool sampled = false;
+                        int activeFingers = 0;
+                        foreach (int pitch in pressed)
+                        {
+                            bool left = MIDI.PianoNoteFilter.IsLeftHand(pitch);
+                            int finger = _handIK.Assignment.GetFinger(left, pitch);
+                            if (finger < 0) { unassigned++; continue; }
+                            if (!_handIK.TryGetKeyPressPoint(pitch, out var key)) continue;
+                            var rig = (IFingerJointRig)(left ? avatar.LeftHand : avatar.RightHand);
+                            var delta = (rig.GetFingertip(finger).position - key) * 1000f;
+                            int slot = (left ? 0 : 5) + finger;
+                            horizontal[slot].Add(Mathf.Sqrt(delta.x * delta.x + delta.z * delta.z));
+                            vertical[slot].Add(delta.y);
+                            sampled = true;
+                            penetration |= delta.y < -4f;
+                            hover |= delta.y > 8f;
+                            hoverBeyondPlan |= delta.y > 6f;
+                            if (!rig.TryGetJoints(finger, out var root, out _, out _)) continue;
+                            activeFingers |= 1 << slot;
+                            origins[slot] = root.position;
+                            keys[slot] = key;
+                            reaches[slot] = rig.GetFingerLength(finger);
+                        }
+                        if (sampled) sampledFrames++;
+                        if (penetration) penetrationFrames++;
+                        if (hover) hoverFrames++;
+                        if (hoverBeyondPlan) hoverBeyondPlanFrames++;
+
+                        float frameGap = 0f;
+                        for (int i = 0; i < 10; i++)
+                        {
+                            if ((activeFingers & (1 << i)) == 0) continue;
+                            for (int j = i + 1; j < (i < 5 ? 5 : 10); j++)
+                            {
+                                if ((activeFingers & (1 << j)) == 0) continue;
+                                // 若键距超过两指长与两指根间距之和，平移手腕也无法同时触键。
+                                float gap = Vector3.Distance(keys[i], keys[j]) - Vector3.Distance(origins[i], origins[j])
+                                            - reaches[i] - reaches[j];
+                                frameGap = Mathf.Max(frameGap, gap);
+                            }
+                        }
+                        if (frameGap > 0.001f) infeasibleFrames++;
+                        maxSpanGap = Mathf.Max(maxSpanGap, frameGap);
+                    }
+                    _session.Stop();
+                    string song = Path.GetFileNameWithoutExtension(file);
+                    Assert.Greater(sampledFrames, 0, song);
+                    Debug.Log($"[CONTACT] {song} 帧={sampledFrames} 穿键帧={penetrationFrames} 离键超过8mm帧={hoverFrames} 未分配样本={unassigned}");
+                    Debug.Log($"[CONTACT-SPAN] {song} 离键超过6mm帧={hoverBeyondPlanFrames} " +
+                              $"同手无法覆盖帧={infeasibleFrames} 最大跨度缺口={maxSpanGap * 1000f:0.0}mm");
+                    for (int i = 0; i < 10; i++)
+                    {
+                        if (vertical[i].Count == 0) continue;
+                        horizontal[i].Sort();
+                        vertical[i].Sort();
+                        int p95 = Mathf.CeilToInt(0.95f * vertical[i].Count) - 1;
+                        Debug.Log($"[CONTACT] {song} {(i < 5 ? "左" : "右")}{i % 5} n={vertical[i].Count} " +
+                                  $"水平P50={horizontal[i][horizontal[i].Count / 2]:0.0}mm 水平P95={horizontal[i][p95]:0.0}mm " +
+                                  $"高度P95={vertical[i][p95]:0.0}mm 最低={vertical[i][0]:0.0}mm");
+                    }
+                    Assert.Zero(penetrationFrames, $"{song}：分配指尖不应低于键面 4 mm");
+                }
+            }
+            finally { Time.captureFramerate = previousCaptureRate; }
+        }
+
         private static string Pct(int part, int total)
             => total > 0 ? $"{part}（{part * 100f / total:0.#}%）" : "0（样本 0）";
 

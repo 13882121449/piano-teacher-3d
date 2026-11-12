@@ -94,6 +94,9 @@ namespace PianoTeacher3D.Core
             public float warmupSeconds;
             public float sampleSeconds;
             public int frameCount;
+            // 按发生顺序保留逐帧耗时，避免汇总百分位掩盖少数长帧。
+            public float[] frameTimesMs;
+            public int switchCount;
             public float meanMs;
             public float p50Ms;
             public float p95Ms;
@@ -136,6 +139,8 @@ namespace PianoTeacher3D.Core
 
             private System.Collections.IEnumerator Run()
             {
+                // 场景装配可能恢复全屏偏好。仅在性能采样时重新指定窗口，不保存设置。
+                Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
                 // ---- 预热：等场景装配、首帧着色器与音频初始化稳定 ----
                 yield return new WaitForSecondsRealtime(WarmupSeconds);
 
@@ -214,8 +219,14 @@ namespace PianoTeacher3D.Core
                     warmupSeconds = WarmupSeconds,
                     sampleSeconds = _seconds,
                     frameCount = _frames.Count,
+                    switchCount = _switchCount,
                     note = "Development Build + 真实图形设备；Editor 批处理数据不可与之混用。"
                 };
+
+                // 采样停止后才复制，逐帧采集阶段不增加数组分配。
+                r.frameTimesMs = new float[_frames.Count];
+                for (int i = 0; i < _frames.Count; i++)
+                    r.frameTimesMs[i] = _frames[i] * 1000f;
 
                 if (_frames.Count > 0)
                 {

@@ -20,8 +20,8 @@
 | 阶段 | 结果 | 产物 |
 |---|---|---|
 | 编译 | 0 错误 | — |
-| EditMode | **311/311 通过**、0 失败、0 跳过（含本轮新增 10 例） | `_verify_out/editmode.xml` |
-| PlayMode | **90 通过、0 失败、5 跳过**（95 总数） | `_verify_out/playmode.xml` |
+| EditMode | **311/311 通过**、0 失败、0 跳过（含本轮新增 10 例） | `_verify_out/history/1112_验证归档_v1/editmode.xml` |
+| PlayMode | **90 通过、0 失败、5 跳过**（95 总数） | `_verify_out/history/1112_验证归档_v1/playmode.xml` |
 
 > 这组数字**不能**代表真实 Windows Player 的帧时间/内存表现（文档 P0-01 明确要求区分），见第 3 节。
 

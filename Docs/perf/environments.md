@@ -31,11 +31,11 @@
 <!-- SECTION:local-check:BEGIN -->
 ### 本机自检（由 Environment_Matrix_Checklist 自动写入）
 
-- 时间：2026-11-06 00:37:17
+- 时间：2026-11-12 15:25:30
 - Unity：2022.3.22f1c1
-- 图形设备：Direct3D11（NVIDIA GeForce RTX 4060 Laptop GPU）
+- 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
-- 是否批处理（-batchmode）：是；是否 -nographics：否
+- 是否批处理（-batchmode）：是；是否 -nographics：是
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
 | 矩阵项 | 期望 | 本机实测 | 结论 |
@@ -44,7 +44,7 @@
 | 路径含空格 | 可正常加载/导入 | 含空格 | 已覆盖（本次运行路径含空格） |
 | 非管理员权限 | 全部功能可用 | 是（管理员） | **待测**（需以标准用户身份复测） |
 | 无网络环境 | 全部功能可用（本地优先） | 网络可达性：可达（局域网） | **待测**（需断网复测） |
-| 不同 DPI / 缩放 | 布局可操作、不遮挡演奏区 | 屏幕 640×480 @ 96 dpi；nographics=否 | 部分覆盖（需按 100%/125%/150% 缩放各测一次） |
+| 不同 DPI / 缩放 | 布局可操作、不遮挡演奏区 | 屏幕 640×480 @ 96 dpi；nographics=是 | **待测**（无图形设备，无法核对视觉布局） |
 | 窄窗口（1280×720） | 主画面未被控制栏过度覆盖 | Screen=640×480 | 已覆盖（当前窗口已 ≤1280 宽） |
 
 > 本表只记录事实：**任何未覆盖的项都保持「待测」，不得写成已通过**（方案 0 节 / 审查 0.1）；覆盖状态来自本次运行环境，不代表其他机器。
@@ -53,9 +53,10 @@
 <!-- SECTION:player-runtime:BEGIN -->
 ### 真实 Player 运行环境（本地自检）
 
-- 采样时间：2026-10-19 19:44:50
-- Player：PianoTeacher3D.exe（Development Build，1280×720 窗口）
-- 场景：PianoLesson + StreamingAssets/Songs/demo.mid
-- 数据文件：`_verify_out/player_<scenario>.json`
-- 说明：本机为开发机（独显），不代表低配/集显设备；三类设备矩阵仍需分别采集。
+- 日期：2026-11-12。
+- Windows Development Build，1280×720 无边框窗口，High 画质，目标 60 FPS，VSync 关闭。
+- i9-14900HX、RTX 4060 Laptop、Direct3D11。
+- PianoLesson + demo.mid。预热 2 秒，采样 20 秒，切换场景实际切换 9 次。
+- 数据文件：`_verify_out/1112_windows_v3/player_<scenario>.json`。
+- 采样与异常启动记录见[优化验证 v3](../reports/1112_优化验证_v3.md)。
 <!-- SECTION:player-runtime:END -->

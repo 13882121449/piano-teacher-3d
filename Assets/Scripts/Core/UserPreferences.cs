@@ -234,13 +234,20 @@ namespace PianoTeacher3D.Core
         /// </summary>
         public void Save()
         {
+            LoadDiagnostic = WriteSnapshot(FilePath, CreateSaveSnapshot());
+        }
+
+        internal string CreateSaveSnapshot()
+        {
             ClampAll();
-            if (AtomicFileWrite.TryWriteAllText(FilePath, JsonUtility.ToJson(this, true), out string error))
-            {
-                LoadDiagnostic = null;
-                return;
-            }
-            LoadDiagnostic = $"保存偏好失败：{error}";
+            return JsonUtility.ToJson(this, true);
+        }
+
+        internal static string WriteSnapshot(string path, string contents)
+        {
+            return AtomicFileWrite.TryWriteAllText(path, contents, out string error)
+                ? null
+                : $"保存偏好失败：{error}";
         }
 
         /// <summary>

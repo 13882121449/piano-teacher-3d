@@ -450,7 +450,7 @@ Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode \
 1. 全量回归：`taskkill //F //IM Unity.exe` → 删 `Temp/UnityLockfile` → EditMode + PlayMode 全量；
    若 PlayMode 报截图差异，先看 `Docs/screenshots/manifest.md` 里的哈希表再决定重采。
 2. Task 8 Step 2：Canvas 拆分（播放条一个动态 Canvas，其余静态），改完采 1280×720 / 1920×1080 两档。
-3. 收尾：`python Tools/static_checks.py` + `python Tools/verify.py`，更新 `Docs/upgrade-2026-11-01.md`。
+3. 收尾：`python Tools/static_checks.py` + `python Tools/verify.py`，更新 `Docs/reports/upgrade-2026-11-01.md`。
 
 ### 已知遗留
 

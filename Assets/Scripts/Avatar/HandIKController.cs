@@ -330,7 +330,10 @@ namespace PianoTeacher3D.Avatar
 
         // 手掌修正（指尖贴键的几何反馈量，仅作用于 XZ）
         private Vector3 _leftPalmCorrection;
-        private Vector3 _rightPalmCorrection;        private Vector3 _leftReachOffset;
+        private bool _leftUsesChordPlacement;
+        private bool _rightUsesChordPlacement;
+        private Vector3 _rightPalmCorrection;
+        private Vector3 _leftReachOffset;
         private Vector3 _rightReachOffset;
 
         // 腕高自适应（接触方案批次 2.4）：每手独立的「腕高偏移」反馈量与连续悬空帧计数。
@@ -349,6 +352,8 @@ namespace PianoTeacher3D.Avatar
 
         // ---- 键面目标点（初始化时预计算，Update 路径零分配复用）----
         private readonly Dictionary<int, KeyTouchPoint> _keyTouches = new();
+        private readonly Vector2[] _chordReachCenters = new Vector2[5];
+        private readonly float[] _chordReachRadii = new float[5];
 
         // ---- 指尖目标（每手 5 个，预分配） + 和弦成形过渡进度 ----
         private readonly Vector3[] _leftFingerTargets = new Vector3[5];
@@ -661,7 +666,12 @@ namespace PianoTeacher3D.Avatar
                 UpdateWristHeightAdaptation(leftHand: false);
             }
 
-            if (EnableMetrics) SampleMetrics();
+        }
+
+        private void LateUpdate()
+        {
+            // 采集手腕和手指均完成更新后的实际姿态。
+            if (EnableMetrics && _avatar != null && _keyMap != null) SampleMetrics();
         }
 
         private void RefreshAssignment(bool leftHand)
@@ -767,7 +777,8 @@ namespace PianoTeacher3D.Avatar
             Vector3 sum = Vector3.zero;
             int count = 0;
 
-            if (hand != null && hand.Fingers != null)
+            bool usesChordPlacement = leftHand ? _leftUsesChordPlacement : _rightUsesChordPlacement;
+            if (!usesChordPlacement && hand != null && hand.Fingers != null)
             {
                 int fingerCount = Mathf.Min(hand.Fingers.Count, 5);
                 for (int f = 0; f < fingerCount; f++)
@@ -778,11 +789,12 @@ namespace PianoTeacher3D.Avatar
                 }
             }
 
-            Vector3 want = count > 0 ? (sum / count) * PalmCorrectionGain : Vector3.zero;
+            var current = leftHand ? _leftPalmCorrection : _rightPalmCorrection;
+            // 本帧残差来自已偏移的位置，到位后保留已生效的偏移。
+            Vector3 want = count > 0 ? current + (sum / count) * PalmCorrectionGain : Vector3.zero;
             want.y = 0f;                                        // 高度不由手掌平移承担
             want = Vector3.ClampMagnitude(want, MaxPalmCorrection);
 
-            var current = leftHand ? _leftPalmCorrection : _rightPalmCorrection;
             float k = 1f - Mathf.Exp(-PalmCorrectionSpeed * Time.deltaTime);
             Vector3 next = Vector3.Lerp(current, want, k);
 
@@ -937,7 +949,12 @@ namespace PianoTeacher3D.Avatar
                 rawTarget.y += BlackKeyHandLift;
             // 指尖贴键的手掌修正（方案 5.3 第二阶段）：把手腕朝「消灭指尖平均误差」的方向平移。
             // 只修正 XZ（高度由手指弯曲负责），并夹在键盘允许范围内，避免把手腕推出琴键区触发姿态钳制。
-            rawTarget += leftHand ? _leftPalmCorrection : _rightPalmCorrection;
+            var hand = leftHand ? _avatar.LeftHand : _avatar.RightHand;
+            bool usesChordPlacement = hasTarget && TryPlaceChordWrist(hand, leftHand, ref rawTarget);
+            if (leftHand) _leftUsesChordPlacement = usesChordPlacement;
+            else _rightUsesChordPlacement = usesChordPlacement;
+            if (!usesChordPlacement)
+                rawTarget += leftHand ? _leftPalmCorrection : _rightPalmCorrection;
 
             // H3 掌位解析解：只补「几何上够不到」的那部分位移，阻尼跟随避免抖动。
             {
@@ -955,7 +972,6 @@ namespace PianoTeacher3D.Avatar
                     Mathf.Clamp(rawTarget.z, _limits.MinZ, _limits.MaxZ));
             }
 
-            var hand = leftHand ? _avatar.LeftHand : _avatar.RightHand;
             var shoulder = leftHand ? _avatar.LeftShoulder : _avatar.RightShoulder;
             // 两段手臂：上臂 + 前臂 + 肘球（改造前是单段胶囊，见 AvatarManager.BuildArm）
             var upperArm = leftHand ? _avatar.LeftArm : _avatar.RightArm;
@@ -1744,6 +1760,54 @@ namespace PianoTeacher3D.Avatar
         {
             var p = key.position;
             return new Vector3(p.x, HandHeight, p.z + HandDepth);
+        }
+
+        private bool TryPlaceChordWrist(IHandRig hand, bool leftHand, ref Vector3 target)
+        {
+            var pitches = leftHand ? _leftPitches : _rightPitches;
+            if (pitches.Count < 2 || !(hand is IFingerJointRig rig)) return false;
+
+            int count = 0;
+            float minimumDepth = float.NegativeInfinity;
+            foreach (int pitch in pitches)
+            {
+                int finger = Assignment.GetFinger(leftHand, pitch);
+                if (finger < 0 || !_keyTouches.TryGetValue(pitch, out var key)
+                    || !rig.TryGetJoints(finger, out var root, out _, out _)) continue;
+
+                Vector3 offset = root.position - hand.Wrist.position;
+                float height = target.y + offset.y - key.SurfaceY;
+                float length = rig.GetFingerLength(finger) * 0.95f;
+                _chordReachCenters[count] = new Vector2(key.Press.x - offset.x, key.Press.z - offset.z);
+                _chordReachRadii[count] = Mathf.Sqrt(Mathf.Max(0f, length * length - height * height));
+                // 蒙皮骨架的指根需要留在琴键的演奏者一侧，避免手指反向折回。
+                if (hand is IHandOrientationRig)
+                    minimumDepth = Mathf.Max(minimumDepth, _chordReachCenters[count].y + 0.002f);
+                count++;
+            }
+            if (count < 2) return false;
+
+            // 每根指头给出一个手腕可达圆。将腕位往圆内投影，和弦过宽时均摊超出的距离。
+            var origin = new Vector2(target.x, target.z);
+            var position = new Vector2(origin.x, Mathf.Max(origin.y, minimumDepth));
+            for (int iteration = 0; iteration < 8; iteration++)
+            {
+                var correction = Vector2.zero;
+                for (int i = 0; i < count; i++)
+                {
+                    Vector2 delta = _chordReachCenters[i] - position;
+                    float distance = delta.magnitude;
+                    if (distance > _chordReachRadii[i] && distance > 1e-5f)
+                        correction += delta * (1f - _chordReachRadii[i] / distance);
+                }
+                if (correction.sqrMagnitude < 1e-8f) break;
+                position += correction / count;
+                position.y = Mathf.Max(position.y, minimumDepth);
+            }
+            position = origin + Vector2.ClampMagnitude(position - origin, MaxPalmCorrection);
+            target.x = position.x;
+            target.z = position.y;
+            return true;
         }
 
         /// <summary>无目标时的手位（<paramref name="side"/>：左手 +1 = 世界 +X，右手 −1）。</summary>

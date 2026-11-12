@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace PianoTeacher3D.Piano
@@ -11,8 +15,8 @@ namespace PianoTeacher3D.Piano
     /// 不会再出现 PlayOneShot 无法停止导致的"切曲后仍在响"。
     /// </para>
     /// <para>
-    /// <b>音频路径零分配（方案 7.3）</b>：<see cref="OnNoteOn"/>、<see cref="OnNoteOff"/> 与 <c>Update</c> 不做任何
-    /// <c>new List/数组/闭包</c>；所有 <see cref="AudioClip"/> 在 <see cref="Initialize"/> 中按音高一次性预生成并复用。
+    /// <b>音高缓存</b>：曲目就绪后在后台准备开头音符的波形。首次演奏某个音高时创建并缓存对应的
+    /// <see cref="AudioClip"/>，再次演奏时复用。
     /// </para>
     /// <para>
     /// <b>力度响应</b>：音量按 <see cref="PianoVoiceAllocator.VelocityGain"/> 线性映射（含最小底噪）；
@@ -55,8 +59,12 @@ namespace PianoTeacher3D.Piano
 
         /// <summary>合成采样率（Hz）：最高音 C8 的 4 次谐波仍低于 Nyquist，不产生混叠。</summary>
         private const int SampleRate = 44100;
+        private const int OpeningPitchLimit = 12;
+        private const float OpeningSeconds = 4f;
 
         private AudioClip[] _clips;                    // 按 (pitch - MinPitch) 索引
+        private float[][] _preparedWaveforms;
+        private CancellationTokenSource _preparationCancellation;
         private AudioSource[] _sources;                // 槽位 → AudioSource（位于各自的子物体，保证滤波器路由确定）
         private AudioLowPassFilter[] _toneFilters;     // 槽位 → 音色低通（力度映射）
         private AudioSource _damperSource;             // 制音声专用（不占 24 声部池）
@@ -96,6 +104,50 @@ namespace PianoTeacher3D.Piano
 
         /// <summary>累计 voice-stealing 次数（池满抢占），供性能与音频回归诊断（优化方案 P1-04）。</summary>
         public int VoiceStealCount => _allocator != null ? _allocator.StealCount : 0;
+
+        /// <summary>按时间顺序准备曲目开头的音高，后台只生成数组，音频对象留在主线程创建。</summary>
+        public void PrepareSong(IReadOnlyList<MIDI.MidiNoteEvent> notes)
+        {
+            CancelPreparation();
+            if (!Initialized || notes == null || notes.Count == 0) return;
+
+            var pitches = new int[OpeningPitchLimit];
+            int count = 0;
+            float end = notes[0].StartTime + OpeningSeconds;
+            for (int i = 0; i < notes.Count && count < pitches.Length; i++)
+            {
+                var note = notes[i];
+                if (note.StartTime > end) break;
+                if (!PianoKeyMap.IsInRange(note.Pitch) || _clips[note.Pitch - PianoKeyMap.MinPitch] != null)
+                    continue;
+                if (Array.IndexOf(pitches, note.Pitch, 0, count) < 0) pitches[count++] = note.Pitch;
+            }
+            if (count == 0) return;
+
+            var waveforms = new float[_clips.Length][];
+            _preparedWaveforms = waveforms;
+            _preparationCancellation = new CancellationTokenSource();
+            var token = _preparationCancellation.Token;
+            Task.Run(() =>
+            {
+                for (int i = 0; i < count && !token.IsCancellationRequested; i++)
+                {
+                    int pitch = pitches[i];
+                    float[] samples = GeneratePianoWaveform(pitch, ClipDurationSeconds);
+                    Interlocked.Exchange(ref waveforms[pitch - PianoKeyMap.MinPitch], samples);
+                }
+            }, token);
+        }
+
+        private void OnDestroy() => CancelPreparation();
+
+        private void CancelPreparation()
+        {
+            _preparationCancellation?.Cancel();
+            _preparationCancellation?.Dispose();
+            _preparationCancellation = null;
+            _preparedWaveforms = null;
+        }
 
         private void Update()
         {
@@ -220,7 +272,7 @@ namespace PianoTeacher3D.Piano
         /// <summary>
         /// 按需合成并缓存某音高的波形（P0-3）：初始化只建索引数组，内存随实际弹到的音高增长，
         /// 典型曲目（20~30 个音高）只需 9~13 MB，而不是无条件的 38.8 MB。
-        /// 合成一段 2.5 s 波形在实机上为毫秒级以内，首次触发不会造成可感知的卡顿。
+        /// 合成使用振荡器与包络递推，避免首次触发时逐采样调用三角函数和指数函数。
         /// </summary>
         private AudioClip GetClip(int pitch)
         {
@@ -230,7 +282,12 @@ namespace PianoTeacher3D.Piano
             var cached = _clips[index];
             if (cached != null) return cached;
 
-            var clip = CreatePianoClip(pitch, ClipDurationSeconds);
+            var prepared = _preparedWaveforms == null
+                ? null
+                : Interlocked.Exchange(ref _preparedWaveforms[index], null);
+            var clip = prepared != null
+                ? CreateClipFromWaveform(pitch, prepared)
+                : CreatePianoClip(pitch, ClipDurationSeconds);
             if (clip == null)
             {
                 // 单个音高失败只降级为该音静音，不再中断整池初始化（原实现会整个抛异常）
@@ -306,6 +363,9 @@ namespace PianoTeacher3D.Piano
         /// </para>
         /// </summary>
         private static AudioClip CreatePianoClip(int pitch, float duration)
+            => CreateClipFromWaveform(pitch, GeneratePianoWaveform(pitch, duration));
+
+        private static float[] GeneratePianoWaveform(int pitch, float duration)
         {
             float freq = 440f * Mathf.Pow(2f, (pitch - 69) / 12f);
             int samples = Mathf.Max(1, (int)(SampleRate * duration));
@@ -330,11 +390,25 @@ namespace PianoTeacher3D.Piano
                 float tau = 1.6f / Mathf.Pow(n, 0.6f);
                 float omega = 2f * Mathf.PI * partialFreq / SampleRate;
 
+                // 正弦加法公式推进相位、等比数列推进指数包络。
+                // 双精度状态避免长波形累积漂移；频率参数保留原来的单精度定义。
+                double sinStep = System.Math.Sin(omega);
+                double cosStep = System.Math.Cos(omega);
+                double sinPhase = 0.0;
+                double cosPhase = 1.0;
+                double envelope = 1.0;
+                double decay = System.Math.Exp(-1.0 / (SampleRate * (double)tau));
+                float attackSamples = SampleRate * attackSeconds;
+                float inverseAttackSamples = 1f / attackSamples;
+
                 for (int i = 0; i < samples; i++)
                 {
-                    float t = i / (float)SampleRate;
-                    float env = Mathf.Exp(-t / tau) * Mathf.Min(1f, t / attackSeconds);
-                    data[i] += Mathf.Sin(omega * i) * amp * env;
+                    float attack = i < attackSamples ? i * inverseAttackSamples : 1f;
+                    data[i] += (float)(sinPhase * amp * envelope * attack);
+                    double nextSin = sinPhase * cosStep + cosPhase * sinStep;
+                    cosPhase = cosPhase * cosStep - sinPhase * sinStep;
+                    sinPhase = nextSin;
+                    envelope *= decay;
                 }
             }
 
@@ -364,7 +438,12 @@ namespace PianoTeacher3D.Piano
                 for (int i = 0; i < samples; i++) data[i] *= gain;
             }
 
-            var clip = AudioClip.Create($"piano_{pitch}", samples, 1, SampleRate, false);
+            return data;
+        }
+
+        private static AudioClip CreateClipFromWaveform(int pitch, float[] data)
+        {
+            var clip = AudioClip.Create($"piano_{pitch}", data.Length, 1, SampleRate, false);
             if (clip == null) return null;
             clip.SetData(data, 0);
             return clip;

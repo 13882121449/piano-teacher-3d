@@ -62,7 +62,7 @@
 |---|---|---|
 | 0.1 | 新增 PlayMode 截图用例：显式 `RestoreCharacter(RocketboxFemaleId)` 后采集真人全景、特写空闲、特写演奏、主菜单 | `Assets/Tests/PlayMode/VisualSnapshotTests.cs` |
 | 0.2 | 输出 `V17_rocketbox_closeup_idle.png`、`V18_rocketbox_closeup_playing.png`、`V19_rocketbox_full.png` | `Docs/screenshots/` |
-| 0.3 | 人工核对四项：手部是否自然弯曲、指尖是否贴键、头/躯干是否遮挡、坐姿是否穿模；结论写入升级记录 | `Docs/upgrade-2026-11-01.md` |
+| 0.3 | 人工核对四项：手部是否自然弯曲、指尖是否贴键、头/躯干是否遮挡、坐姿是否穿模；结论写入升级记录 | `Docs/reports/upgrade-2026-11-01.md` |
 
 **验收**：四张新图生成，`manifest.md` 自动更新；文档如实记录真人特写的缺陷清单。
 **决策点**：若真人手部/坐姿明显不合格，阶段 1 先修手部链路，再继续场景与主菜单。
@@ -238,7 +238,7 @@ bool TryCollectFallingNotes(float from, float to, List<FallingNoteLane> result)
 3. `python Tools/verify.py --visual --timeout 900` 生成全部基线；人工核对后更新 `baseline/`。
 4. `python Tools/verify.py --player --player-seconds 20` 构建 Windows Player 并冒烟（若环境允许）。
 5. 更新 README、`Docs/architecture.md`、`Docs/ui-design-system.md`、`Docs/animation-pipeline.md` 的相关节；
-   新增 `Docs/upgrade-2026-11-01.md`（改动、数据、未达标项、复现命令）。
+   新增 `Docs/reports/upgrade-2026-11-01.md`（改动、数据、未达标项、复现命令）。
 6. 逐阶段提交到 `feature/v4-full-upgrade`；**不自动合并 master**。
 
 ---
@@ -328,6 +328,6 @@ PracticeInputController（键盘/鼠标）── PracticeNoteOn/Off ──→ �
 
 - `Docs/screenshots/V17_…` ~ `V19_…` 与更新后的 `manifest.md`
 - `Docs/screenshots/baseline/`（更新后的基线）
-- `Docs/upgrade-2026-11-01.md`（执行记录与实测数据）
+- `Docs/reports/upgrade-2026-11-01.md`（执行记录与实测数据）
 - 新增测试文件与测试报告
 - `Assets/StreamingAssets/Songs/catalog.json` 与 6–8 首 MIDI

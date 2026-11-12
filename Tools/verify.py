@@ -44,6 +44,7 @@ Unity Test Framework 的官方约定是：**选中其所属 Category 时即会�
 """
 
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -203,6 +204,7 @@ def report_stage_special(title, result):
 
 PLAYER_DIR = OUT_DIR / "player"
 PLAYER_EXE = PLAYER_DIR / "PianoTeacher3D.exe"
+PLAYER_WIDTH, PLAYER_HEIGHT = 1280, 720
 PLAYER_BUILD_METHOD = "PianoTeacher3D.EditorTools.PlayerBaselineBuild.Build"
 
 
@@ -232,6 +234,8 @@ def build_player(unity, timeout_s):
         proc.kill()
     print(f"  用时 {time.time() - started:0.1f}s → {status}")
 
+    if status != "completed":
+        return False, f"Player 构建未正常完成（{status}），详见 {log_path.name}"
     if not PLAYER_EXE.exists():
         detail = ""
         if log_path.exists():
@@ -258,7 +262,8 @@ def run_player(exe, seconds, scenario, timeout_s):
            "-pt3dPerf", str(seconds),
            "-pt3dPerfScenario", scenario,
            "-pt3dPerfOut", str(out_json),
-           "-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0",
+           "-screen-width", str(PLAYER_WIDTH), "-screen-height", str(PLAYER_HEIGHT), "-screen-fullscreen", "0",
+           "-popupwindow",  # 避免 Windows 恢复上次最大化状态而改变实际渲染分辨率。
            "-logFile", str(log_path)]
 
     print(f"\n$ {exe.name} -pt3dPerf {seconds} -pt3dPerfScenario {scenario} ...")
@@ -272,6 +277,8 @@ def run_player(exe, seconds, scenario, timeout_s):
         status = "timeout"
     print(f"  用时 {time.time() - started:0.1f}s → {status}")
 
+    if status != "completed":
+        return None, f"Player 未正常退出（{status}），详见 {log_path.name}"
     if not out_json.exists():
         return None, f"Player 未输出采样结果（{status}），详见 {log_path.name}"
 
@@ -348,8 +355,33 @@ def player_section_markdown(data, scenario):
     return "\n".join(lines)
 
 
+def player_gate_issues(data, scenario):
+    """检查场景、样本有效性和性能门槛，缺数据不能算通过。"""
+    if not isinstance(data, dict):
+        return ["采样结果必须是 JSON 对象"]
+    issues = []
+    if data.get("scenario") != scenario:
+        issues.append("采样场景与请求不一致")
+    if (data.get("screenWidth"), data.get("screenHeight")) != (PLAYER_WIDTH, PLAYER_HEIGHT):
+        issues.append(f"实际分辨率 {data.get('screenWidth')}×{data.get('screenHeight')}"
+                      f" 与要求的 {PLAYER_WIDTH}×{PLAYER_HEIGHT} 不符")
+    for key in ("frameCount", "p95Ms", "p99Ms", "low1Fps"):
+        value = data.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            issues.append(f"{key} 缺失或不是有效正数")
+    if issues:
+        return issues
+    if data["frameCount"] < 100:
+        issues.append("采样不足 100 帧，不能判断最慢 1% 帧")
+    if data["p99Ms"] > 20.0:
+        issues.append(f"p99 {data['p99Ms']:.2f} ms 超过 20 ms")
+    if data["low1Fps"] < 55.0:
+        issues.append(f"1% low {data['low1Fps']:.1f} FPS 低于 55 FPS")
+    return issues
+
+
 def run_player_stage(unity, seconds, scenarios, timeout_s):
-    """构建 + 采样 + 归档。返回 (是否可用, 摘要行列表)。"""
+    """构建 + 采样 + 归档。返回 (所有请求场景是否达标, 摘要行列表)。"""
     ok, message = build_player(unity, timeout_s)
     if not ok:
         print(f"  ✗ Player 构建失败：{message}")
@@ -359,14 +391,28 @@ def run_player_stage(unity, seconds, scenarios, timeout_s):
 
     summary = []
     any_data = False
+    all_ok = bool(scenarios)
     for scenario in scenarios:
         data, err = run_player(PLAYER_EXE, seconds, scenario, seconds + 180)
         if data is None:
+            all_ok = False
             print(f"  ⚠ scenario={scenario} 未取得数据：{err}")
             summary.append(f"{scenario}: 未取得数据（{err}）")
             continue
 
         any_data = True
+        issues = player_gate_issues(data, scenario)
+        if issues:
+            all_ok = False
+            reason = "；".join(issues)
+            print(f"  ✗ scenario={scenario}：{reason}")
+            summary.append(f"{scenario}: 未通过（{reason}）")
+            upsert_section(PROJECT_ROOT / "Docs" / "perf" / "sampling.md",
+                           f"player-{scenario}",
+                           f"### 真实 Windows Player 基线（scenario = {scenario}）\n\n"
+                           f"- 本次门槛检查未通过：{reason}\n"
+                           f"- 原始数据：`{(OUT_DIR / f'player_{scenario}.json').relative_to(PROJECT_ROOT).as_posix()}`")
+            continue
         print(f"  ✓ scenario={scenario}：p95 {data.get('p95Ms', 0):.2f} ms、"
               f"p99 {data.get('p99Ms', 0):.2f} ms、1% low {data.get('low1Fps', 0):.1f} FPS、"
               f"GC 增量 {data.get('gcAllocMb', 0):+.2f} MB")
@@ -381,15 +427,15 @@ def run_player_stage(unity, seconds, scenarios, timeout_s):
             "### 真实 Player 运行环境（本地自检）",
             "",
             f"- 采样时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"- Player：{PLAYER_EXE.name}（Development Build，1280×720 窗口）",
+            f"- Player：{PLAYER_EXE.name}（Development Build，请求 {PLAYER_WIDTH}×{PLAYER_HEIGHT} 窗口）",
             "- 场景：PianoLesson + StreamingAssets/Songs/demo.mid",
-            "- 数据文件：`_verify_out/player_<scenario>.json`",
+            f"- 数据文件：`{OUT_DIR.relative_to(PROJECT_ROOT).as_posix()}/player_<scenario>.json`",
             "- 说明：本机为开发机（独显），不代表低配/集显设备；三类设备矩阵仍需分别采集。",
         ])
         upsert_section(PROJECT_ROOT / "Docs" / "perf" / "environments.md",
                        "player-runtime", env_body)
 
-    return any_data, summary
+    return all_ok, summary
 
 
 def print_artifacts():
@@ -536,10 +582,11 @@ def main():
 
     # ---- 7. 真实 Windows Player 基线（可选，需要图形设备）----
     player_summary = None
+    player_ok = True
     if args.player:
         print("\n" + "-" * 68)
         print("[附加] 真实 Windows Player 基线（Development Build，不含 -nographics）")
-        _, player_summary = run_player_stage(
+        player_ok, player_summary = run_player_stage(
             unity, args.player_seconds, ["play", "switch"], args.timeout)
 
     # ---- 8. 长跑稳定性（可选，耗时长）----
@@ -568,7 +615,7 @@ def main():
     print("\n" + "=" * 68)
     print("结果汇总")
     print("=" * 68)
-    all_ok = True
+    all_ok = player_ok
     for title, result in results.items():
         all_ok = print_summary(title, result) and all_ok
         report_stage_special(title, result)

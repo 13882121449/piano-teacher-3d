@@ -44,6 +44,7 @@ namespace PianoTeacher3D.Avatar
     /// </para>
     /// <para>性能（方案 7.2）：<c>Update</c> 无 LINQ、无字符串拼接、无每帧 <c>new</c>；容器全部预分配复用。</para>
     /// </summary>
+    [DefaultExecutionOrder(10)]
     public class FingerPoseController : MonoBehaviour, IHandJointIssueSource
     {
         [Header("手指姿态（无目标 / 无三关节时的兜底姿态）")]
@@ -448,6 +449,8 @@ namespace PianoTeacher3D.Avatar
                 {
                     UpdateFingerJoints(finger, jointRig, f, proximal, intermediate, distal,
                         worldTarget, hasTarget, phase, leftHand);
+                    if (pressed && _targetSource != null && _targetSource.TryGetKeyPressPoint(pitch, out var press))
+                        ConstrainFingertipContact(finger, jointRig.GetFingertip(f), press, finger == proximal);
                 }
                 else
                 {
@@ -457,6 +460,50 @@ namespace PianoTeacher3D.Avatar
         }
 
         // ==================== 三关节铰链 IK（附录 A.4.2 / A.4.4） ====================
+
+        private static void ConstrainFingertipContact(Transform root, Transform tip, Vector3 press, bool sharedRoot)
+        {
+            if (tip == null || tip == root || !tip.IsChildOf(root)) return;
+
+            Vector3 offset = tip.position - root.position;
+            float radius = offset.magnitude;
+            if (radius < 1e-5f) return;
+
+            if (sharedRoot)
+            {
+                // 写实角色的近节屈曲覆盖了指根瞄准。沿末端可转动的圆弧，寻找键面上的最近点。
+                const float ContactHeight = 0.002f;
+                const float MaxAimCorrection = 60f;
+                Vector3 desired = press + Vector3.up * ContactHeight - root.position;
+                var horizontal = new Vector3(desired.x, 0f, desired.z);
+                if (desired.z < 0f && horizontal.sqrMagnitude > 1e-8f && Mathf.Abs(desired.y) < radius)
+                {
+                    // 先绕竖直轴对准键位。此步不改变指尖高度，可单独修正被近节写入覆盖的偏航。
+                    var tipHorizontal = new Vector3(offset.x, 0f, offset.z);
+                    float yaw = Vector3.SignedAngle(tipHorizontal, horizontal, Vector3.up);
+                    var turn = Quaternion.AngleAxis(Mathf.Clamp(yaw, -MaxAimCorrection, MaxAimCorrection), Vector3.up);
+                    root.rotation = turn * root.rotation;
+                    offset = turn * offset;
+                    float reach = Mathf.Sqrt(radius * radius - desired.y * desired.y);
+                    Vector3 contact = horizontal.normalized * reach + Vector3.up * desired.y;
+                    if ((contact - desired).sqrMagnitude < (offset - desired).sqrMagnitude
+                        && Vector3.Angle(offset, contact) <= MaxAimCorrection)
+                    {
+                        root.rotation = Quaternion.FromToRotation(offset, contact) * root.rotation;
+                        return;
+                    }
+                }
+            }
+
+            if (tip.position.y >= press.y) return;
+            Vector3 axis = Vector3.Cross(offset, Vector3.up);
+            if (axis.sqrMagnitude < 1e-10f) return;
+
+            // 在关节阻尼之后校正末端高度，保持指骨长度与各关节的相对角度。
+            float from = Mathf.Asin(Mathf.Clamp(offset.y / radius, -1f, 1f));
+            float to = Mathf.Asin(Mathf.Clamp((press.y - root.position.y) / radius, -1f, 1f));
+            root.rotation = Quaternion.AngleAxis((to - from) * Mathf.Rad2Deg, axis) * root.rotation;
+        }
 
         /// <summary>
         /// 单指求解：<b>指根朝向由手掌决定</b>（不追着琴键走），关节负责把指尖送到目标键。
@@ -623,6 +670,12 @@ namespace PianoTeacher3D.Avatar
             {
                 a = 0f;
                 if (v < 0f) v = 0f;
+            }
+            // 目标角度限幅不能阻止残余速度造成过冲，实际角度也必须受上限约束。
+            if (a > maxDegrees)
+            {
+                a = maxDegrees;
+                if (v > 0f) v = 0f;
             }
 
             angles[slot] = a;
