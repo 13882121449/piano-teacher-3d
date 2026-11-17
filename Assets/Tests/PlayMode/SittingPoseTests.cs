@@ -81,6 +81,38 @@ namespace PianoTeacher3D.Tests
         }
 
         [UnityTest]
+        public IEnumerator AllRocketboxCharacters_FitTheBenchOnTheFloor()
+        {
+            var registry = new CharacterRegistry();
+            foreach (var id in new[] { CharacterRegistry.RocketboxFemaleId,
+                CharacterRegistry.RocketboxMaleId, CharacterRegistry.RocketboxChildId })
+            {
+                Assert.IsTrue(registry.TryGet(id, out var profile));
+                var view = RocketboxCharacterView.TryCreate(profile, null, out string error);
+                Assert.IsNotNull(view, error);
+                try
+                {
+                    view.OnCharacterActivated();
+                    yield return null;
+                    view.OnCharacterDeactivated();
+                    view.OnCharacterActivated();
+                    yield return null;
+
+                    var hips = view.Animator.GetBoneTransform(HumanBodyBones.Hips);
+                    var stool = view.RootTransform.Find("StoolRoot");
+                    var cushion = stool.Find("StoolCushion").GetComponent<Renderer>().bounds;
+                    float seat = view.PoseSettings.SeatSurfaceHeight + view.PoseSettings.SeatHeightOffset;
+                    float floor = stool.Find("StoolLeg_1_1").GetComponent<Renderer>().bounds.min.y;
+                    Debug.Log($"[PT3D][SeatFit] {id} 髋={hips.position.ToString("F3")} 座垫={cushion.max.y:F3} 凳脚={floor:F3}");
+                    Assert.That(cushion.max.y, Is.EqualTo(seat).Within(0.003f), id);
+                    Assert.That(cushion.center.z, Is.EqualTo(hips.position.z).Within(0.003f), id);
+                    Assert.That(floor, Is.EqualTo(0f).Within(0.003f), id);
+                }
+                finally { view.DisposeCharacterResources(); }
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Apply_KeepsLeftAndRightArmsSymmetric()
         {
             var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);

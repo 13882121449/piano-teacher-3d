@@ -14,6 +14,7 @@ namespace PianoTeacher3D.Piano
     /// Update 路径不再枚举 <c>Dictionary</c>，也不产生任何托管分配。
     /// </para>
     /// </summary>
+    [DefaultExecutionOrder(2)]
     public class PianoKeyAnimator : MonoBehaviour
     {
         [SerializeField] private float _pressAngle = 3f;
@@ -30,9 +31,13 @@ namespace PianoTeacher3D.Piano
         private int[] _activeIndex;     // 需要在本帧插值的键（pitch - MinPitch）
         private int _activeCount;
         private int _pressedCount;
+        private readonly MIDI.ActiveNoteHands _pressedHands = new();
 
         /// <summary>当前处于按下状态（目标角度 &gt; 0）的琴键数量。</summary>
         public int PressedKeyCount => _pressedCount;
+
+        /// <summary>琴键完全按下时的局部旋转，供腕位预先计算稳定的触键位置。</summary>
+        internal Quaternion DepressedRotation => Quaternion.Euler(_pressAngle, 0f, 0f);
 
         public void Initialize(PianoKeyMap keyMap)
         {
@@ -53,11 +58,13 @@ namespace PianoTeacher3D.Piano
 
             _activeCount = 0;
             _pressedCount = 0;
+            _pressedHands.Clear();
         }
 
         public void OnNoteOn(MIDI.MidiNoteEvent e)
         {
             if (_targetAngle == null || !PianoKeyMap.IsInRange(e.Pitch)) return;
+            _pressedHands.Press(e);
 
             int i = e.Pitch - PianoKeyMap.MinPitch;
             if (!_tracked[i])
@@ -73,6 +80,7 @@ namespace PianoTeacher3D.Piano
         public void OnNoteOff(MIDI.MidiNoteEvent e)
         {
             if (_targetAngle == null || !PianoKeyMap.IsInRange(e.Pitch)) return;
+            if (!_pressedHands.Release(e)) return;
 
             int i = e.Pitch - PianoKeyMap.MinPitch;
             if (_targetAngle[i] > 0f)
@@ -100,6 +108,7 @@ namespace PianoTeacher3D.Piano
             }
             _activeCount = 0;
             _pressedCount = 0;
+            _pressedHands.Clear();
 
             if (_keyMap == null) return;
             foreach (var kv in _keyMap.KeyRoots)

@@ -1,0 +1,36 @@
+# Piano Teacher 3D — 版本库文件属性（P2-2 / P0-2 ④）
+#
+# 目标：
+#   1. 文本文件统一 LF 入库，避免 Windows/CI 之间整文件 diff；
+#   2. C# 保持 .editorconfig 要求的 CRLF，但只影响工作区，不影响仓库内容；
+#   3. 二进制资产显式标记，禁止换行转换、禁止文本 diff。
+
+* text=auto eol=lf
+
+# C# 源码：工作区 CRLF，仓库内统一（与 .editorconfig 的 end_of_line = crlf 一致）
+*.cs    text eol=crlf
+*.asmdef text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+*.meta  text eol=lf
+
+# Unity 场景/预制体是 YAML 文本，保留可合并性（配合 UnityYAMLMerge 使用）
+*.unity  text eol=lf
+*.prefab text eol=lf
+*.asset  text eol=lf
+
+# 二进制资产：显式声明，避免 Git 做行尾转换或产生巨大文本 diff
+*.tga   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.psd   binary
+*.fbx   binary
+*.glb   binary
+*.wav   binary
+*.mp3   binary
+
+# 大文件（Rocketbox 两张 2048 TGA 共约 19.6 MB）：装好 Git LFS 后启用下面一行，
+# 并执行 `git lfs migrate import --include="*.tga"` 把历史也迁到 LFS。
+# *.tga filter=lfs diff=lfs merge=lfs -text

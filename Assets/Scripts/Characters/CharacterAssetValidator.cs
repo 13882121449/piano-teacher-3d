@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
@@ -147,7 +147,12 @@ namespace PianoTeacher3D.Characters
                     if (mat == null)
                         return CharacterValidation.Fail($"网格「{smr.name}」第 {m} 个材质为空（材质丢失）。");
 
-                    bool hasMainTexture = mat.HasProperty("_MainTex") && mat.mainTexture != null;
+                    // URP/Lit 用 _BaseMap，内置 Standard 用 _MainTex —— 两个都要认。
+                    // 只认 _MainTex 会在 URP 下把已正确绑定 _BaseMap 的角色误判成白模
+                    // （Rocketbox 走的就是运行时绑 URP/Lit 的路径）。
+                    bool hasMainTexture =
+                        (mat.HasProperty("_MainTex") && mat.GetTexture("_MainTex") != null) ||
+                        (mat.HasProperty("_BaseMap") && mat.GetTexture("_BaseMap") != null);
                     if (!hasMainTexture)
                     {
                         return CharacterValidation.Fail(
@@ -209,8 +214,26 @@ namespace PianoTeacher3D.Characters
                 var t = all[i];
                 if (t == null || string.IsNullOrEmpty(t.name)) continue;
                 if (!index.ContainsKey(t.name)) index.Add(t.name, t);
+                // 同一套 Rocketbox 资产里 Biped 版本前缀并不统一：成人是 Bip01，儿童是 Bip02。
+                // 统一登记一份「Bip01 xxx」别名，骨骼名表就与具体是哪一代 Biped 无关。
+                string alias = CanonicalBipedName(t.name);
+                if (!string.Equals(alias, t.name, System.StringComparison.Ordinal) && !index.ContainsKey(alias))
+                {
+                    index.Add(alias, t);
+                }
             }
             return index;
+        }
+
+        /// <summary>把 <c>Bip02 L Hand</c> 这类名字折算成 <c>Bip01 L Hand</c>；非 Biped 名原样返回。</summary>
+        private static string CanonicalBipedName(string name)
+        {
+            if (name.Length < 7) return name;
+            if (name[0] != 'B' || name[1] != 'i' || name[2] != 'p') return name;
+            if (name[5] != ' ') return name;
+            if (!char.IsDigit(name[3]) || !char.IsDigit(name[4])) return name;
+            if (name[3] == '0' && name[4] == '1') return name;
+            return "Bip01 " + name.Substring(6);
         }
 
         /// <summary>

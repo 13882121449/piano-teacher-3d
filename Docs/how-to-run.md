@@ -6,6 +6,8 @@
 >
 > 对应方案 **9.3 场景装配与测试**、**11.4 自动化与真实设备验证**、**12 分阶段路线图（Sprint 0 基线）**、**15 发布前检查清单**。
 
+> 2026-11-12 更新：播放卡顿与贴键复测见 [优化验证 v3](reports/1112_优化验证_v3.md)。首次发声测试见 [优化验证 v2](reports/1112_优化验证_v2.md)，初始基线见 [优化验证 v1](reports/1112_优化验证_v1.md)。本文第 9、11 节中的旧测试数量属于历史记录。
+
 ---
 
 ## 1. 环境依赖
@@ -27,7 +29,7 @@
 piano-teacher-3d/
 ├── Assets/
 │   ├── Scenes/                       # MainMenu.unity / PianoLesson.unity（运行时程序化装配）
-│   ├── Scripts/                      # 46 个脚本，约 16,500 行
+│   ├── Scripts/                      # 运行时代码
 │   │   ├── Core/                     # 状态机 / 时间轴 / 会话门面 / 曲库 / 偏好 / 错误 / 画质
 │   │   ├── MIDI/                     # 解析 / 校验 / 调度 / 过滤器
 │   │   ├── Piano/                    # 琴键 / 动画 / 高亮 / 音频（声部池）/ 网格工厂 / 场景环境
@@ -35,16 +37,20 @@ piano-teacher-3d/
 │   │   ├── Camera/                   # 视角状态机 + 取景数学
 │   │   └── UI/                       # 设计令牌 / 控制栏 / 状态栏 / 分段选择器 / 文件选择器 ...
 │   ├── StreamingAssets/Songs/        # demo.mid（内置示例曲，只读）
-│   └── Tests/                        # 共 30 个测试文件（EditMode 17 + PlayMode 13）
+│   └── Tests/                        # Unity Test Runner 测试（EditMode / PlayMode）
 ├── Docs/
-│   ├── architecture.md / animation-pipeline.md / ui-design-system.md / error-codes.md ...
+│   ├── index.md / architecture.md / animation-pipeline.md / ui-design-system.md ...
+│   ├── reports/                      # 历次优化与验收记录
 │   ├── screenshots/                  # 视觉截图（运行时生成；含 baseline/ 子目录）
 │   └── perf/                         # 性能采样与发布前环境矩阵（运行时/人工维护）
 ├── Tools/
 │   ├── verify.py                     # 一键验证脚本
 │   └── visual_diff.py                # 视觉基线像素比较工具
-└── _verify_out/                      # 中间产物（日志与结果 XML，可随时删除）
+├── Builds/Windows/                   # 本地 Windows 使用版
+└── _verify_out/                      # 验证产物，历史批次在 history/
 ```
+
+Unity 测试统一放在 `Assets/Tests/`，分别由 EditMode 和 PlayMode 测试程序集管理。验证脚本自身的测试放在 `Tools/tests/`。
 
 > 用户数据（导入曲目副本、最近列表、偏好）在 **`Application.persistentDataPath/PianoTeacher3D/`**，不在仓库内。
 
@@ -326,8 +332,20 @@ python Tools/visual_diff.py Docs/screenshots/baseline Docs/screenshots --json _v
 
 | 目的 | 命令 | 说明 |
 |---|---|---|
-| 静态检查（无需 Unity） | `python Tools/static_checks.py` | 纯 C# 模块不得引用 UnityEngine、UI 不得直连调度器/时间轴、禁止空 catch；并扫描 TMPro / Timeline / Animation Rigging 的引用数（信息性，不自动删包） |
+| 静态检查（无需 Unity） | `python Tools/static_checks.py` | ① 纯 C# 模块不得引用 UnityEngine；② UI 不得直连调度器/时间轴；③ 禁止空 catch；④ `Update/LateUpdate/FixedUpdate` 不得每帧分配（字符串插值/拼接、集合拷贝、LINQ、`GetComponentsInChildren`、`SendMessage`、`Debug.Log`）。另扫描 TMPro / Timeline / Animation Rigging 的引用数（信息性，不自动删包） |
 | 真实 Player 基线 | `python Tools/verify.py --player [--player-seconds 20]` | Development Build（仅 `PianoLesson` 场景）→ 独立进程采样 `play` / `switch` 两个场景 → 写入 `Docs/perf/sampling.md` 的 `player-*` 小节与 `Docs/perf/environments.md` |
 | CI | `.github/workflows/verify.yml` | `static` job 跑在 GitHub 托管 runner（无需 Unity）；`unity` job 需要注册 `[self-hosted, windows, unity]` 标签的机器 |
 
 > `--player` 需要**图形设备**：在无 GPU/无桌面的环境会构建失败或采不到数据，脚本会如实报告而不会用 Editor 数据顶替。
+
+### 11.3 独立运行版性能门槛（2026-11-12）
+
+- `--player` 要求 `play` 与 `switch` 两个场景均完成，构建及运行进程均正常退出。
+- 性能采样固定为 1280×720 窗口；实际分辨率与请求不符时，结果不计为达标。每个场景至少采到 100 帧，关键数值须有效；p99 帧时间 ≤ 20 ms，1% low ≥ 55 FPS。
+- 任一场景缺数据、场景不匹配、数据无效或指标未达标，整条验证命令返回退出码 `1`。测试通过不能覆盖 Player 阶段的失败。
+- 原始采样保存在 `_verify_out/player_play.json` 和 `_verify_out/player_switch.json`；独显开发机的数据不能替代集显设备验收。
+- 验证脚本的自动测试无需 Unity：`python -B -m unittest discover -s Tools/tests -p test_1112_verify_v1.py`。
+
+### 11.4 构建本地 Windows 使用版
+
+使用项目指定版本的 Unity Editor，在命令行添加 `-batchmode -quit -projectPath <项目绝对路径> -executeMethod PianoTeacher3D.EditorTools.PlayerBaselineBuild.BuildRelease`。该构建从项目的 Build Settings 读取主菜单与课程场景。可用 `PT3D_PLAYER_OUT` 指定项目内的 exe 输出位置，默认放入 `Builds/Windows/` 下的时间目录。运行时保持 exe、DLL 和 `PianoTeacher3D_Data` 在同一目录。

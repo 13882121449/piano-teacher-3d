@@ -4,6 +4,13 @@ using UnityEngine;
 
 namespace PianoTeacher3D.Avatar
 {
+    /// <summary>可选的拇指蒙皮触键点。</summary>
+    public interface IThumbContactRig
+    {
+        /// <summary>拇指的参考点是否取自模型蒙皮外侧的指腹。</summary>
+        bool HasThumbPad { get; }
+    }
+
     /// <summary>
     /// 统一手部控制接口（方案 3.2）：手腕、手掌、手指。
     /// 各角色共用此接口，使 IK 与姿态控制与具体模型解耦。
@@ -30,6 +37,37 @@ namespace PianoTeacher3D.Avatar
     {
         /// <summary>取指定手指的指尖 Transform（0 = 拇指 … 4 = 小指）；索引越界返回 null。</summary>
         Transform GetFingertip(int fingerIndex);
+    }
+
+    /// <summary>
+    /// 可选扩展接口：暴露腕骨局部空间的手背法线与手指前向。
+    /// <para>
+    /// 导入骨架的手臂由「旋转骨骼」解算（<c>RotationalArmChainSolver</c>），只约束
+    /// 「肩→腕」的连线方向，<b>绕前臂轴的滚转是自由的</b>，于是掌心朝向完全由骨架绑定姿态
+    /// 决定：实测 Rocketbox 坐姿下左右手滚转都不对，五指指尖高度横跨 72 mm。
+    /// </para>
+    /// <para>
+    /// 实现方给出两个腕骨局部轴后，<c>HandIKController</c> 才能把掌心明确地「摆平」
+    /// （手背朝上、手指朝前下），而不是靠猜一个 localRotation 欧拉角。
+    /// </para>
+    /// </summary>
+    public interface IHandOrientationRig
+    {
+        /// <summary>腕骨局部空间里「手背朝外」的方向（单位向量）。</summary>
+        Vector3 BackNormalLocal { get; }
+
+        /// <summary>腕骨局部空间里「手指指向」的方向（单位向量）。</summary>
+        Vector3 FingerForwardLocal { get; }
+
+        /// <summary>
+        /// 腕骨局部空间里的「规范 X 轴」= 拇指方向 × <see cref="SideSign"/>（单位向量）。
+        /// 注意它不是纯粹的拇指方向：右手为 −拇指，用之前必须乘回 <see cref="SideSign"/>。
+        /// 加这条约束才能唯一确定绕手指轴的扭转（只有前向 + 背向时左右手会镜像）。
+        /// </summary>
+        Vector3 ThumbSideLocal { get; }
+
+        /// <summary>左手 +1 / 右手 −1：把规范 X 轴换算回拇指方向。</summary>
+        float SideSign { get; }
     }
 
     /// <summary>
@@ -682,8 +720,11 @@ namespace PianoTeacher3D.Avatar
             // 0.28 会在颧骨与鼻尖留下明显高光斑（塑料积木感的主要来源）；0.12 接近哑光、仍保留微弱光泽。
             // 再掺入 7% 暖红模拟皮下毛细血管透光（Built-in Standard 无 SSS 时的廉价替代）。
             var skinBase = Color.Lerp(def.SkinColor, new Color(0.86f, 0.42f, 0.38f), 0.07f);
-            var skinMat = CreateMaterial(skinBase, 0.12f, 0f);
-            var nailMat = CreateMaterial(Color.Lerp(def.SkinColor, Color.white, 0.35f), 0.22f, 0f);
+            // 写实化批次 4：URP（Linear + ACES）下高光泽更「亮」，皮肤要更低光泽、指甲要有明确高光点。
+            // 内置管线保持原值逐位不变（回退路径不受影响）。视觉确认在批次 7 的 --visual 出图。
+            bool srp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
+            var skinMat = CreateMaterial(skinBase, srp ? 0.10f : 0.12f, 0f);
+            var nailMat = CreateMaterial(Color.Lerp(def.SkinColor, Color.white, 0.35f), srp ? 0.45f : 0.22f, 0f);
             var clothMat = CreateMaterial(def.ClothColor, 0.15f, 0f);
             var trimMat = CreateMaterial(Color.Lerp(def.ClothColor, Color.black, 0.32f), 0.20f, 0f);
             var darkMat = CreateMaterial(def.DarkColor, 0.25f, 0f);
@@ -767,10 +808,14 @@ namespace PianoTeacher3D.Avatar
             wrist.SetParent(parent, false);
             wrist.localPosition = new Vector3(positionSign * 0.20f * s, 0.90f * s, 0.10f * s);
 
-            // 腕部连接：一个比掌根略小的过渡体，把「手臂（圆形）→ 手掌（扁形）」的截面差摊平。
-            // 尺寸必须小于掌根截面，否则会在腕部形成一圈可见的凸环（附录 A.3.2 第 6 条）。
-            CreatePart(PrimitiveType.Sphere, wrist, "Wrist", new Vector3(0f, 0f, -wristR * 0.55f),
-                new Vector3(palmW * 0.62f, palmT * 0.85f, wristR * 1.65f), skinMat);
+            // 腕部连接：把「手臂（圆形）→ 手掌（扁形）」的截面差摊平。
+            // 腕部：<b>不</b>另建过渡体。真实腕围是整条手臂最细处（前臂肌腱在此汇聚），
+            // 前臂与手掌之间是「收窄再展开」，不是膨大。
+            // 之前用一个 Sphere 填「前臂（圆 32 mm）→ 手掌（扁 51×17 mm）」的截面差，
+            // 试了三组尺寸（薄饼 / 球形 / 扁椭球）都读成一眼可见的腕部鼓包 ——
+            // 球面弧线一旦超出两侧轮廓就必然像「关节球」，与真人腕部形态相反。
+            // 现在靠手掌网格自身向腕后延伸（z0 = −WristRadius×0.55）+ 端面封口覆盖交界，
+            // 交界处的宽度台阶与真实手腕的展开方向一致。
 
             // 掌部：单块连续放样网格（腕部收窄 → 掌心变宽 → 掌指关节略收，含大鱼际/小鱼际隆起）
             AttachMesh(wrist, "PalmMesh", HandMeshFactory.BuildPalm(meshDef), skinMat);
@@ -1271,9 +1316,14 @@ namespace PianoTeacher3D.Avatar
         /// <summary>创建材质：皮肤用略低 smoothness + 零金属度，避免「塑料积木感」（方案 5.1 第 5 项 / 5.4）。</summary>
         private static Material CreateMaterial(Color c, float smoothness, float metallic)
         {
-            var shader = Shader.Find("Standard")
-                ?? Shader.Find("Universal Render Pipeline/Lit")
-                ?? Shader.Find("Sprites/Default");
+            // 写实化批次 2：由当前管线状态决定顺序（SRP 下 Standard 渲染为洋红，见 PianoKeyMap 同注释）
+            var shader = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
+                ? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Standard")
+                    ?? Shader.Find("Sprites/Default")
+                : Shader.Find("Standard")
+                    ?? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Sprites/Default");
             if (shader == null) return null;
 
             var mat = new Material(shader) { color = c };

@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using NUnit.Framework;
 using PianoTeacher3D.Characters;
 using UnityEngine;
@@ -47,20 +47,49 @@ namespace PianoTeacher3D.Tests
 
             try
             {
-                // 资产现状（2026-10-20 实测）：仓库里只有 head 的两张贴图，
-                // body / opacity 材质没有主贴图 → 渲染出来是白模 + 白色发片碎片。
-                // 因此校验**必须**失败，且原因要指向缺失的贴图；这是刻意的门禁，
-                // 不是缺陷回退：宁可不让用户切过去，也不让他看到破面白模。
+                // 资产现状（2026-10-31 更新）：7 张贴图已入库（body/head 的 color+normal、
+                // 两组 specular、opacity），并由 RocketboxTextureLibrary 在运行时绑定到实例材质
+                // ——FBX 内的贴图路径指向建模机临时目录，导入器永远解析不到，必须代码补。
+                // 因此校验应当**通过**；同时必须确认贴图真的绑上了，
+                // 不能出现「校验通过、实际仍是白模」的假通过。
                 var validation = view.ValidateRig();
-                Assert.IsFalse(validation.Ok, "贴图不全的角色不应通过校验（会被渲染成白模）");
-                StringAssert.Contains("主贴图", validation.Message,
-                    "失败原因应指向缺失的贴图，当前：" + validation.Message);
+                Assert.IsTrue(validation.Ok, "贴图已补齐，角色应通过校验，当前：" + validation.Message);
 
+                Assert.IsNotNull(view.RootTransform, "视图应暴露根节点");
+                var smrs = view.RootTransform.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                int totalSlots = 0, texturedSlots = 0;
+                bool hasConcertOutfit = false;
+                foreach (var smr in smrs)
+                {
+                    foreach (var mat in smr.sharedMaterials)
+                    {
+                        if (mat == null) continue;
+                        totalSlots++;
+                        bool hasTex = (mat.HasProperty("_BaseMap") && mat.GetTexture("_BaseMap") != null)
+                                   || (mat.HasProperty("_MainTex") && mat.GetTexture("_MainTex") != null);
+                        if (hasTex) texturedSlots++;
+                        var albedo = mat.HasProperty("_BaseMap") ? mat.GetTexture("_BaseMap") : mat.mainTexture;
+                        if (albedo != null && albedo.name == "f001_concert_body_color") hasConcertOutfit = true;
+                    }
+                }
+                Assert.Greater(totalSlots, 0, "角色应至少有一个材质槽");
+                Assert.AreEqual(totalSlots, texturedSlots,
+                    string.Format("所有材质槽都必须绑定主贴图（{0}/{1}）——否则仍会露出白模", texturedSlots, totalSlots));
+                Assert.IsTrue(hasConcertOutfit, "默认老师应绑定保留皮肤区域的演奏服贴图");
+
+                Assert.IsNotNull(view.RootTransform.Find("SatinCowlBodice")?.GetComponent<SkinnedMeshRenderer>());
+                Assert.IsNotNull(view.RootTransform.Find("FineSatinStraps")?.GetComponent<SkinnedMeshRenderer>());
+                Assert.IsNotNull(view.RootTransform.Find("StandingSatinGown"));
+                Assert.IsNotNull(view.Skeleton.Head.Find("ReferencePerformerHead")?.GetComponent<MeshRenderer>());
                 Assert.IsTrue(view.IsActivated == false, "未激活前 IsActivated 应为 false");
                 view.OnCharacterActivated();
                 Assert.IsTrue(view.IsActivated);
                 Assert.IsNotNull(view.RootTransform);
                 Assert.IsTrue(view.RootTransform.gameObject.activeSelf);
+                Assert.IsNotNull(view.RootTransform.Find("SeatedSatinGown"), "女演奏者需要实体长裙");
+                var renderers = view.RootTransform.GetComponentsInChildren<MeshRenderer>();
+                Assert.IsTrue(System.Array.Exists(renderers, renderer => renderer.name == "BraidedChignon"),
+                    "女演奏者需要随头骨移动的低发髻");
             }
             finally
             {
@@ -244,7 +273,8 @@ namespace PianoTeacher3D.Tests
                         Vector3 motion = after - before;
                         Assert.Greater(motion.magnitude, 0.002f,
                             $"{labels[h]}第 {f} 指弯曲 30° 后指尖几乎没动（{motion.magnitude * 1000f:0.#} mm）");
-                        Assert.Less(Vector3.Dot(motion, palmDirection), 0f,
+                        // palmDirection 是「掌心朝向」，指尖屈曲应朝这个方向走，dot 应为正。
+                        Assert.Greater(Vector3.Dot(motion, palmDirection), 0f,
                             $"{labels[h]}第 {f} 指弯曲方向错误：指尖没有朝掌心移动" +
                             $"（dot={Vector3.Dot(motion, palmDirection) * 1000f:0.##} mm）");
 
@@ -285,11 +315,16 @@ namespace PianoTeacher3D.Tests
         }
 
         /// <summary>
-        /// 会话层门禁：资产不完整的角色必须被拒绝，且当前角色保持不变（方案 7.3 回滚）。
-        /// 这是用户实际会走到的路径——点了角色卡片就触发这一段。
+        /// 会话层切换：贴图补齐后，写实女性应能真正切过去。
+        /// <para>
+        /// 原用例断言的是「资产不完整 → 拒绝并保留原角色」，依据是 2026-10-20 的资产现状
+        /// （只有 head 两张贴图）。贴图入库后这条前提不再成立，改为验证正向路径；
+        /// 「门禁仍能拦住坏资产」由 <c>CharacterAssetValidatorTests</c>（EditMode）直接覆盖，
+        /// 保护没有丢失，只是从「依赖真实资产残缺」换成了「代码构造残缺」。
+        /// </para>
         /// </summary>
         [UnityTest]
-        public IEnumerator Session_RejectsIncompleteCharacter_AndKeepsPrevious()
+        public IEnumerator Session_ActivatesTexturedCharacter()
         {
             UnityEngine.SceneManagement.SceneManager.LoadScene("PianoLesson");
             yield return null;
@@ -305,10 +340,9 @@ namespace PianoTeacher3D.Tests
 
             var result = session.ActivateCharacter(_profile);
 
-            Assert.IsFalse(result.Succeeded, "资产不完整的角色不应切换成功");
-            StringAssert.Contains("主贴图", result.Error, "应给出可读原因，当前：" + result.Error);
-            Assert.AreEqual(before, session.CurrentCharacterView.CharacterId,
-                "切换失败后必须保留原角色");
+            Assert.IsTrue(result.Succeeded, "贴图补齐后角色应可切换，当前：" + result.Error);
+            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, session.CurrentCharacterView.CharacterId,
+                "切换成功后当前角色应为写实女性（原角色 " + before + "）");
         }
 
         private static void AssertHand(RocketboxHandRig hand, string label)

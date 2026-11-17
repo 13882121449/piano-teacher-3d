@@ -22,7 +22,7 @@ namespace PianoTeacher3D.Characters
     /// 它们都是模型根的子节点，随模型根一起销毁，因此不单独登记到资源作用域。
     /// </para>
     /// </summary>
-    public sealed class RocketboxHandRig : IHandRig, IFingerJointRig
+    public sealed class RocketboxHandRig : IHandRig, IFingerJointRig, IHandOrientationRig, IThumbContactRig
     {
         /// <summary>每只手的手指数（0 = 拇指 … 4 = 小指）。</summary>
         public const int FingersPerHand = 5;
@@ -47,6 +47,8 @@ namespace PianoTeacher3D.Characters
         /// <summary>是否左手。</summary>
         public bool LeftHand { get; }
 
+        public bool HasThumbPad { get; private set; }
+
         public Transform Wrist { get; }
 
         public Transform Palm { get; }
@@ -62,6 +64,16 @@ namespace PianoTeacher3D.Characters
 
         /// <summary>腕部局部空间中的拇指侧（规范基 +X，已乘 SideSign）。</summary>
         public Vector3 ThumbSide { get; private set; } = Vector3.right;
+
+        // 说明：显式实现，避免把「腕骨局部轴」和「世界轴」混用（BackNormal 的坐标系
+        // 在 DeriveCanonicalBasis 里已确定为腕骨局部空间）。
+        Vector3 IHandOrientationRig.BackNormalLocal => BackNormal;
+
+        Vector3 IHandOrientationRig.FingerForwardLocal => FingerDirection;
+
+        Vector3 IHandOrientationRig.ThumbSideLocal => ThumbSide;
+
+        float IHandOrientationRig.SideSign => SideSign;
 
         /// <summary>左手 +1 / 右手 −1（用于把「拇指侧」换算成规范 X 轴）。</summary>
         public float SideSign => LeftHand ? 1f : -1f;
@@ -150,6 +162,58 @@ namespace PianoTeacher3D.Characters
 
             rig.DeriveCanonicalBasis();
             return rig;
+        }
+
+        /// <summary>从拇指末节蒙皮推导指腹，保留其他指的参考点及骨长。</summary>
+        internal void CalibrateThumbPad(SkinnedMeshRenderer[] renderers)
+        {
+            var distal = _distal[0];
+            var middle = _intermediate[0];
+            Vector3 axis = (distal.position - middle.position).normalized;
+            Vector3 palm = -Wrist.TransformDirection(BackNormal);
+            palm = Vector3.ProjectOnPlane(palm, axis).normalized;
+            float length = Vector3.Distance(distal.position, middle.position);
+            if (length < 0.001f || palm.sqrMagnitude < 0.5f) return;
+
+            float best = float.NegativeInfinity;
+            Vector3 pad = _tips[0].localPosition;
+            foreach (var renderer in renderers)
+            {
+                var mesh = renderer.sharedMesh;
+                if (mesh == null || !mesh.isReadable) continue;
+                int bone = Array.IndexOf(renderer.bones, distal);
+                if (bone < 0) continue;
+                var bindPoses = mesh.bindposes;
+                if (bone >= bindPoses.Length) continue;
+                var weights = mesh.boneWeights;
+                var vertices = mesh.vertices;
+                if (weights.Length != vertices.Length) continue;
+                Matrix4x4 bind = bindPoses[bone];
+                for (int i = 0; i < weights.Length; i++)
+                {
+                    var weight = weights[i];
+                    float influence = (weight.boneIndex0 == bone ? weight.weight0 : 0f) +
+                        (weight.boneIndex1 == bone ? weight.weight1 : 0f) +
+                        (weight.boneIndex2 == bone ? weight.weight2 : 0f) +
+                        (weight.boneIndex3 == bone ? weight.weight3 : 0f);
+                    if (influence < 0.70f) continue;
+                    Vector3 local = bind.MultiplyPoint3x4(vertices[i]);
+                    Vector3 delta = distal.TransformVector(local);
+                    float reach = Vector3.Dot(delta, axis);
+                    if (reach < length * 0.15f || reach > length * 2.3f) continue;
+                    float contact = Vector3.Dot(delta, palm);
+                    float score = reach * 0.53f + contact;
+                    if (contact <= 0f || score <= best) continue;
+                    best = score;
+                    pad = local;
+                }
+            }
+
+            if (float.IsNegativeInfinity(best)) return;
+            HasThumbPad = true;
+            _tips[0].localPosition = pad;
+            _lengths[0] = Vector3.Distance(_proximal[0].position, middle.position) + length +
+                Vector3.Distance(distal.position, _tips[0].position);
         }
 
         /// <summary>

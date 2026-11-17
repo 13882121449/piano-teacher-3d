@@ -11,6 +11,7 @@ using UnityEngine.TestTools;
 using UnityEngine.UI;
 using PianoTeacher3D.Avatar;
 using PianoTeacher3D.CameraControl;
+using PianoTeacher3D.Characters;
 using PianoTeacher3D.Core;
 using PianoTeacher3D.MIDI;
 using PianoTeacher3D.Piano;
@@ -43,8 +44,18 @@ using PianoTeacher3D.Tests.PlayMode;
 [Category("Visual")]
 public class VisualSnapshotTests
 {
-    private const int W = 1280;
-    private const int H = 720;
+    /// <summary>
+    /// 快照分辨率。默认 1280×720（设计参考分辨率）；用环境变量 <c>PIANO_SNAPSHOT_W</c> /
+    /// <c>PIANO_SNAPSHOT_H</c> 可在不改代码的前提下再采一档（例如 1920×1080 核对宽屏下底栏不重叠）。
+    /// </summary>
+    private static readonly int W = SnapshotSize("PIANO_SNAPSHOT_W", 1280);
+    private static readonly int H = SnapshotSize("PIANO_SNAPSHOT_H", 720);
+
+    private static int SnapshotSize(string variable, int fallback)
+    {
+        string raw = Environment.GetEnvironmentVariable(variable);
+        return int.TryParse(raw, out int value) && value >= 640 && value <= 3840 ? value : fallback;
+    }
 
     /// <summary>读不到 ProjectSettings/ProjectVersion.txt 时的兜底版本锁定值。</summary>
     private const string ProjectVersionFallback = "2022.3.22f1c1";
@@ -58,7 +69,12 @@ public class VisualSnapshotTests
             yield break;
         }
 
-        string dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Docs", "screenshots"));
+        // 输出目录可用 PIANO_SNAPSHOT_DIR 覆盖：采宽屏一档时写到 _verify_out/ 下，
+        // 不覆盖 Docs/screenshots 里 1280×720 的正式基线。
+        string dirOverride = Environment.GetEnvironmentVariable("PIANO_SNAPSHOT_DIR");
+        string dir = string.IsNullOrWhiteSpace(dirOverride)
+            ? Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Docs", "screenshots"))
+            : Path.GetFullPath(dirOverride);
         Directory.CreateDirectory(dir);
 
         // 方案 11.2 / 审查 6.1：固定窗口尺寸，并把「实际值」写进 manifest（不假设一定是 1280×720）
@@ -139,7 +155,20 @@ public class VisualSnapshotTests
         session.Stop();
         session.ClearLoop();
         session.SetHighlightMode(HighlightMode.Off);
-        session.SwitchAvatar(0);
+        // 注意：SwitchAvatar(int) 是「程序化内置角色」的旧下标路径，走它会把写实角色换回方块人；
+        // 视觉基线要的是 Rocketbox 真人，所以这里按角色 ID 走注册表 + 切换事务。
+        if (session.CharacterRegistry != null &&
+            session.CharacterRegistry.TryGet(PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId,
+                out var baselineProfile))
+        {
+            var baselineResult = session.ActivateCharacter(baselineProfile);
+            Debug.Log($"[V12] 归位角色 rocketbox.female01：成功={baselineResult.Succeeded} 原因={baselineResult.Error}");
+        }
+        else
+        {
+            Debug.LogWarning("[V12] 注册表里没有 rocketbox.female01，回落到程序化角色 0");
+            session.SwitchAvatar(0);
+        }
         session.SetPracticeHand(PracticeHand.Both);
         yield return new WaitForSeconds(1.0f);
 
@@ -170,6 +199,23 @@ public class VisualSnapshotTests
         yield return Capture(cam, Path.Combine(dir, "V01_closeup_chord.png"));
         records.Add(Snapshot("V01_closeup_chord.png", "审查 6.1 V01 / 方案 11.2-4",
             "掌心、指尖、琴键可见；指法自然", v01Note, session, cameraCtrl, avatar, timeline));
+
+        // ---- V16 手部特写 + 演奏中（不暂停）----
+        // V01/V02 都是 Play 后 Pause —— 手型被冻结便于回归对比，但冻结也掩盖了动态：
+        // 看不出手指是否真的在弯曲、指尖是否贴在键上。本图在播放状态下直接抓帧，
+        // 是唯一能同时验证「指节弯曲」与「接触」的快照（写实化三期补）。
+        session.Seek(v01Time);
+        session.Play();
+        // 0.30 s：和弦刚开始按下（音符持续 2 s，此时手指在键上、手型已成形）。
+        // 等太久（0.75 s）会落到 demo 曲的音符间隙，抓到的其实是空闲姿态，
+        // 反而看不出「指节弯曲 + 指尖接触」——这张图的用途正是验证这两点。
+        yield return new WaitForSeconds(0.30f);
+        yield return Capture(cam, Path.Combine(dir, "V16_closeup_playing.png"));
+        records.Add(Snapshot("V16_closeup_playing.png", "写实化三期 / 手部动态",
+            "演奏中不暂停：指节弯曲与指尖接触可见（非冻结手型）",
+            v01Note, session, cameraCtrl, avatar, timeline));
+        session.Pause();
+        yield return new WaitForSeconds(0.4f);
 
         // ---- V02 手部特写 + 低音到高音大跨度跳跃（审查 6.1 V02 / 3.2-1）----
         string v02Note = contentNote;
@@ -366,6 +412,19 @@ public class VisualSnapshotTests
         session.Seek(total * 0.3f);
         session.Play();
         yield return new WaitForSeconds(1.5f);
+
+        // 「曲目分析」现在收在底栏的「更多」浮层里：先展开浮层（顺带采一张 V27），再点分析
+        bool moreOpened = ClickButton("Btn_更多");
+        yield return new WaitForSeconds(0.4f);
+        if (moreOpened)
+        {
+            yield return Capture(cam, Path.Combine(dir, "V27_more_panel.png"));
+            records.Add(Snapshot("V27_more_panel.png", "方案 3.1 底栏单行",
+                "低频工具收进「更多」浮层，底栏只留 播放 / 时间 / 进度 / 手型 / 速度 / 循环",
+                "浮层贴底栏右上角，两行工具：重播·高亮·节拍器·拍点 / 展示·分析；视角在演奏区右上",
+                session, cameraCtrl, avatar, timeline));
+        }
+
         bool analysisOpened = ClickButton("Btn_曲目分析");
         yield return new WaitForSeconds(1.2f);
         bool diagnosticsOpened = ClickButton("Btn_开发诊断");
@@ -391,9 +450,11 @@ public class VisualSnapshotTests
         }
 
         // ---- V13 教学模式：隐藏手部，只高亮被按下的琴键（左手冷蓝 / 右手暖橙）----
-        // 先收起分析面板（V12 展开过），避免遮挡键盘区域
+        // 先收起分析面板与「更多」浮层（V12 展开过），避免遮挡键盘区域
         ClickButton("Btn_曲目分析");
-        yield return new WaitForSeconds(0.6f);
+        yield return new WaitForSeconds(0.4f);
+        if (moreOpened) ClickButton("Btn_更多");
+        yield return new WaitForSeconds(0.4f);
 
         session.SetDisplayMode(DisplayMode.Teaching);
         session.SetCameraMode(CameraMode.Closeup);
@@ -428,6 +489,123 @@ public class VisualSnapshotTests
                 avatar != null && avatar.HandsAndArmsVisible, session.PressedPitchCount),
             session, cameraCtrl, avatar, timeline));
         session.Pause();
+
+        // ---- V15 写实角色（Rocketbox）：贴图入库后的完整外观（写实化二期新增）----
+        // 为什么必须有这张图：贴图绑定发生在运行时（FBX 内的路径指向建模机临时目录，
+        // 导入器永远解析不到），单元断言只能证明「材质非空」，证明不了「不是白模/没有碎片/没破面」。
+        // 这张图是唯一能人工核对的证据，也是后续视觉回归的基线。
+        session.SetCameraMode(CameraMode.Full);
+        session.Stop();
+        session.Seek(0f);
+        // ActivateCharacter 接的是 CharacterProfile（不是 ID），先从会话的注册表解析
+        PianoTeacher3D.Characters.CharacterProfile rocketboxProfile = null;
+        bool foundProfile = session.CharacterRegistry != null
+            && session.CharacterRegistry.TryGet(
+                PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId, out rocketboxProfile);
+        var rocketboxResult = foundProfile
+            ? session.ActivateCharacter(rocketboxProfile)
+            : default(PianoTeacher3D.Characters.CharacterSwitchResult);
+        Debug.Log(string.Format("[V15] Rocketbox 激活：解析档案={0} 成功={1} 原因={2} 当前角色={3}",
+            foundProfile, rocketboxResult.Succeeded,
+            string.IsNullOrEmpty(rocketboxResult.Error) ? "(无)" : rocketboxResult.Error,
+            session.CurrentCharacterView != null ? session.CurrentCharacterView.CharacterId : "(null)"));
+        yield return new WaitForSeconds(1.2f);
+        yield return Capture(cam, Path.Combine(dir, "V15_rocketbox_character.png"));
+        records.Add(Snapshot("V15_rocketbox_character.png", "新增：写实角色（Rocketbox）",
+            "写实女性全景：皮肤与头发贴图完整、无白模、无碎片、手指自然弯曲",
+            string.Format("激活成功={0}，角色={1}", rocketboxResult.Succeeded,
+                session.CurrentCharacterView != null ? session.CurrentCharacterView.CharacterId : "(null)"),
+            session, cameraCtrl, avatar, timeline));
+
+        // ---- V17 / V18 / V19：真实默认角色（Rocketbox）的特写与全景 ----
+        // 为什么单独拍：生产默认 SelectedCharacterId = rocketbox.female01，但 batchmode
+        // 按设计跳过偏好，01–06 / V01–V14 拍的仍是内置角色。真人特写从未有过基线，
+        // 手部弯曲、指尖贴键、头/躯干遮挡只能靠这三张图判断。
+        session.SwitchAvatar(0);                 // 先离开外部角色，确保事务可重入
+        yield return new WaitForSeconds(0.4f);
+        if (foundProfile)
+        {
+            var reActivate = session.ActivateCharacter(rocketboxProfile);
+            Debug.Log(string.Format("[V17] Rocketbox 再次激活：成功={0} 原因={1}",
+                reActivate.Succeeded, string.IsNullOrEmpty(reActivate.Error) ? "(无)" : reActivate.Error));
+            yield return new WaitForSeconds(1.0f);
+        }
+
+        session.Stop();
+        session.ClearLoop();
+        session.SetPracticeHand(PracticeHand.Both);
+        session.SetHighlightMode(HighlightMode.Off);
+        session.SetCameraMode(CameraMode.Closeup);
+        session.Seek(0f);
+        yield return new WaitForSeconds(2.0f);
+        yield return Capture(cam, Path.Combine(dir, "V17_rocketbox_closeup_idle.png"));
+        records.Add(Snapshot("V17_rocketbox_closeup_idle.png", "v4 阶段 0 / 真实默认体验",
+            "真人角色手部特写（空闲）：手掌、五指、琴键同时可见；头/躯干不遮挡键面",
+            "Rocketbox 默认真人角色，停止态；用于判断手型与遮挡",
+            session, cameraCtrl, avatar, timeline));
+
+        float v18Time = notes.Count > 0 && NoteScan.TryFindChordTime(notes, 2, 48, 76, 0.06f, out float chord18, out _)
+            ? chord18
+            : total * 0.25f;
+        session.Seek(v18Time);
+        session.Play();
+        yield return new WaitForSeconds(0.30f);
+        yield return Capture(cam, Path.Combine(dir, "V18_rocketbox_closeup_playing.png"));
+        records.Add(Snapshot("V18_rocketbox_closeup_playing.png", "v4 阶段 0 / 真实默认体验",
+            "真人角色手部特写（演奏中，不暂停）：指节弯曲与指尖接触可见",
+            string.Format("t={0:F2}s，播放中抓帧", v18Time),
+            session, cameraCtrl, avatar, timeline));
+        DiagHandAndPedal(session, avatar);
+        session.Pause();
+
+        session.SetCameraMode(CameraMode.Full);
+        session.Stop();
+        session.Seek(0f);
+        yield return new WaitForSeconds(1.5f);
+        yield return Capture(cam, Path.Combine(dir, "V19_rocketbox_full.png"));
+        records.Add(Snapshot("V19_rocketbox_full.png", "v4 阶段 0 / 真实默认体验",
+            "真人角色全景：坐姿、琴凳、琴体、键面完整；无穿模与悬空",
+            "Rocketbox 默认真人角色，停止态",
+            session, cameraCtrl, avatar, timeline));
+
+        // ---- V20 真人 · 延音踏板踩下 ----
+        string pedalSong = Path.Combine(Application.streamingAssetsPath, "Songs", "bench",
+            "articulation", "pedal_cc64.mid");
+        session.LoadSong(pedalSong);
+        yield return new WaitUntil(() => !session.IsLoading);
+        session.SetCameraMode(CameraMode.Pedal);
+        session.Play();
+        session.Pause();
+        session.Seek(0.45f);
+        yield return new WaitForSeconds(0.55f);
+        yield return Capture(cam, Path.Combine(dir, "V20_rocketbox_pedal.png"));
+        records.Add(Snapshot("V20_rocketbox_pedal.png", "v4 阶段 1 / 延音踏板",
+            "踏板特写：右鞋、踏面、后跟与木地板",
+            "踏板样本 0.45 秒，暂停于踩下状态",
+            session, cameraCtrl, avatar, timeline));
+        session.Stop();
+        session.Seek(0f);
+        yield return new WaitForSeconds(0.5f);
+
+        // ---- V21 角色库面板：三张真人像卡（v4 阶段 1 / Task 4）----
+        var avatarPanel = PianoTeacher3D.UI.AvatarSelectionUI.Instance;
+        if (avatarPanel != null)
+        {
+            avatarPanel.ShowPanel(true);
+            yield return null;
+            yield return new WaitForSeconds(0.4f);
+            yield return Capture(cam, Path.Combine(dir, "V21_avatar_select.png"));
+            records.Add(Snapshot("V21_avatar_select.png", "v4 阶段 1 / 角色库",
+                "三张竖版人像卡：写实女性 / 写实男性 / 儿童，缩略图取自模型头部贴图",
+                "打开角色库面板后截图（面板默认收起）",
+                session, cameraCtrl, avatar, timeline));
+            avatarPanel.ShowPanel(false);
+            yield return null;
+        }
+
+        // 复位到内置角色，避免影响后续（主菜单截图）
+        session.SwitchAvatar(0);
+        yield return new WaitForSeconds(0.5f);
 
         // ---- V10 主菜单 / 空曲库（方案 11.2-1）----
         // 放在最后：它会切换场景，避免影响上面所有课程场景截图
@@ -469,6 +647,28 @@ public class VisualSnapshotTests
             v10Record.Time = -1f;
             v10Record.CameraState = "不适用（主菜单场景无 CameraModeController）";
             records.Add(v10Record);
+
+            // ---- V24–V26 角色、设置与唯一曲库 ----
+            yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
+                "V24_menu_characters.png", "EntryCard_角色", "主菜单 / 角色浮层",
+                "三张人像预览卡（写实女性 / 写实男性 / 儿童）+「进入课程后可切换」说明",
+                "主菜单点「角色」入口卡后截图");
+
+            yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
+                "V25_menu_settings.png", "EntryCard_设置", "主菜单 / 设置浮层",
+                "画质三档 chips（取自 QualitySettings.names）+ 全屏开关 + 快捷键说明",
+                "主菜单点「设置」入口卡后截图");
+
+            yield return Capture(menuCam, Path.Combine(dir, "V26_menu_songs.png"));
+            var libraryRecord = Snapshot("V26_menu_songs.png", "主菜单 / 曲库",
+                "曲库和导入入口同屏，曲目只列一次", "首页直接显示曲库，曲目超出可视区时可滚动",
+                null, null, null, null);
+            libraryRecord.Avatar = "不适用（主菜单场景）";
+            libraryRecord.AvatarIndex = -1;
+            libraryRecord.Song = "不适用（未进入课程）";
+            libraryRecord.Time = -1f;
+            libraryRecord.CameraState = "不适用（主菜单场景无 CameraModeController）";
+            records.Add(libraryRecord);
         }
 
         // ==================================================================
@@ -484,18 +684,132 @@ public class VisualSnapshotTests
     }
 
     // ==================================================================
+    // 主菜单浮层截图（Task 7 Step 1：卡片式四入口 → 选曲 / 角色 / 设置）
+    // ==================================================================
+
+    /// <summary>点入口卡打开浮层 → 截图 → 关闭；找不到入口卡时记入 <paramref name="skipped"/>，不算失败。</summary>
+    private static IEnumerator CaptureMenuOverlay(string dir, Camera cam, List<ShotRecord> records,
+        List<string> skipped, string fileName, string entryName, string doc, string check, string note)
+    {
+        if (!ClickButton(entryName))
+        {
+            skipped.Add(fileName + "：主菜单没有找到可点击的入口卡 " + entryName);
+            yield break;
+        }
+
+        yield return null;
+        yield return new WaitForSeconds(0.4f);
+        yield return Capture(cam, Path.Combine(dir, fileName));
+
+        var record = Snapshot(fileName, doc, check, note, null, null, null, null);
+        record.Avatar = "不适用（主菜单浮层）";
+        record.AvatarIndex = -1;
+        record.Song = "不适用（未进入课程）";
+        record.Time = -1f;
+        record.CameraState = "不适用（主菜单场景无 CameraModeController）";
+        records.Add(record);
+
+        ClickButton("Btn_关闭");
+        yield return null;
+        yield return new WaitForSeconds(0.2f);
+    }
+
+    // ==================================================================
     // 截图辅助（行为与改造前一致：Overlay Canvas 临时转 Screen Space Camera 后渲染）
     // ==================================================================
 
     /// <summary>同步渲染当前相机视图（含 Overlay UI）到 PNG。</summary>
-    private static IEnumerator Capture(Camera cam, string path)
+    [UnityTest, Explicit("用实际图形设备检查星空舞台和第一课")]
+    public IEnumerator CaptureStarStageAndClassroom()
+    {
+        Assert.AreNotEqual(UnityEngine.Rendering.GraphicsDeviceType.Null, SystemInfo.graphicsDeviceType);
+        string directory = Environment.GetEnvironmentVariable("PT3D_STAR_CAPTURE_DIR");
+        Assert.IsNotEmpty(directory);
+        Directory.CreateDirectory(directory);
+        SceneManager.LoadScene("PianoLesson");
+        yield return null;
+        var session = UnityEngine.Object.FindFirstObjectByType<LessonSessionController>();
+        session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+        session.SetDisplayMode(DisplayMode.Showcase);
+        session.SetCameraMode(CameraMode.Full);
+        for (int i = 0; i < 60; i++) yield return null;
+        Assert.IsNotNull(GameObject.Find("StarSky"));
+        Assert.IsNotNull(GameObject.Find("StarWater"));
+        Assert.IsNotNull(GameObject.Find("MoonlitPlatform"));
+        var stage = GameObject.Find("SceneEnvironment");
+        var habitat = stage.transform.Find("UnderwaterHabitat");
+        Assert.IsNotNull(habitat);
+        Assert.IsTrue(habitat.Find("SunlightVolume").GetComponent<Renderer>().sharedMaterial.shader.isSupported);
+        var environment = session.GetComponent<PianoSceneEnvironment>();
+        var sky = GameObject.Find("StarSky").GetComponent<Renderer>();
+        var water = GameObject.Find("StarWater").GetComponent<Renderer>();
+        var etching = GameObject.Find("MoonlitPlatformEtching").GetComponent<Renderer>();
+        var whale = habitat.Find("HumpbackWhale").GetComponent<Renderer>();
+        var shell = GameObject.Find("TideShell").GetComponent<Renderer>();
+        Assert.IsTrue(sky.sharedMaterial.shader.isSupported);
+        Assert.IsTrue(water.sharedMaterial.shader.isSupported);
+        Assert.IsTrue(etching.sharedMaterial.shader.isSupported);
+        Assert.IsTrue(whale.sharedMaterial.shader.isSupported);
+        Assert.AreEqual("Universal Render Pipeline/Lit", shell.sharedMaterial.shader.name);
+        Assert.IsTrue(shell.sharedMaterial.shader.isSupported);
+        Assert.Less(shell.sharedMaterial.GetColor("_BaseColor").r, 0.20f, "演奏展示使用深蓝漆面");
+        Assert.Greater(shell.sharedMaterial.GetFloat("_Smoothness"), 0.75f, "琴漆近景应有光滑高光");
+        Assert.IsNotNull(shell.transform.parent.Find("TideInlay"), "舞台琴需要青蓝侧沿");
+        environment.ApplyQuality(QualityProfile.For(QualityTier.Standard));
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "standard.png"));
+        environment.ApplyQuality(QualityProfile.For(QualityTier.High));
+        for (int i = 0; i < 30; i++) yield return null;
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "stage.png"));
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "art.png"), includeInterface: false);
+        var frames = Path.Combine(directory, "frames");
+        Directory.CreateDirectory(frames);
+        for (int i = 0; i < 42; i++)
+        {
+            yield return new WaitForSecondsRealtime(0.09f);
+            yield return Capture(UnityEngine.Camera.main, Path.Combine(frames, $"{i:D2}.png"), includeInterface: false);
+        }
+
+        var camera = UnityEngine.Camera.main;
+        var controller = camera.GetComponent<CameraModeController>();
+        var previousPose = new Pose(camera.transform.position, camera.transform.rotation);
+        if (controller != null) controller.enabled = false;
+        Vector3 focus = new Vector3(-0.04f, 0.86f, -0.53f);
+        camera.transform.position = new Vector3(2.16f, 1.64f, 1.11f);
+        camera.transform.LookAt(focus);
+        yield return Capture(camera, Path.Combine(directory, "piano.png"), includeInterface: false);
+        camera.transform.position = new Vector3(1.1f, 1.42f, 3.7f);
+        camera.transform.LookAt(new Vector3(0f, 1.08f, -0.55f));
+        yield return Capture(camera, Path.Combine(directory, "rear.png"), includeInterface: false);
+        camera.transform.SetPositionAndRotation(previousPose.position, previousPose.rotation);
+        if (controller != null) controller.enabled = true;
+        foreach (var id in new[] { CharacterRegistry.RocketboxMaleId, CharacterRegistry.RocketboxChildId })
+        {
+            session.RestoreCharacter(id);
+            for (int i = 0; i < 40; i++) yield return null;
+            yield return Capture(camera, Path.Combine(directory, id + ".png"), includeInterface: false);
+        }
+
+        SceneManager.LoadScene("MainMenu");
+        yield return null;
+        yield return null;
+        GameObject.Find("PracticePrimary").GetComponent<Button>().onClick.Invoke();
+        yield return null;
+        yield return null;
+        GameObject.Find("GuidedStartWait").GetComponent<Button>().onClick.Invoke();
+        for (int i = 0; i < 60; i++) yield return null;
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "classroom.png"));
+    }
+
+    private static IEnumerator Capture(Camera cam, string path, bool includeInterface = true)
     {
         // Overlay Canvas 临时转为 Screen Space Camera，使其纳入相机渲染
-        var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+        var canvases = includeInterface
+            ? UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None)
+            : Array.Empty<Canvas>();
         var saved = new List<(Canvas c, RenderMode mode, Camera wcam, float pd)>();
         foreach (var c in canvases)
         {
-            if (c.renderMode == RenderMode.ScreenSpaceOverlay)
+            if (c.isRootCanvas && c.renderMode == RenderMode.ScreenSpaceOverlay)
             {
                 saved.Add((c, c.renderMode, c.worldCamera, c.planeDistance));
                 c.renderMode = RenderMode.ScreenSpaceCamera;
@@ -825,5 +1139,94 @@ public class VisualSnapshotTests
         for (int i = 0; i < fileName.Length && char.IsDigit(fileName[i]); i++)
             leading = leading * 10 + (fileName[i] - '0');
         return leading;
+    }
+
+    /// <summary>
+    /// 诊断用：把「演奏中」的手部相位与踏板绑定状态打到日志里。
+    /// 只在测试里调用，不进入运行时路径。
+    /// </summary>
+    private static void DiagHandAndPedal(LessonSessionController session, AvatarManager avatar)
+    {
+        var view = avatar != null ? avatar.CurrentView : null;
+        var animator = view != null ? view.Animator : null;
+        Debug.Log(string.Format("[DIAG] view={0} animator={1} isHuman={2} avatar={3}",
+            view == null ? "null" : view.CharacterId,
+            animator == null ? "null" : animator.name,
+            animator != null && animator.isHuman,
+            animator == null || animator.avatar == null ? "null" : animator.avatar.name));
+
+        var pedals = UnityEngine.Object.FindObjectsByType<PedalFootAnimator>(FindObjectsSortMode.None);
+        for (int i = 0; i < pedals.Length; i++)
+        {
+            Debug.Log(string.Format("[DIAG] pedal[{0}] bound={1} angle={2:F1} enabled={3}",
+                i, pedals[i].IsBound, pedals[i].CurrentAngleDegrees, pedals[i].enabled));
+        }
+
+        if (avatar != null && avatar.LeftHand != null)
+        {
+            DumpChain("L", avatar.LeftHand);
+            DumpChain("R", avatar.RightHand);
+        }
+
+        var poses = UnityEngine.Object.FindObjectsByType<FingerPoseController>(FindObjectsSortMode.None);
+        for (int i = 0; i < poses.Length; i++)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[DIAG] pose[").Append(i).Append("] ");
+            for (int h = 0; h < 2; h++)
+            {
+                sb.Append(h == 0 ? "L:" : " R:");
+                for (int f = 0; f < 5; f++)
+                {
+                    sb.Append(poses[i].GetPhase(h == 0, f)).Append('/').Append(poses[i].GetFingerPitch(h == 0, f)).Append(' ');
+                }
+            }
+            Debug.Log(sb.ToString());
+        }
+
+        if (avatar != null && poses.Length > 0 && poses[0].TargetSource != null)
+        {
+            DumpTargets("L", poses[0], avatar.LeftHand, true);
+            DumpTargets("R", poses[0], avatar.RightHand, false);
+        }
+    }
+
+    /// <summary>诊断：把每根手指从指根到指尖的世界方向打出来（Y 为正表示朝上竖起）。</summary>
+    private static void DumpChain(string tag, IHandRig hand)
+    {
+        if (hand == null)
+        {
+            Debug.Log("[DIAG] " + tag + " hand=null");
+            return;
+        }
+
+        var tips = hand as IFingertipRig;
+        for (int f = 0; f < hand.Fingers.Count; f++)
+        {
+            var root = hand.Fingers[f];
+            var tip = tips != null ? tips.GetFingertip(f) : null;
+            if (root == null || tip == null) continue;
+
+            Vector3 d = tip.position - root.position;
+            float len = d.magnitude;
+            Vector3 n = len > 1e-5f ? d / len : Vector3.zero;
+            Debug.Log(string.Format("[DIAG] {0}f{1} dir=({2:F2},{3:F2},{4:F2}) len={5:F3} tipY={6:F3}",
+                tag, f, n.x, n.y, n.z, len, tip.position.y));
+        }
+    }
+
+    /// <summary>诊断：每根手指的「目标键面点」与「实际指尖」的高度差（负值=指尖已低于目标）。</summary>
+    private static void DumpTargets(string tag, FingerPoseController pose, IHandRig hand, bool left)
+    {
+        if (hand == null || pose.TargetSource == null) return;
+        var tips = hand as IFingertipRig;
+        for (int f = 0; f < hand.Fingers.Count; f++)
+        {
+            if (!pose.TargetSource.TryGetFingertipTarget(left, f, out Vector3 target)) continue;
+            var tip = tips != null ? tips.GetFingertip(f) : null;
+            if (tip == null) continue;
+            Debug.Log(string.Format("[DIAG] {0}tgt{1} tgtY={2:F3} tipY={3:F3} d={4:F3} phase={5}",
+                tag, f, target.y, tip.position.y, tip.position.y - target.y, pose.GetPhase(left, f)));
+        }
     }
 }

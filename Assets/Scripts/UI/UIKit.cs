@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using PianoTeacher3D.Characters;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -44,6 +45,35 @@ namespace PianoTeacher3D.UI
         /// <summary>1px 分割线（仅用于面板内分区）。</summary>
         public static RectTransform Divider(Transform parent, string name)
             => UITheme.CreateDivider(parent, name, Vector2.zero, Vector2.one);
+
+        /// <summary>优先展示实际模型渲染图。缺少图片时显示通用的角色剪影。</summary>
+        internal static void PlaceCharacterPreview(RectTransform parent, string characterId,
+            Texture2D customThumbnail = null)
+        {
+            string path = CharacterRegistry.PortraitResourcesPath(characterId);
+            var texture = customThumbnail;
+            if (texture == null && !string.IsNullOrEmpty(path))
+                texture = Resources.Load<Texture2D>(path + "_render");
+
+            if (texture != null)
+            {
+                var preview = new GameObject("CharacterPreview", typeof(RectTransform),
+                    typeof(RawImage), typeof(AspectRatioFitter));
+                preview.transform.SetParent(parent, false);
+                var image = preview.GetComponent<RawImage>();
+                image.texture = texture;
+                image.raycastTarget = false;
+                var fitter = preview.GetComponent<AspectRatioFitter>();
+                fitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+                fitter.aspectRatio = texture.width / (float)texture.height;
+                return;
+            }
+
+            var head = Panel(parent, "CharacterHead", UITheme.PianoIvoryShadow, 16);
+            UITheme.PlaceTopCenter(head, 24f, 32f, 32f);
+            var shoulders = Panel(parent, "CharacterShoulders", UITheme.CardBorder, 16);
+            UITheme.PlaceTopCenter(shoulders, 62f, 60f, 32f);
+        }
 
         // ==================== 文本 ====================
 
@@ -224,18 +254,18 @@ namespace PianoTeacher3D.UI
         /// 悬停底色转 <see cref="UITheme.ControlHover"/> 并升起 2px；卡内有 2px 阴影条。
         /// </summary>
         public static Button Card(Transform parent, string title, string meta, Vector2 size,
-            UnityEngine.Events.UnityAction onClick, string tooltip = null)
+            UnityEngine.Events.UnityAction onClick, string tooltip = null, string namePrefix = "Card_")
         {
             var btn = UITheme.CreateButton(parent, "", Vector2.zero, size, onClick,
                 UITheme.FontSubtitle, ButtonStyle.Secondary);
-            btn.gameObject.name = "Card_" + (string.IsNullOrEmpty(title) ? "Song" : title);
+            btn.gameObject.name = (namePrefix ?? "Card_") + (string.IsNullOrEmpty(title) ? "Song" : title);
 
             if (btn.targetGraphic is Image img)
             {
                 var sprite = UITheme.GetRoundedSprite(UITheme.RadiusLarge);
                 if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
-                img.color = UITheme.PanelBgRaised;
-                UITheme.SetOutline(img, true, UITheme.Divider, 1f);
+                img.color = UITheme.CardBg;
+                UITheme.SetOutline(img, true, UITheme.CardBorder, 1f);
             }
 
             // 底部 2px 阴影条（左右各内缩一个圆角，避免露出直角）
@@ -263,7 +293,7 @@ namespace PianoTeacher3D.UI
             metaText.horizontalOverflow = HorizontalWrapMode.Wrap;
             metaText.verticalOverflow = VerticalWrapMode.Truncate;
 
-            UIHoverFeedback.Attach(btn, UITheme.PanelBgRaised, UITheme.ControlHover, 2f);
+            UIHoverFeedback.Attach(btn, UITheme.CardBg, UITheme.ControlHover, 2f);
             if (!string.IsNullOrEmpty(tooltip)) UITheme.SetButtonTooltip(btn, tooltip);
             return btn;
         }

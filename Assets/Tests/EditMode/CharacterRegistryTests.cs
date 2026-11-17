@@ -1,4 +1,4 @@
-using NUnit.Framework;
+﻿using NUnit.Framework;
 using PianoTeacher3D.Characters;
 using UnityEngine;
 
@@ -28,27 +28,28 @@ namespace PianoTeacher3D.Tests
         [Test]
         public void BuiltInCount_IsFour()
         {
-            Assert.AreEqual(4, _registry.Count);
-            Assert.AreEqual(4, _registry.All.Count);
+            Assert.AreEqual(3, _registry.Count);
+            Assert.AreEqual(3, _registry.All.Count);
         }
 
         [Test]
         public void BuiltInIds_MatchDeclaredOrder()
         {
-            Assert.AreEqual(CharacterRegistry.BuiltInRealisticFemaleId, _registry.All[0].CharacterId);
-            Assert.AreEqual(CharacterRegistry.BuiltInRealisticMaleId, _registry.All[1].CharacterId);
-            Assert.AreEqual(CharacterRegistry.BuiltInCartoonId, _registry.All[2].CharacterId);
-            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, _registry.All[3].CharacterId);
+            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, _registry.All[0].CharacterId);
+            Assert.AreEqual(CharacterRegistry.RocketboxMaleId, _registry.All[1].CharacterId);
+            Assert.AreEqual(CharacterRegistry.RocketboxChildId, _registry.All[2].CharacterId);
         }
 
         [Test]
-        public void BuiltInProceduralIndexes_AreZeroOneTwo()
+        public void BuiltInProfiles_ArePrefabSourcedRealisticAvatars()
         {
             for (int i = 0; i < CharacterRegistry.BuiltInIds.Length; i++)
             {
                 Assert.IsTrue(_registry.TryGet(CharacterRegistry.BuiltInIds[i], out var profile));
-                Assert.AreEqual(CharacterSource.ProceduralBuiltIn, profile.Source);
-                Assert.AreEqual(i, profile.ProceduralIndex);
+                Assert.AreEqual(CharacterSource.Prefab, profile.Source);
+                Assert.AreEqual(CharacterStyle.Realistic, profile.Style);
+                Assert.AreEqual(-1, profile.ProceduralIndex);
+                Assert.IsFalse(string.IsNullOrEmpty(profile.ResourcesPath));
                 Assert.AreEqual("MIT", profile.LicenseName);
             }
         }
@@ -76,7 +77,7 @@ namespace PianoTeacher3D.Tests
         [Test]
         public void IsRegistered_ReflectsContents()
         {
-            Assert.IsTrue(_registry.IsRegistered(CharacterRegistry.BuiltInCartoonId));
+            Assert.IsTrue(_registry.IsRegistered(CharacterRegistry.RocketboxFemaleId));
             Assert.IsFalse(_registry.IsRegistered("nope"));
         }
 
@@ -89,7 +90,7 @@ namespace PianoTeacher3D.Tests
                 var result = _registry.Register(duplicate);
                 Assert.IsFalse(result.Ok);
                 StringAssert.Contains("已注册", result.Message);
-                Assert.AreEqual(4, _registry.Count);
+                Assert.AreEqual(3, _registry.Count);
             }
             finally
             {
@@ -112,7 +113,7 @@ namespace PianoTeacher3D.Tests
             {
                 var result = _registry.Register(profile);
                 Assert.IsTrue(result.Ok, result.Message);
-                Assert.AreEqual(5, _registry.Count);
+                Assert.AreEqual(4, _registry.Count);
                 Assert.IsTrue(_registry.TryGet("test.extra", out var found));
                 Assert.AreSame(profile, found);
             }
@@ -135,7 +136,7 @@ namespace PianoTeacher3D.Tests
             {
                 var result = _registry.Register(profile);
                 Assert.IsFalse(result.Ok);
-                Assert.AreEqual(4, _registry.Count);
+                Assert.AreEqual(3, _registry.Count);
             }
             finally
             {
@@ -158,11 +159,10 @@ namespace PianoTeacher3D.Tests
         }
 
         [Test]
-        public void FilterByStyle_Cartoon_ReturnsOne()
+        public void FilterByStyle_Cartoon_ReturnsEmpty_AfterRealisticUpgrade()
         {
-            var list = _registry.FilterByStyle(CharacterStyle.Cartoon);
-            Assert.AreEqual(1, list.Count);
-            Assert.AreEqual(CharacterRegistry.BuiltInCartoonId, list[0].CharacterId);
+            // 三个内置槽位全部换成真人模型后，卡通风格不再有任何资料
+            Assert.AreEqual(0, _registry.FilterByStyle(CharacterStyle.Cartoon).Count);
         }
 
         [Test]
@@ -172,23 +172,21 @@ namespace PianoTeacher3D.Tests
         }
 
         [Test]
-        public void FilterByQualityTier_Zero_KeepOnlyCartoon()
+        public void FilterByQualityTier_Zero_ReturnsEmpty()
         {
-            var list = _registry.FilterByQualityTier(0);
-            Assert.AreEqual(1, list.Count);
-            Assert.AreEqual(CharacterRegistry.BuiltInCartoonId, list[0].CharacterId);
+            Assert.AreEqual(0, _registry.FilterByQualityTier(0).Count);
         }
 
         [Test]
-        public void FilterByQualityTier_One_ExcludesRocketbox()
+        public void FilterByQualityTier_One_ReturnsEmpty()
         {
-            Assert.AreEqual(3, _registry.FilterByQualityTier(1).Count);
+            Assert.AreEqual(0, _registry.FilterByQualityTier(1).Count);
         }
 
         [Test]
         public void FilterByQualityTier_Two_ReturnsAll()
         {
-            Assert.AreEqual(4, _registry.FilterByQualityTier(2).Count);
+            Assert.AreEqual(3, _registry.FilterByQualityTier(2).Count);
         }
 
         [Test]

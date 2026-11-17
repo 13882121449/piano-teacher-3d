@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using PianoTeacher3D.CameraControl;
@@ -144,10 +144,19 @@ public class UIThemeTokenTests
     public void TeachingSemanticColors_KeepDocumentedMeaning()
     {
         // 审查 2.3：金色 = 预提示，蓝色 = 左手发声，橙色 = 右手发声，语义不得互换
-        Assert.AreEqual(UITheme.Accent.r, UITheme.UpcomingColor.r, 0.001f);
+        Assert.AreEqual(new Color(0.851f, 0.643f, 0.255f, 1f), UITheme.UpcomingColor,
+            "重做界面配色时保留琴键预提示色");
         Assert.Greater(UITheme.LeftHandColor.b, UITheme.LeftHandColor.r, "左手应为冷色（偏蓝）");
         Assert.Greater(UITheme.RightHandColor.r, UITheme.RightHandColor.b, "右手应为暖色（偏橙）");
         Assert.AreNotEqual(UITheme.LeftHandColor.r, UITheme.RightHandColor.r);
+    }
+
+    [Test]
+    public void PracticeHero_TextIsReadableOnWalnutAndNeutralSurfaces()
+    {
+        Assert.GreaterOrEqual(UITheme.ContrastRatio(UITheme.TextPrimary, UITheme.Walnut), 4.5f);
+        Assert.GreaterOrEqual(UITheme.ContrastRatio(UITheme.TextSecondary, UITheme.Walnut), 4.5f);
+        Assert.GreaterOrEqual(UITheme.ContrastRatio(UITheme.TextSecondary, UITheme.Control), 4.5f);
     }
 
     // ==================== 字号 / 间距 / 圆角 / 控件高度 ====================
@@ -270,7 +279,9 @@ public class UIThemeTokenTests
     [Test]
     public void LayoutTokens_KeepMainBarAboveMinimumUsableHeight()
     {
-        Assert.Greater(UITheme.Layout.MainBarHeightNormal, UITheme.Layout.MainBarHeightCompact);
+        // 底栏压成单行后（进度行并入同一行 + 「更多」浮层工具），常态与紧凑态同高；
+        // 紧凑态只是把次要控件收进浮层，不再减少栏高。
+        Assert.GreaterOrEqual(UITheme.Layout.MainBarHeightNormal, UITheme.Layout.MainBarHeightCompact);
         Assert.GreaterOrEqual(UITheme.Layout.MainBarHeightCompact, UITheme.HeightPrimary);
         Assert.Greater(UITheme.Layout.ToolbarHeightExpanded, UITheme.Layout.ToolbarHeightCollapsed);
         Assert.Greater(UITheme.Layout.AnalysisPanelWidth, 0f);
@@ -557,14 +568,12 @@ public class UIThemeTokenTests
     [Test]
     public void PlayerBar_InternalRowsAddUpExactly()
     {
-        // 132 = 16 上内边距 + 44 进度行 + 16 行距 + 40 控制行 + 16 下内边距
-        float sum = UITheme.Layout.PlayerPadding + UITheme.Layout.PlayerProgressRowHeight +
-                    UITheme.Layout.PlayerRowGap + UITheme.Layout.PlayerControlRowHeight +
-                    UITheme.Layout.PlayerPadding;
+        float sum = UITheme.Layout.PlayerPadding * 2f + UITheme.Layout.PlayerControlRowHeight +
+                    UITheme.Layout.PlayerProgressRowHeight;
         Assert.AreEqual(UITheme.Layout.MainBarHeightNormal, sum, 0.001f,
             "底栏高度必须由内部行高精确相加得出，不允许出现无法解释的留白");
 
-        // 紧凑态：隐藏进度行，只留控制行 + 上下内边距
+        // 紧凑态：栏高不变，多余控件进「更多」浮层
         float compact = UITheme.Layout.PlayerPadding * 2f + UITheme.Layout.PlayerControlRowHeight;
         Assert.AreEqual(UITheme.Layout.MainBarHeightCompact, compact, 0.001f);
     }

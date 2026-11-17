@@ -95,6 +95,7 @@
 - **公开接口要点**：`PlaybackState State`、`float CurrentTime`、`float TotalDuration`、`float PlaybackSpeed`（clamp ≥ 0.1）、`bool IsLooping`、`float LoopStart/LoopEnd`、`SetDuration/SetLoop/ClearLoop/Play/Pause/Stop/Seek/Restart`、事件 `OnStateChanged` / `OnTimeChanged`。
 - **依赖方向**：不依赖任何其它项目模块（仅 `UnityEngine`）；被会话层驱动。
 - **允许做**：唯一推进时间；循环跳回时把 `CurrentTime` 设为 `LoopStart`。
+- **时钟来源**：以 `AudioSettings.dspTime` 的差值为时基（`SampleDelta()`），无音频设备时退化为帧时钟；`Play / Seek / Stop / Restart` 通过 `ResetClock()` 重新对齐起点。`timeScale = 0` 时不推进，保持「暂停即冻结」语义。
 - **不允许做**：不自建额外计时器；不感知曲目 / 音符 / 相机 / 音频（只暴露时间与状态）。
 
 ### 3.4 `MidiParser` + `MidiEventScheduler`（解析与调度）
@@ -106,9 +107,18 @@
 - **允许做**：解析数据、调度事件、二分区间查询。
 - **不允许做**：不发声、不动画、不改时间轴；不执行被导入文件中的任何命令或脚本（只解析 MIDI 数据）。
 
-### 3.5 `PianoAudioSynth`（音频，对应方案 `AudioPlaybackService`）
+### 3.4b `PedalFootAnimator`（延音踏板 → 右脚）
 
-- **职责**：受控发声池（24 声部 `AudioSource` + `PianoVoiceAllocator`）；音高采样一次性预生成；力度→音量（线性含底噪）+ 音色（声部低通截止频率随力度）；Note Off 在 0.12 s 内余弦淡出释放。
+- **职责**：把「踏板是否踩下」翻译成右脚骨骼的局部旋转（`RightFoot` 绕自身 X 轴抬起 ≤13°，`RightToes` 反向补偿 40%，0.07 s 平滑）。只改旋转，不改位置，脚不会离地。
+- **数据来源**（`MidiParser` → `SustainSpan`）：优先用曲目里真实录下的 CC64；值 ≥64 视为踩下，踩下/抬起配对成秒制半开区间 `[Start, End)`。
+- **无 CC64 的曲目**：`PedalFootAnimator.BuildAutoSustainSpans` 按 legato 生成自动延音——有音符在响就踩住，全部松开就抬起；长音按 2.2 s 换踏板（每次抬起 0.03 s），避免「一口气踩到底」。内置 `demo.mid` 没有踏板事件，走的就是这条路径。
+- **依赖方向**：只依赖 `Animator`（Humanoid）与 `IReadOnlyList<SustainSpan>`；不读时间轴、不读调度器。
+- **允许做**：绑定/解绑骨架、平滑推进角度、生成自动延音区间。
+- **不允许做**：不推进时间、不发声、不改脚的位置；程序化角色没有 Humanoid 时必须静默不动（`IsBound == false`），不得抛异常。
+- **验证**：`Assets/Tests/EditMode/PedalSustainTests.cs`（区间配对、半开边界、自动延音分段）+ `Assets/Tests/PlayMode/PedalFootRocketboxTests.cs`（真实骨架：踩下旋转 >8°、抬起复位 <1°）。
+
+### 3.5 `PianoAudioSynth`（音频，对应方案 `AudioPlaybackService`）
+- **职责**：受控发声池（24 声部 `AudioSource` + `PianoVoiceAllocator`）；音高采样**首次发声时按需生成并缓存**（`GetClip(pitch)`，不再启动即预生成 88 段）；力度→音量（线性含底噪）+ 音色（声部低通截止频率随力度）；Note Off 在 0.12 s 内余弦淡出释放。
 - **公开接口要点**：`bool Initialized`、`string LastInitError`、`int ActiveVoiceCount`、`bool Muted`、`void Initialize()`、`void OnNoteOn(MidiNoteEvent)`、`void OnNoteOff(MidiNoteEvent)`、`void ReleaseAll()`、`void SetMasterVolume(float)`。
 - **依赖方向**：依赖 `MIDI.MidiNoteEvent` 与 `PianoKeyMap` 的音高范围常量；**不依赖**会话层/时间轴（时间由事件驱动）。
 - **允许做**：分配 / 抢占声部、淡出释放、音量与音色映射、初始化失败降级静音。
@@ -352,3 +362,16 @@ flowchart TD
 | 真实采样音色替换波形合成 | 计划中 | 需先评估延迟 / 长音衰减 / 力度响应 / 同时发声数 / 许可条件（方案 7.3） |
 | 移动端 / Web 输入命令抽象 | 计划中 | 方案 2.2 P2 / Sprint 5 |
 | `ScriptableObject` 配置资产 | 计划中 | 当前用纯数据类，见第 6 节取舍 |
+
+## 12. 运行时不变量（由 `Tools/static_checks.py` 守护）
+
+以下四条是**已经在代码里成立、并且每一条都对应一个自动检查**的约束。改动若破坏它们，`python Tools/static_checks.py` 会直接失败，不依赖人工评审。
+
+| 不变量 | 位置 | 守护方式 |
+|---|---|---|
+| 时间轴以音频时钟推进 | `LessonTimeline.SampleDelta()` 用 `AudioSettings.dspTime` 差值；`Play/Seek/Stop/Restart` 重新对齐 | 代码审查 + `Docs/architecture.md §3.3` 约定（时钟来源不可回退为纯 `Time.deltaTime` 累加） |
+| 进度事件不得每帧广播 | `LessonSessionController` 的 `OnProgressChanged` 按 0.1 s 节流，跳转时补发 | 同上；订阅方按整秒/区间变化刷新 |
+| 琴音按需合成、单音失败只降级该音 | `PianoAudioSynth.GetClip(pitch)` | 同上 |
+| `Update / LateUpdate / FixedUpdate` 零分配 | 全部 14 个每帧方法 | 规则 4：值类型 `new` 放行，字符串插值/拼接、集合拷贝、LINQ、`GetComponentsInChildren`、`SendMessage`、`Debug.Log` 一律失败 |
+
+> 规则 4 是把 README §8 里「Update 路径禁止 LINQ、每帧 new、字符串拼接」这句人话变成可执行检查：基线为 **0 处违规**，因此默认就是硬门禁（不再需要 `--strict-alloc` 渐进开关）。新增违规时用 `python Tools/static_checks.py --list-alloc` 看明细。

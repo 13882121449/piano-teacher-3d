@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using System.Collections.Generic;
+using System.IO;
 using PianoTeacher3D.Core;
 using PianoTeacher3D.MIDI;
 
@@ -9,6 +10,21 @@ using PianoTeacher3D.MIDI;
 public class PianoNoteFilterTests
 {
     private static MidiNoteEvent Note(int pitch) => new MidiNoteEvent(pitch, 0f, 1f, 80, 0, 0);
+
+    [Test]
+    public void BenchChords_LastBassOctave_StaysTogetherInLeftHandPractice()
+    {
+        var song = MidiParser.ParseFile(Path.Combine(UnityEngine.Application.streamingAssetsPath,
+            "Songs", "bench", "bench_chords.mid"));
+        Assert.That(song.Success, Is.True, song.Error);
+        float lastChord = song.Notes[song.Notes.Count - 1].StartTime;
+        var left = PianoNoteFilter.FilterByHand(song.Notes, PracticeHand.LeftOnly);
+        var right = PianoNoteFilter.FilterByHand(song.Notes, PracticeHand.RightOnly);
+        CollectionAssert.AreEquivalent(new[] { 48, 60 }, left.FindAll(n => n.StartTime == lastChord).ConvertAll(n => n.Pitch));
+        CollectionAssert.AreEquivalent(new[] { 72, 76, 79 }, right.FindAll(n => n.StartTime == lastChord).ConvertAll(n => n.Pitch));
+        Assert.That(right.Exists(n => n.Pitch == 60 && n.StartTime < lastChord), Is.True,
+            "曲目开头的同音高仍属于右手");
+    }
 
     [Test]
     public void FilterByHand_Both_ReturnsAll()

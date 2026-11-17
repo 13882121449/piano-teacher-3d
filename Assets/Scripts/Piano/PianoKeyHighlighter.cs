@@ -37,6 +37,7 @@ namespace PianoTeacher3D.Piano
         private MaterialPropertyBlock _block;
         private readonly Dictionary<int, Renderer> _renderers = new();
         private readonly HashSet<int> _active = new();
+        private readonly ActiveNoteHands _activeHands = new();
         private readonly HashSet<int> _upcoming = new();
         private readonly HashSet<int> _touched = new();
         private readonly HashSet<int> _pending = new();   // 预提示集合暂存区（用于变更检测）
@@ -79,6 +80,7 @@ namespace PianoTeacher3D.Piano
             _keyMap = keyMap;
             _renderers.Clear();
             _active.Clear();
+            _activeHands.Clear();
             _upcoming.Clear();
             _pending.Clear();
             _touched.Clear();
@@ -88,14 +90,19 @@ namespace PianoTeacher3D.Piano
         public void OnNoteOn(MidiNoteEvent e)
         {
             if (!PianoKeyMap.IsInRange(e.Pitch)) return;
-            if (!_active.Add(e.Pitch)) return;      // 同音重复触发（连音）不重复着色
+            bool previousLeft = _activeHands.IsLeft(e.Pitch);
+            _activeHands.Press(e);
+            if (!_active.Add(e.Pitch) && previousLeft == _activeHands.IsLeft(e.Pitch)) return;
             if (_mode != HighlightMode.Off) Recolor(e.Pitch);
         }
 
         /// <summary>音符结束：清除发声高亮；若该键仍在预提示窗口内则回落到预提示色。</summary>
         public void OnNoteOff(MidiNoteEvent e)
         {
-            if (!_active.Remove(e.Pitch)) return;
+            if (!PianoKeyMap.IsInRange(e.Pitch) || !_active.Contains(e.Pitch)) return;
+            bool previousLeft = _activeHands.IsLeft(e.Pitch);
+            if (_activeHands.Release(e)) _active.Remove(e.Pitch);
+            else if (previousLeft == _activeHands.IsLeft(e.Pitch)) return;
             if (_mode != HighlightMode.Off) Recolor(e.Pitch);
         }
 
@@ -133,6 +140,7 @@ namespace PianoTeacher3D.Piano
             _scratch.AddRange(_touched);
 
             _active.Clear();
+            _activeHands.Clear();
             _upcoming.Clear();
             _pending.Clear();
             _touched.Clear();
@@ -165,6 +173,11 @@ namespace PianoTeacher3D.Piano
             {
                 if (!_touched.Contains(pitch)) _scratch.Add(pitch);
             }
+            if (_mode == HighlightMode.Active || _mode == HighlightMode.Both)
+            {
+                foreach (var pitch in _active)
+                    if (!_touched.Contains(pitch) && !_upcoming.Contains(pitch)) _scratch.Add(pitch);
+            }
 
             for (int i = 0; i < _scratch.Count; i++) Recolor(_scratch[i]);
             _scratch.Clear();
@@ -183,7 +196,7 @@ namespace PianoTeacher3D.Piano
                           (_mode == HighlightMode.Active || _mode == HighlightMode.Both);
             if (active)
             {
-                ApplyColor(pitch, PianoNoteFilter.IsLeftHand(pitch) ? LeftHandColor : RightHandColor);
+                ApplyColor(pitch, _activeHands.IsLeft(pitch) ? LeftHandColor : RightHandColor);
                 return;
             }
 

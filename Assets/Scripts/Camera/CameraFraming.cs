@@ -209,7 +209,10 @@ namespace PianoTeacher3D.CameraControl
                 ViewYaw = 0f,
                 PrimaryShare = 0.7f,
                 ViewPitchMax = 70f,
-                TorsoMargin = 0.02f
+                // 躯干必须整体退到「视口内缩 10%」的安全区之外才算不遮挡。
+                // 从 0.02 提高的依据：0.02 只要求躯干边缘离画面边框 2%，实测特写里躯干
+                // 仍会占掉右下角约四分之一画面；10% 相当于在画面四周留出可见的呼吸边。
+                TorsoMargin = 0.04f
             };
         }
     }
@@ -765,10 +768,98 @@ namespace PianoTeacher3D.CameraControl
             return nx <= limit && ny <= limit;
         }
 
+        /// <summary>
+        /// 包围盒在视口中的遮挡面积占比（0 = 完全出画，1 = 铺满画面）。
+        /// <para>
+        /// 这是「躯干避让」的<b>直接</b>指标。原先用「中心点是否出画」只是代理指标，
+        /// 它会漏判体积遮挡（中心出画、半个躯干压在画面边缘），而要求「整个包围盒出画」
+        /// 在特写距离下几何上不可满足（躯干高约 0.5 m，0.88 m 距离 / 44° FOV 时视口高仅 0.71 m）。
+        /// 面积占比既能量化遮挡程度，又不强求不可达的完美构图。
+        /// </para>
+        /// </summary>
+        public static float BoundsViewportCoverage(in Bounds bounds, in CameraTarget target, float aspect)
+        {
+            Vector3 back = target.Direction.sqrMagnitude > 1e-8f ? target.Direction.normalized : Vector3.forward;
+            Vector3 cameraPosition = target.Focus + back * target.Distance;
+            BuildBasis(back, out _, out Vector3 right, out Vector3 up);
+            Vector3 forward = -back;
+
+            float tanV = Mathf.Tan(Mathf.Max(target.FieldOfView, 1f) * 0.5f * Mathf.Deg2Rad);
+            float tanH = tanV * Mathf.Max(aspect, MinAspect);
+
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+            bool anyFront = false;
+
+            Vector3 c = bounds.center;
+            Vector3 e = bounds.extents;
+            for (int i = 0; i < 9; i++)
+            {
+                Vector3 p = i == 0
+                    ? c
+                    : new Vector3(
+                        c.x + (((i - 1) & 1) == 0 ? -e.x : e.x),
+                        c.y + (((i - 1) & 2) == 0 ? -e.y : e.y),
+                        c.z + (((i - 1) & 4) == 0 ? -e.z : e.z));
+
+                Vector3 v = p - cameraPosition;
+                float depth = Vector3.Dot(v, forward);
+                // 在相机后方/贴脸的角点按钳到近处的极值处理：它们会撑满该侧画面，
+                // 直接跳过会低估遮挡（正好漏掉「躯干贴到镜头前」这种最糟情况）
+                if (depth <= MinDepth)
+                {
+                    anyFront = true;
+                    minX = -1f; maxX = 1f; minY = -1f; maxY = 1f;
+                    break;
+                }
+
+                float nx = Vector3.Dot(v, right) / (depth * tanH);
+                float ny = Vector3.Dot(v, up) / (depth * tanV);
+                if (nx < minX) minX = nx;
+                if (nx > maxX) maxX = nx;
+                if (ny < minY) minY = ny;
+                if (ny > maxY) maxY = ny;
+                anyFront = true;
+            }
+
+            if (!anyFront) return 0f;
+
+            // 与视口 [-1,1]² 求交后算面积（视口总面积 = 4）
+            float ix = Mathf.Max(0f, Mathf.Min(maxX, 1f) - Mathf.Max(minX, -1f));
+            float iy = Mathf.Max(0f, Mathf.Min(maxY, 1f) - Mathf.Max(minY, -1f));
+            return Mathf.Clamp01(ix * iy * 0.25f);
+        }
+
         /// <summary>躯干包围盒中心是否在视口内（批次 3.3 的断言口径）。</summary>
         public static bool IsTorsoCenterInViewport(in Bounds torsoBounds, in CameraTarget target, float aspect, float margin01 = 0f)
         {
             return IsPointInViewport(torsoBounds.center, target, aspect, margin01);
+        }
+
+        /// <summary>
+        /// 包围盒是否与视口相交（8 角 + 中心，任一落入即视为「入画」）。
+        /// <para>
+        /// 为什么不能只查中心点：躯干包围盒跨度约 0.3–0.5 m，中心虽然出画，但半个躯干仍然
+        /// 压在画面边缘——实测特写里右下角会出现「巨大球体」占掉四分之一画面，而中心点判定
+        /// 全程为「不遮挡」，等于漏判。这里用 8 角 + 中心共 9 点覆盖，配合内缩
+        /// <see cref="CloseupFramingTuning.TorsoMargin"/> 要求整个包围盒退到安全区之外。
+        /// </para>
+        /// </summary>
+        public static bool IsBoundsVisibleInViewport(in Bounds bounds, in CameraTarget target, float aspect, float margin01 = 0f)
+        {
+            if (IsPointInViewport(bounds.center, target, aspect, margin01)) return true;
+
+            Vector3 c = bounds.center;
+            Vector3 e = bounds.extents;
+            for (int i = 0; i < 8; i++)
+            {
+                var corner = new Vector3(
+                    c.x + ((i & 1) == 0 ? -e.x : e.x),
+                    c.y + ((i & 2) == 0 ? -e.y : e.y),
+                    c.z + ((i & 4) == 0 ? -e.z : e.z));
+                if (IsPointInViewport(corner, target, aspect, margin01)) return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -796,30 +887,56 @@ namespace PianoTeacher3D.CameraControl
 
             target = CameraTarget.Create(focus, CoverRadius(region, focus), back, distance, fov);
 
-            // 没有躯干信息，或躯干中心本来就在画面外：保持原构图（绝大多数帧走这里，零额外成本）
+            // 没有躯干信息，或躯干本来就完全在画面外：保持原构图（绝大多数帧走这里，零额外成本）
             if (!hasTorsoBounds) return true;
-            if (!IsTorsoCenterInViewport(torsoBounds, target, aspect)) return true;
+            if (!IsBoundsVisibleInViewport(torsoBounds, target, aspect)) return true;
 
             float bestCoverage = -1f;
             CameraTarget bestClear = default;
             bool hasClear = false;
-            float fallbackCoverage = -1f;
+
+            // fallback 择优（找不到「完全出画」解时用）：
+            // 字典序比较——先要躯干遮挡面积小，面积相同时才要手部占屏大。
+            // 原实现只按「占屏更大」选 fallback，结果会挑出「相机贴脸、躯干铺满边缘」的候选
+            // （实测 z=0.079 m，中心点虽然出了视口，画面上却是一大块肉色）。
+            // in 参数不能被局部函数捕获，先取副本（Bounds 是 6 个 float 的结构体，复制无成本）
+            Bounds torsoLocal = torsoBounds;
+            float fallbackTorso = BoundsViewportCoverage(torsoLocal, target, aspect);
+            float fallbackCoverage = target.Radius / Mathf.Max(target.Distance, 0.01f);
             CameraTarget fallback = target;
+
+            void Consider(CameraTarget candidate)
+            {
+                float coverage = candidate.Radius / Mathf.Max(candidate.Distance, 0.01f);
+                float torso = BoundsViewportCoverage(torsoLocal, candidate, aspect);
+
+                bool betterFallback = torso < fallbackTorso - 1e-4f
+                                      || (Mathf.Abs(torso - fallbackTorso) <= 1e-4f && coverage > fallbackCoverage);
+                if (betterFallback)
+                {
+                    fallbackTorso = torso;
+                    fallbackCoverage = coverage;
+                    fallback = candidate;
+                }
+
+                if (torso > 1e-4f) return;              // 仍有遮挡：不能当「clear」候选
+                if (coverage > bestCoverage) { bestCoverage = coverage; bestClear = candidate; hasClear = true; }
+            }
 
             float margin = Mathf.Max(0f, tuning.TorsoMargin);
             float maxDistance = Mathf.Max(tuning.MaxDistance, distance);
 
-            // 候选 A：沿视线后移（步长 0.1 m），只在距离上限内搜索
+            // 候选 A：沿视线后移（步长 0.1 m），只在距离上限内搜索。
+            // 后移是首选——它同时降低躯干占屏（远处物体更小）与手部占屏，不改变构图角度。
             for (float d = distance; d <= maxDistance + 1e-3f; d += 0.1f)
             {
                 var candidate = CameraTarget.Create(focus, target.Radius, back, d, fov);
-                float coverage = candidate.Radius / Mathf.Max(candidate.Distance, 0.01f);
-                if (coverage > fallbackCoverage) { fallbackCoverage = coverage; fallback = candidate; }
-                if (IsTorsoCenterInViewport(torsoBounds, candidate, aspect, margin)) continue;
-                if (coverage > bestCoverage) { bestCoverage = coverage; bestClear = candidate; hasClear = true; }
+                if (IsBoundsVisibleInViewport(torsoBounds, candidate, aspect, margin)) { Consider(candidate); continue; }
+                Consider(candidate);
             }
 
-            // 候选 B：抬高俯角（每次 +5°，上限 ViewPitchMax）
+            // 候选 B：抬高俯角（每次 +5°，上限 ViewPitchMax）。
+            // 作用：把相机移到躯干上方，让躯干落到画面下缘之外。
             float pitchMax = Mathf.Max(tuning.ViewPitch, tuning.ViewPitchMax);
             for (float pitch = tuning.ViewPitch + 5f; pitch <= pitchMax + 1e-3f; pitch += 5f)
             {
@@ -827,12 +944,12 @@ namespace PianoTeacher3D.CameraControl
                 SolveFraming(region, focus, steeper, tuning.BaseFov, tuning.MaxFov,
                     tuning.MinDistance, tuning.MaxDistance, tuning.FrameMargin, aspect,
                     out float d, out float f);
-                var candidate = CameraTarget.Create(focus, target.Radius, steeper, d, f);
-                float coverage = candidate.Radius / Mathf.Max(candidate.Distance, 0.01f);
-                if (coverage > fallbackCoverage) { fallbackCoverage = coverage; fallback = candidate; }
-                if (IsTorsoCenterInViewport(torsoBounds, candidate, aspect, margin)) continue;
-                if (coverage > bestCoverage) { bestCoverage = coverage; bestClear = candidate; hasClear = true; }
+                Consider(CameraTarget.Create(focus, target.Radius, steeper, d, f));
             }
+
+            // 不再有「候选 C：沿视线前移」——实测证明它是负优化：镜头贴近手部时躯干会贴到
+            // 近平面附近（z≈0.08 m），中心点虽然出了视口，但透视放大让它在画面边缘铺成一大块。
+            // 「近大远小」在这里是反向作用的。
 
             target = hasClear ? bestClear : fallback;
             return true;

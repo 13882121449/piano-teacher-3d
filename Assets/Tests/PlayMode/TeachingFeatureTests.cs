@@ -8,6 +8,8 @@ using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using PianoTeacher3D.Core;
 using PianoTeacher3D.Piano;
+using PianoTeacher3D.CameraControl;
+using UnityEngine.UI;
 
 namespace PianoTeacher3D.Tests.PlayMode
 {
@@ -41,6 +43,96 @@ namespace PianoTeacher3D.Tests.PlayMode
         }
 
         // ==================== 琴键高亮 ====================
+
+        [UnityTest]
+        public IEnumerator CharacterCards_RebindFingersAndUpdateTheToolbar()
+        {
+            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            _session.Seek(0.5f);
+            float position = _session.CurrentTime;
+            var labels = new[] { "写实男性", "儿童", "写实女性" };
+            var ids = new[]
+            {
+                Characters.CharacterRegistry.RocketboxMaleId,
+                Characters.CharacterRegistry.RocketboxChildId,
+                Characters.CharacterRegistry.RocketboxFemaleId
+            };
+            var pose = Object.FindFirstObjectByType<Avatar.FingerPoseController>();
+            var avatar = Object.FindFirstObjectByType<Avatar.AvatarManager>();
+            var leftHandField = typeof(Avatar.FingerPoseController).GetField("_leftHand",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            for (int i = 0; i < labels.Length; i++)
+            {
+                GameObject.Find("Btn_角色").GetComponent<Button>().onClick.Invoke();
+                yield return null;
+                var panel = GameObject.Find("AvatarPanel");
+                Assert.IsNotNull(panel);
+                panel.transform.Find("Btn_" + labels[i]).GetComponent<Button>().onClick.Invoke();
+                yield return null;
+
+                Assert.AreEqual(ids[i], _session.CurrentCharacterView.CharacterId);
+                Assert.AreEqual(labels[i], GameObject.Find("AvatarName").GetComponent<Text>().text);
+                Assert.AreSame(avatar.LeftHand, leftHandField.GetValue(pose), "手指控制器必须驱动刚切换的骨架");
+                Assert.AreSame(((Characters.ICharacterJointAxesProvider)_session.CurrentCharacterView).JointAxes,
+                    pose.JointAxes);
+                Assert.AreEqual(position, _session.CurrentTime, 0.001f);
+                GameObject.Find("Btn_角色").GetComponent<Button>().onClick.Invoke();
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator MoreHighlightButton_CyclesInTeachingMode()
+        {
+            _session.SetDisplayMode(DisplayMode.Showcase);
+            _session.SetHighlightMode(HighlightMode.Both);
+            _session.SetDisplayMode(DisplayMode.Teaching);
+            GameObject.Find("Btn_更多").GetComponent<Button>().onClick.Invoke();
+            yield return null;
+
+            var highlight = GameObject.Find("HighlightChip").GetComponent<Button>();
+            Assert.IsTrue(highlight.IsInteractable(), "教学模式的高亮按钮应可以点击");
+            foreach (var mode in new[] { HighlightMode.Upcoming, HighlightMode.Off, HighlightMode.Both,
+                         HighlightMode.Active, HighlightMode.Upcoming })
+            {
+                UnityEngine.EventSystems.ExecuteEvents.Execute(highlight.gameObject,
+                    new UnityEngine.EventSystems.PointerEventData(UnityEngine.EventSystems.EventSystem.current),
+                    UnityEngine.EventSystems.ExecuteEvents.pointerClickHandler);
+                Assert.AreEqual(mode, _session.KeyHighlight);
+            }
+            _session.SetDisplayMode(DisplayMode.Showcase);
+            Assert.AreEqual(HighlightMode.Both, _session.KeyHighlight);
+            _session.SetDisplayMode(DisplayMode.Teaching);
+            Assert.AreEqual(HighlightMode.Upcoming, _session.KeyHighlight);
+            _session.SetDisplayMode(DisplayMode.Showcase);
+        }
+
+        [UnityTest]
+        public IEnumerator Closeup_KeepsTimeAndViewControlsVisible()
+        {
+            _session.SetCameraMode(CameraMode.Closeup);
+            yield return null;
+
+            var playBar = GameObject.Find("MainPlayBar");
+            Assert.IsNotNull(playBar);
+            var timeline = playBar.transform.Find("Progress").GetComponent<RectTransform>();
+            Assert.Greater(timeline.rect.width, 0f, "时间轴保留可拖动区域");
+            Assert.IsNotNull(timeline.GetComponent<GraphicRaycaster>(), "独立子画布应接收滑条指针事件");
+            var view = GameObject.Find("ViewSegmented");
+            Assert.IsNotNull(view, "特写时仍能直接切换视角");
+            Assert.IsNull(view.transform.parent.Find("MorePanel"), "视角独立于更多工具面板");
+            if (playBar.GetComponent<RectTransform>().rect.width >= 960f)
+            {
+                Assert.IsTrue(playBar.transform.Find("TimeCurrent").gameObject.activeInHierarchy);
+                Assert.IsTrue(playBar.transform.Find("TimeTotal").gameObject.activeInHierarchy);
+            }
+
+            var more = playBar.transform.Find("Btn_更多").GetComponent<Button>();
+            more.onClick.Invoke();
+            yield return null;
+            Assert.IsTrue(playBar.transform.Find("MorePanel").gameObject.activeInHierarchy);
+            more.onClick.Invoke();
+            Assert.IsFalse(playBar.transform.Find("MorePanel").gameObject.activeSelf);
+        }
 
         [UnityTest]
         public IEnumerator Highlight_DefaultModeIsOff()
@@ -126,6 +218,9 @@ namespace PianoTeacher3D.Tests.PlayMode
 
             Assert.AreEqual(HighlightMode.Off, _session.KeyHighlight);
             Assert.AreEqual(0, _highlighter.HighlightedKeyCount, "关闭高亮应立即清除颜色");
+            _session.SetHighlightMode(HighlightMode.Active);
+            Assert.AreEqual(_session.PressedPitchCount, _highlighter.HighlightedKeyCount,
+                "重新打开高亮应立即显示尚未松开的琴键");
             _session.Pause();
         }
 

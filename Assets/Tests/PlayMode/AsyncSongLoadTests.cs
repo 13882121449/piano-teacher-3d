@@ -50,6 +50,9 @@ namespace PianoTeacher3D.Tests.PlayMode
         [UnityTest]
         public IEnumerator LoadSongAsync_ReachesReadyAndCommitsSong()
         {
+            // 明确让同步与异步加载使用同一首曲目。场景也可能从首页恢复最近一次选择。
+            _session.LoadSong(_demoPath);
+            Assert.AreEqual("demo", _session.CurrentSongName);
             string before = _session.CurrentSongName;
 
             _session.LoadSongAsync(_demoPath);

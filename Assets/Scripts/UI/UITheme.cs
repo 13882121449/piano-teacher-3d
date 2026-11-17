@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -55,33 +55,39 @@ namespace PianoTeacher3D.UI
 
         /// <summary>
         /// 底：场景背景（最深）。由 <c>Core/LessonSessionController</c> 直接使用，务必保留。
-        /// 亮度 0.0060 —— 全表最低，其余层级严格递增。
+        /// 深灰琴漆色，其他界面层级在此基础上提亮。
         /// </summary>
-        public static readonly Color SceneBg = new Color(0.063f, 0.071f, 0.086f, 1f);
+        public static readonly Color SceneBg = new Color32(9, 13, 22, 255);
 
         /// <summary>面：面板底色（带轻微透明，浮于场景之上）。</summary>
-        public static readonly Color PanelBg = new Color(0.106f, 0.118f, 0.141f, 0.96f);
+        public static readonly Color PanelBg = new Color32(24, 31, 45, 250);
 
         /// <summary>浮：控件底色（按钮常态 / 玻璃卡之上的实体块）。</summary>
-        public static readonly Color Control = new Color(0.169f, 0.188f, 0.220f, 1f);
+        public static readonly Color Control = new Color32(35, 46, 65, 255);
 
         /// <summary>控件悬停色（唯一允许的悬停提亮，不再另造第 4 级）。</summary>
-        public static readonly Color ControlHover = new Color(0.231f, 0.255f, 0.294f, 1f);
+        public static readonly Color ControlHover = new Color32(50, 66, 92, 255);
 
         /// <summary>控件按下色（比常态更暗，与悬停形成两个方向）。</summary>
-        public static readonly Color ControlPressed = new Color(0.129f, 0.145f, 0.173f, 1f);
+        public static readonly Color ControlPressed = new Color32(26, 36, 53, 255);
 
-        // ==================== 强调色（暖金） ====================
+        // ==================== 强调色（冷白蓝） ====================
 
-        public static readonly Color Accent = new Color(0.851f, 0.643f, 0.255f, 1f);        // #D9A441
-        public static readonly Color AccentBright = new Color(0.941f, 0.776f, 0.455f, 1f);  // #F0C674
-        public static readonly Color AccentDim = new Color(0.545f, 0.412f, 0.165f, 1f);
+        public static readonly Color Accent = new Color32(198, 221, 252, 255);
+        public static readonly Color AccentBright = new Color32(229, 239, 255, 255);
+        public static readonly Color AccentDim = new Color32(75, 108, 158, 255);
 
         // ==================== 文字 ====================
 
-        public static readonly Color TextPrimary = new Color(0.937f, 0.945f, 0.953f, 1f);
-        public static readonly Color TextSecondary = new Color(0.639f, 0.690f, 0.729f, 1f);
-        public static readonly Color TextOnAccent = new Color(0.078f, 0.086f, 0.102f, 1f);
+        public static readonly Color TextPrimary = new Color32(241, 246, 253, 255);
+        public static readonly Color TextSecondary = new Color32(192, 205, 225, 255);
+        public static readonly Color TextOnAccent = new Color32(12, 20, 33, 255);
+
+        public static readonly Color Walnut = new Color32(77, 53, 44, 255);
+        public static readonly Color PianoIvory = new Color32(238, 231, 214, 255);
+        public static readonly Color PianoIvoryShadow = new Color32(187, 176, 155, 255);
+        public static readonly Color PianoFelt = new Color32(113, 47, 48, 255);
+        public static readonly Color ModalShade = new Color32(0, 0, 0, 166);
 
         // ==================== 状态色 ====================
 
@@ -91,34 +97,43 @@ namespace PianoTeacher3D.UI
         // ==================== 新增令牌：层次 / 分割 / 状态（方案 3.3 / 审查 2.2A） ====================
 
         /// <summary>抬升面板底色：次级功能卡片、分段控件轨道之上的一级。</summary>
-        public static readonly Color PanelBgRaised = new Color(0.137f, 0.153f, 0.180f, 1f);
+        public static readonly Color PanelBgRaised = new Color32(31, 41, 59, 255);
+
+        /// <summary>
+        /// 可点击卡片的底色。比 <see cref="PanelBgRaised"/> 再亮一档：主菜单背景接近纯黑，
+        /// 卡片若与背景亮度差 &lt; 0.05 就会「存在但看不见」（实测截图里四张入口卡几乎与背景融为一体）。
+        /// </summary>
+        public static readonly Color CardBg = new Color32(31, 43, 63, 255);
+
+        /// <summary>卡片描边：灰蓝，保证在深色背景上能勾出卡片轮廓（1px）。</summary>
+        public static readonly Color CardBorder = new Color32(71, 91, 120, 255);
 
         /// <summary>顶栏 / 底栏底色（比普通面板更深，压住 3D 画面又不抢眼）。</summary>
-        public static readonly Color PanelBgDeep = new Color(0.086f, 0.098f, 0.118f, 0.97f);
+        public static readonly Color PanelBgDeep = new Color32(15, 22, 35, 250);
 
         /// <summary>
         /// 玻璃卡底色：直接压在 3D 画面上的一层（左上视角提示卡）。
         /// alpha 0.72 仍保证 <see cref="TextSecondary"/> 对比度 ≥ 3:1。
         /// </summary>
-        public static readonly Color PanelBgGlass = new Color(0.106f, 0.118f, 0.141f, 0.72f);
+        public static readonly Color PanelBgGlass = new Color32(19, 27, 43, 224);
 
         /// <summary>分割线（半透明，不与强调色争抢注意力）。</summary>
-        public static readonly Color Divider = new Color(0.850f, 0.878f, 0.918f, 0.16f);
+        public static readonly Color Divider = new Color(0.66f, 0.76f, 0.91f, 0.19f);
 
         /// <summary>
         /// 选中态底色（分段选择器选中项 / 开关开启项）。
         /// 比 <see cref="AccentDim"/> 更深，保证与 <see cref="TextPrimary"/> 的对比度 ≥ 4.5:1（实测 6.8:1）。
         /// </summary>
-        public static readonly Color Selected = new Color(0.412f, 0.310f, 0.125f, 1f);
+        public static readonly Color Selected = new Color32(52, 78, 117, 255);
 
         /// <summary>警告色（功能降级但可继续）。</summary>
         public static readonly Color Warning = new Color(0.960f, 0.741f, 0.365f, 1f);
 
         /// <summary>禁用底色。</summary>
-        public static readonly Color Disabled = new Color(0.129f, 0.145f, 0.173f, 1f);
+        public static readonly Color Disabled = new Color32(28, 34, 45, 255);
 
         /// <summary>禁用文字色。</summary>
-        public static readonly Color TextDisabled = new Color(0.478f, 0.522f, 0.565f, 1f);
+        public static readonly Color TextDisabled = new Color32(112, 126, 149, 255);
 
         /// <summary>错误文字色（比底色更亮，保证暗色面板上的对比度）。</summary>
         public static readonly Color TextError = new Color(0.949f, 0.639f, 0.639f, 1f);
@@ -136,7 +151,7 @@ namespace PianoTeacher3D.UI
         public static readonly Color Transparent = new Color(0f, 0f, 0f, 0f);
 
         /// <summary>按钮/面板边框色（选中态、焦点态共用；颜色之外的第二重区分）。</summary>
-        public static readonly Color BorderSelected = new Color(0.941f, 0.776f, 0.455f, 1f);
+        public static readonly Color BorderSelected = new Color32(156, 190, 240, 255);
 
         // ==================== 教学语义色（审查 2.3「颜色语义不变」） ====================
 
@@ -146,13 +161,16 @@ namespace PianoTeacher3D.UI
         /// <summary>右手发声提示色（暖橙，保持既有语义）。</summary>
         public static readonly Color RightHandColor = new Color(0.949f, 0.612f, 0.318f, 1f);
 
-        /// <summary>预提示色（暖金，与 <see cref="Accent"/> 同源，但语义只用于琴键提示）。</summary>
+        /// <summary>预提示色（暖金，沿用原来的琴键提示色值）。</summary>
         public static readonly Color UpcomingColor = new Color(0.851f, 0.643f, 0.255f, 1f);
 
         // ==================== 字号层级（10 / 12 / 13 / 15 / 20 / 28，行高 = 字号 × 1.35） ====================
 
         /// <summary>字号：hero（页面主标题）。</summary>
         public const int FontPageTitle = 28;
+
+        /// <summary>首页练习入口的大标题。</summary>
+        public const int FontPracticeTitle = 44;
 
         /// <summary>字号：title（区块 / 面板标题）。</summary>
         public const int FontTitle = 20;
@@ -263,10 +281,10 @@ namespace PianoTeacher3D.UI
             /// <summary>顶栏左右内边距。</summary>
             public const float TopBarPadding = Space16;
 
-            /// <summary>底栏总高度：16 上内边距 + 44 进度行 + 16 行距 + 40 控制行 + 16 下内边距。</summary>
-            public const float MainBarHeightNormal = 132f;
+            /// <summary>底栏总高度：紧凑栏 72 + 独立进度行 32。</summary>
+            public const float MainBarHeightNormal = MainBarHeightCompact + PlayerProgressRowHeight;
 
-            /// <summary>底栏紧凑高度（手部特写：隐藏进度行，仅保留 40 控制行 + 上下 16）。</summary>
+            /// <summary>底栏紧凑高度（手部特写：播放和进度共用一行）。</summary>
             public const float MainBarHeightCompact = 72f;
 
             /// <summary>
@@ -287,7 +305,7 @@ namespace PianoTeacher3D.UI
             public const float PlayerPadding = Space16;
 
             /// <summary>底栏进度行高度（轨道 6 垂直居中，时间标签 12 号字左右对齐）。</summary>
-            public const float PlayerProgressRowHeight = 44f;
+            public const float PlayerProgressRowHeight = 32f;
 
             /// <summary>底栏控制行高度（主按钮 40，其余控件 32 垂直居中）。</summary>
             public const float PlayerControlRowHeight = 40f;
@@ -328,7 +346,7 @@ namespace PianoTeacher3D.UI
             public const float HintCardTopGap = Space12;
 
             /// <summary>鼠标移出后淡到的透明度（不完全隐藏，避免新手找不到）。</summary>
-            public const float HintCardIdleAlpha = 0.45f;
+            public const float HintCardIdleAlpha = 0.76f;
 
             /// <summary>鼠标移出多久后开始淡出（秒）。</summary>
             public const float HintCardFadeDelay = 2.5f;
@@ -703,6 +721,26 @@ namespace PianoTeacher3D.UI
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
             scaler.matchWidthOrHeight = 1f; // 匹配高度：窄窗口优先折行/折叠，不压缩按钮高度
             go.AddComponent<GraphicRaycaster>();
+            return canvas;
+        }
+
+        /// <summary>
+        /// 把一个「逐帧变化」的控件拆到子 Canvas。
+        /// <para>
+        /// 一个 Canvas 就是一个批次：进度条每帧改 fill、时间标签每帧改文本，
+        /// 都会把这个 Canvas 的合批网格标脏重建。播放条上静态的背景板与六个按钮
+        /// 本来不该跟着重建，所以把变化源独立出去——只加 Canvas 组件、不换父节点，
+        /// 因此 <see cref="Place"/> / <see cref="StretchX"/> 这些坐标语义完全不变。
+        /// </para>
+        /// </summary>
+        public static Canvas IsolateDynamic(Component target)
+        {
+            if (target == null) return null;
+            var go = target.gameObject;
+            var canvas = go.GetComponent<Canvas>();
+            if (canvas == null) canvas = go.AddComponent<Canvas>();
+            // 不覆盖排序：子 Canvas 仍按层级顺序绘制，只是单独成批
+            canvas.overrideSorting = false;
             return canvas;
         }
 
@@ -1128,9 +1166,16 @@ namespace PianoTeacher3D.UI
             btn.colors = colors;
         }
 
-        /// <summary>chip 底色：开启 <see cref="Selected"/>，关闭透明；禁用 <see cref="Disabled"/>。</summary>
+        /// <summary>
+        /// chip 底色：开启 <see cref="Selected"/>，关闭 <see cref="Control"/>，禁用 <see cref="Disabled"/>。
+        /// <para>
+        /// 关闭态曾经是<b>全透明</b>——在深色场景上几乎看不见，只剩一圈 1px 描边，
+        /// 实际观感是「一排灰方块的空白按钮」。改成实心底色后，关闭态与开启态
+        /// 靠「深灰底 / 金色底」区分，文字始终压在实色上，对比度稳定。
+        /// </para>
+        /// </summary>
         public static Color ChipBackground(bool active, bool enabled)
-            => !enabled ? Disabled : (active ? Selected : Transparent);
+            => !enabled ? Disabled : (active ? Selected : Control);
 
         /// <summary>
         /// 绘制 chip（带状态后缀的只读/可点小控件）：常态透明 + 1px <see cref="Divider"/> 边，
@@ -1158,7 +1203,7 @@ namespace PianoTeacher3D.UI
         }
 
         /// <summary>
-        /// 绘制分段项：未选中透明（悬停出 <see cref="ControlHover"/>），
+        /// 绘制分段项：未选中 <see cref="Control"/> 实心底（与 chip 一致，透明底在深色场景里只剩一圈细边、像空按钮），
         /// 选中 <see cref="Selected"/> 底 + 1px <see cref="BorderSelected"/> 边 + 粗体，
         /// 因此「当前值」同时靠底色、描边、字重三重表达，不只靠颜色。
         /// </summary>
@@ -1170,7 +1215,7 @@ namespace PianoTeacher3D.UI
             {
                 var sprite = GetRoundedSprite(radius);
                 if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
-                img.color = !enabled ? Disabled : (selected ? Selected : Transparent);
+                img.color = !enabled ? Disabled : (selected ? Selected : Control);
                 SetOutline(img, selected, BorderSelected, 1f);
             }
             var label = GetLabel(btn);
@@ -1532,6 +1577,7 @@ namespace PianoTeacher3D.UI
         {
             CameraMode.Closeup => "手部特写",
             CameraMode.Full => "全景",
+            CameraMode.Pedal => "踏板特写",
             _ => "自由观察"
         };
 

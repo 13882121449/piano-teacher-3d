@@ -249,6 +249,13 @@ namespace PianoTeacher3D.Core
             if (found != null && IsUserImported(found))
                 TryDeleteUserFile(found.SourcePath);
 
+            DismissRecent(id);
+        }
+
+        /// <summary>只移除最近曲目记录，保留来源文件。</summary>
+        public void DismissRecent(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return;
             _recent.RemoveAll(m => m == null
                 || string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase)
                 || (!string.IsNullOrEmpty(m.SourcePath) && PathsEqual(m.SourcePath, id)));

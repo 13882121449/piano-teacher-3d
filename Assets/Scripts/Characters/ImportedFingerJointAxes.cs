@@ -106,6 +106,10 @@ namespace PianoTeacher3D.Characters
                         ? nexts[j].position - joint.position
                         : Vector3.zero;
 
+                    // 指腹偏向末节侧面，拇指末节的屈伸轴仍沿骨干推导。
+                    if (f == 0 && j == 2)
+                        worldDirection = joint.position - joints[j - 1].position;
+
                     if (worldDirection.sqrMagnitude < 1e-8f && j > 0)
                     {
                         // 末节常常没有独立「指尖节点」（GetFingertip 直接返还 distal），
@@ -162,7 +166,8 @@ namespace PianoTeacher3D.Characters
             // Unity 的 Vector3.Cross 与 Quaternion.AngleAxis 都按左手规则，两者叠乘后符号相反：
             // 取 cross(dir, curl) 会让正向弯曲把手指抬起来（实测指尖朝 +Y 而非掌心）。
             // 因此轴取反，保证 degrees ≥ 0 恒为屈曲方向。
-            axis = -axis.normalized;
+            // 正方向 = 屈曲（指尖朝掌心侧移动）。绕 −axis 旋转会让指节做伸展，静止手型反而张开。
+            axis = axis.normalized;
 
             _joints[joint] = new JointAxis
             {

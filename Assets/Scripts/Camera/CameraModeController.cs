@@ -10,7 +10,8 @@ namespace PianoTeacher3D.CameraControl
     {
         Closeup, // 手部特写
         Full,    // 全景
-        Free     // 自由观察
+        Free,    // 自由观察
+        Pedal    // 踏板特写
     }
 
     /// <summary>
@@ -34,16 +35,16 @@ namespace PianoTeacher3D.CameraControl
     {
         // ==================== Inspector：全景（方案 4.3 / 审查 3.1C） ====================
 
-        [Header("全景预设（前侧 3/4 角度，修正侧视低音端遮挡；方案 4.3 / 审查 3.1C）")]
-        public float OverviewYaw = 34f;          // 水平角：0 = 正前方，34° = 前侧 3/4
-        public float OverviewPitch = 16f;        // 俯角
-        public float OverviewFov = 50f;          // 基准视野
+        [Header("全景预设（斜侧展示老师坐姿和琴体）")]
+        public float OverviewYaw = 66f;          // 保留演奏者侧脸，并露出琴盖内侧和弦框
+        public float OverviewPitch = 12f;
+        public float OverviewFov = 46f;
         public float OverviewMinFov = 40f;
         public float OverviewMaxFov = 62f;
         public float OverviewMinDistance = 1.2f;
-        public float OverviewMaxDistance = 4.5f;
-        public float OverviewFrameMargin = 1.12f;
-        public Vector3 OverviewFocusOffset = new Vector3(0f, 0.02f, 0f);
+        public float OverviewMaxDistance = 5.8f;
+        public float OverviewFrameMargin = 1.43f;
+        public Vector3 OverviewFocusOffset = new Vector3(0f, 0.12f, 0f);
         public float OverviewReferenceHeight = 1.45f;   // 基准身高（米）
         public float OverviewHeightCompensation = 0.35f; // 身高/头身比轻量校正系数
         public float OverviewFollowDamping = 6f;
@@ -71,18 +72,11 @@ namespace PianoTeacher3D.CameraControl
         public float CloseupFingerTipReach = 0.05f;   // 指根 → 指尖的延伸估计（米）
         public float CloseupVerticalFollowLimit = 0.035f; // 焦点垂直跟随幅度上限
         public float CloseupBottomUiInset = 0.02f;    // 底部 UI 预留（焦点下移）
-        // 观察俯角（固定值，不随手部动作变化）。
-        // 【为什么必须是 60°】手部特写要「从后上方越过头顶看琴键」，而角色头部位于
-        // 琴键后方 z≈0.42m、高约 1.09m（写实男性更高）。相机位置 = 焦点 + d·(sinθ, cosθ)，
-        // 只要水平后移量 d·cosθ 超过「焦点到头部的水平距离」(≈0.46m)，头部就会落在
-        // 相机 → 双手的连线上，画面正中会被一大团头发挡住（实测 34° 时必然遮挡）。
-        // 取 θ=60° 时 cosθ=0.5，即使取到最大距离 0.88m，d·cosθ=0.44 < 0.46，相机始终位于头部之前，
-        // 从几何上排除头部遮挡；同时保留足够宽度以容纳大跨度双手（审查 3.2 观察标准）。
-        public float CloseupViewPitch = 60f;
-        public float CloseupViewYaw = 0f;
-        // 躯干避让（接触方案批次 3）：躯干中心落在视口内时，允许抬角到该上限再取「手部占屏更大」的候选
-        public float CloseupViewPitchMax = 70f;
-        public float CloseupTorsoMargin = 0.02f;
+        // 较陡的俯角和少量侧向偏移减少头部入画，同时能观察指腹与琴键的高差。
+        public float CloseupViewPitch = 72f;
+        public float CloseupViewYaw = 5f;
+        public float CloseupViewPitchMax = 77f;
+        public float CloseupTorsoMargin = 0.04f;
 
         /// <summary>
         /// 特写躯干避让开关（接触方案批次 3 的回滚点）：关闭后行为与改动前完全一致。
@@ -164,6 +158,8 @@ namespace PianoTeacher3D.CameraControl
         private bool _modeChanged;
         private bool _resetPending;
         private float _resetDuration;
+        private bool _stageTrackActive;
+        private float _stageTrackProgress;
 
         private PracticeHand _practiceHand = PracticeHand.Both;
         private Vector3 _currentFocus;
@@ -203,7 +199,7 @@ namespace PianoTeacher3D.CameraControl
 
         private static CameraModePreset[] CreatePresets()
         {
-            var presets = new CameraModePreset[3];
+            var presets = new CameraModePreset[4];
             presets[(int)CameraMode.Closeup] = new CameraModePreset(CameraMode.Closeup, "手部特写")
             {
                 NearClip = 0.05f,
@@ -218,6 +214,13 @@ namespace PianoTeacher3D.CameraControl
             {
                 NearClip = 0.05f,
                 FarClip = 50f
+            };
+            presets[(int)CameraMode.Pedal] = new CameraModePreset(CameraMode.Pedal, "踏板特写")
+            {
+                NearClip = 0.03f,
+                FarClip = 30f,
+                FollowDamping = 12f,
+                MaxFovStepPerSecond = 60f
             };
             return presets;
         }
@@ -277,6 +280,12 @@ namespace PianoTeacher3D.CameraControl
 
             var preset = _presets[(int)Mode];
 
+            if (_stageTrackActive && Mode == CameraMode.Full)
+            {
+                ApplyStageTrackPose();
+                return;
+            }
+
             // 自由观察：用户输入只影响相机自身状态，与时间轴完全解耦（方案 4.4）
             if (preset.AllowUserInput) HandleFreeInput();
             else _userOrbiting = false;
@@ -330,10 +339,35 @@ namespace PianoTeacher3D.CameraControl
 
         // ==================== 公开 API ====================
 
+        /// <summary>在演奏展示的全景模式中接管构图，关闭后平滑回到手动预设。</summary>
+        internal void SetStageTrack(bool enabled, float progress)
+        {
+            if (_stageTrackActive && !enabled && Mode == CameraMode.Full)
+            {
+                _resetPending = true;
+                _resetDuration = ResetTransitionDuration;
+            }
+            _stageTrackActive = enabled;
+            _stageTrackProgress = progress;
+            if (_cam != null && enabled && Mode == CameraMode.Full) ApplyStageTrackPose();
+        }
+
+        private void ApplyStageTrackPose()
+        {
+            _transition = default;
+            _modeChanged = false;
+            _resetPending = false;
+            _userOrbiting = false;
+            Vector3 keyboard = _hasKeyboardBounds ? _keyboardBounds.center : new Vector3(0f, 0.74f, 0.05f);
+            _currentFocus = keyboard;
+            ApplyClipping(_presets[(int)CameraMode.Full]);
+            ApplyPose(StageCameraTrack.Evaluate(_stageTrackProgress, keyboard));
+        }
+
         /// <summary>切换视角模式（同模式重复调用为无操作；切换只改表现层，不触碰时间轴）。</summary>
         public void SetMode(CameraMode mode)
         {
-            if (mode == Mode) return;
+            if ((uint)mode >= (uint)_presets.Length || mode == Mode) return;
 
             if (mode == CameraMode.Free)
             {
@@ -345,8 +379,8 @@ namespace PianoTeacher3D.CameraControl
             _modeChanged = true;
         }
 
-        /// <summary>循环切换：特写 → 全景 → 自由观察 → 特写。</summary>
-        public void CycleMode() => SetMode((CameraMode)(((int)Mode + 1) % 3));
+        /// <summary>循环切换：特写 → 全景 → 自由观察 → 特写；踏板特写也可直接选择。</summary>
+        public void CycleMode() => SetMode(Mode >= CameraMode.Free ? CameraMode.Closeup : (CameraMode)((int)Mode + 1));
 
         /// <summary>
         /// 按 R：回到当前模式的标准构图。
@@ -435,6 +469,19 @@ namespace PianoTeacher3D.CameraControl
                     return SolveCloseupDesired(dt, preset, out pose);
                 case CameraMode.Free:
                     return SolveFreeDesired(preset, out pose);
+                case CameraMode.Pedal:
+                    if (_keyMap != null && _keyMap.RightPedalHinge != null && _keyMap.RightHeelAnchor != null)
+                    {
+                        Transform hinge = _keyMap.RightPedalHinge;
+                        Vector3 focus = Vector3.Lerp(hinge.position, _keyMap.RightHeelAnchor.position, 0.65f);
+                        focus.y += 0.10f;
+                        Vector3 direction = _keyMap.transform.TransformDirection(new Vector3(-0.85f, 0.36f, 0.47f)).normalized;
+                        preset.Target = CameraTarget.Create(focus, 0.32f, direction, 0.87f, 42f);
+                        _currentFocus = focus;
+                        pose = CameraPose.FromTarget(preset.Target);
+                        return true;
+                    }
+                    return SolveFullDesired(preset, out pose);
                 default:
                     return SolveFullDesired(preset, out pose);
             }

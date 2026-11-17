@@ -19,6 +19,30 @@ namespace PianoTeacher3D.Tests.EditMode
         }
 
         [Test]
+        public void PreparedMajorScale_KeepsThumbCrossingAndFingeringAfterSeek()
+        {
+            var service = NewService();
+            int[] pitches = { 60, 62, 64, 65, 67, 69, 71, 72 };
+            int[] expected = { 0, 1, 2, 0, 1, 2, 3, 4 };
+            var notes = new MidiNoteEvent[pitches.Length];
+            for (int i = 0; i < notes.Length; i++)
+                notes[i] = new MidiNoteEvent(pitches[i], i * 0.125f, 0.11f, 80, 0, 0);
+
+            service.PrepareSong(notes);
+            for (int i = 0; i < pitches.Length; i++)
+            {
+                service.PushMelody(false, notes[i]);
+                service.Refresh(false, new[] { pitches[i] }, notes[i].StartTime, i);
+                Assert.AreEqual(expected[i], service.GetFinger(false, pitches[i]), "音符 " + pitches[i]);
+            }
+
+            service.Clear();
+            service.PushMelody(false, notes[3]);
+            service.Refresh(false, new[] { 65 }, notes[3].StartTime, 10);
+            Assert.AreEqual(0, service.GetFinger(false, 65), "跳转到穿指位置后仍应用同一份曲目计划");
+        }
+
+        [Test]
         public void Refresh_AssignsEveryPitchToExactlyOneFinger()
         {
             var service = NewService();
@@ -128,6 +152,69 @@ namespace PianoTeacher3D.Tests.EditMode
                 int pitch = service.GetPitch(true, f);
                 if (pitch >= 0) Assert.Contains(pitch, many, "分配出的音高必须来自输入集合");
             }
+        }
+
+        [Test]
+        public void PreparedLegato_KeepsHeldFingerAndRestoresTheSameChordAfterSeek()
+        {
+            var service = NewService();
+            var held = new MidiNoteEvent(64, 0f, 0.5f, 80, 0, 0);
+            var added = new MidiNoteEvent(67, 0.15f, 0.4f, 80, 0, 0);
+            service.PrepareSong(new[] { held, added });
+
+            service.PushMelody(false, held);
+            service.Refresh(false, new[] { 64 }, 0f, 1);
+            int heldFinger = service.GetFinger(false, 64);
+            service.PushMelody(false, added);
+            service.Refresh(false, new[] { 64, 67 }, 0.2f, 2);
+
+            Assert.AreEqual(heldFinger, service.GetFinger(false, 64), "保持中的音符不能在加入新音时换指");
+            int addedFinger = service.GetFinger(false, 67);
+            Assert.Greater(addedFinger, heldFinger, "自然右手形要维持由低向高的指序");
+
+            service.Clear();
+            service.PushMelody(false, added);
+            service.PushMelody(false, held);
+            service.Refresh(false, new[] { 64, 67 }, 0.2f, 3);
+            Assert.AreEqual(heldFinger, service.GetFinger(false, 64));
+            Assert.AreEqual(addedFinger, service.GetFinger(false, 67));
+        }
+
+        [Test]
+        public void PreparedRepeatedNote_KeepsItsFingeringAfterRestAndSeek()
+        {
+            var service = NewService();
+            var approach = new MidiNoteEvent(60, 0f, 0.2f, 80, 0, 0);
+            var first = new MidiNoteEvent(60, 0.3f, 0.2f, 80, 0, 0);
+            var second = new MidiNoteEvent(60, 0.7f, 0.2f, 80, 0, 0);
+            var chord = new MidiNoteEvent(67, 0f, 0.2f, 80, 0, 0);
+            service.PrepareSong(new[] { approach, chord, first, second });
+            service.PushMelody(false, approach);
+            service.PushMelody(false, chord);
+            service.Refresh(false, new[] { 60, 67 }, 0f, 1);
+            int finger = service.GetFinger(false, 60);
+
+            foreach (var note in new[] { first, second })
+            {
+                Assert.AreEqual(finger, service.PreviewFinger(false, note.Pitch, note.StartTime));
+                service.Clear();
+                service.PushMelody(false, note);
+                service.Refresh(false, new[] { 60 }, note.StartTime, 2);
+                Assert.AreEqual(finger, service.GetFinger(false, 60));
+            }
+        }
+
+        [Test]
+        public void PreparedOverstretch_DoesNotAssignBothKeysToOneHand()
+        {
+            var service = NewService();
+            var low = new MidiNoteEvent(60, 0f, 0.5f, 80, 0, 0);
+            var high = new MidiNoteEvent(84, 0f, 0.5f, 80, 0, 0);
+            service.PrepareSong(new[] { low, high });
+            service.PushMelody(false, low);
+            service.PushMelody(false, high);
+            service.Refresh(false, new[] { 60, 84 }, 0.1f, 1);
+            Assert.Less(CountAssigned(service, false), 2, "一只手不能同时跨两个八度");
         }
 
         private static int CountAssigned(FingerAssignmentService service, bool leftHand)

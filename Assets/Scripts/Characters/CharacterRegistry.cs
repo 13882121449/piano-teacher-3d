@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using PianoTeacher3D.Customization;
 using UnityEngine;
 
 namespace PianoTeacher3D.Characters
@@ -29,22 +30,66 @@ namespace PianoTeacher3D.Characters
         /// <summary>内置卡通角色 ID。</summary>
         public const string BuiltInCartoonId = "builtin.cartoon";
 
-        /// <summary>内置 Rocketbox 导入角色 ID。</summary>
+        /// <summary>内置 Rocketbox 导入角色 ID（写实女性）。</summary>
         public const string RocketboxFemaleId = "rocketbox.female01";
 
-        /// <summary>Rocketbox 预制体的 Resources 路径（不含扩展名）。</summary>
+        /// <summary>内置 Rocketbox 导入角色 ID（写实男性）。</summary>
+        public const string RocketboxMaleId = "rocketbox.male01";
+
+        /// <summary>内置 Rocketbox 导入角色 ID（儿童）。</summary>
+        public const string RocketboxChildId = "rocketbox.child01";
+
+        /// <summary>写实女性的 Resources 路径（不含扩展名）。</summary>
         public const string RocketboxResourcesPath = "Characters/Rocketbox/Female_Adult_01";
+
+        /// <summary>写实男性的 Resources 路径（不含扩展名）。</summary>
+        public const string RocketboxMaleResourcesPath = "Characters/Rocketbox/Male_Adult_01";
+
+        /// <summary>儿童的 Resources 路径（不含扩展名）。</summary>
+        public const string RocketboxChildResourcesPath = "Characters/Rocketbox/Female_Child_01";
+
+        /// <summary>
+        /// 人像缩略图的 Resources 路径（不含扩展名）。
+        /// 贴图与 FBX 同目录，因此直接复用角色的 Resources 路径加 <c>_portrait</c> 后缀。
+        /// </summary>
+        public static string PortraitResourcesPath(string profileId)
+        {
+            switch (profileId)
+            {
+                case RocketboxMaleId: return RocketboxMaleResourcesPath + "_portrait";
+                case RocketboxChildId: return RocketboxChildResourcesPath + "_portrait";
+                case RocketboxFemaleId: return RocketboxResourcesPath + "_portrait";
+                default: return string.Empty;
+            }
+        }
+
+        /// <summary>模型名 → 贴图前缀（Rocketbox 每个角色的贴图前缀都不同：f001 / m002 / cf001）。</summary>
+        private static readonly Dictionary<string, string> TexturePrefixes = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            { "Female_Adult_01", "f001" },
+            { "Male_Adult_01", "m002" },
+            { "Female_Child_01", "cf001" },
+        };
+
+        /// <summary>按 Resources 路径推出贴图前缀；未知模型回退到 f001。</summary>
+        public static string TexturePrefixFor(string resourcesPath)
+        {
+            if (string.IsNullOrEmpty(resourcesPath)) return "f001";
+            var slash = resourcesPath.LastIndexOf('/');
+            var name = slash >= 0 ? resourcesPath.Substring(slash + 1) : resourcesPath;
+            return TexturePrefixes.TryGetValue(name, out var prefix) ? prefix : "f001";
+        }
 
         /// <summary>内置角色的 ID 表（索引与 <c>AvatarManager</c> 内置顺序一致）。</summary>
         public static readonly string[] BuiltInIds =
         {
-            BuiltInRealisticFemaleId,
-            BuiltInRealisticMaleId,
-            BuiltInCartoonId
+            RocketboxFemaleId,
+            RocketboxMaleId,
+            RocketboxChildId
         };
 
         /// <summary>内置角色的显示名（索引与 <see cref="BuiltInIds"/> 一致）。</summary>
-        public static readonly string[] BuiltInDisplayNames = { "写实女性", "写实男性", "卡通角色" };
+        public static readonly string[] BuiltInDisplayNames = { "写实女性", "写实男性", "儿童" };
 
         private readonly List<CharacterProfile> _all = new List<CharacterProfile>();
         private readonly Dictionary<string, CharacterProfile> _byId =
@@ -54,6 +99,7 @@ namespace PianoTeacher3D.Characters
         private readonly List<CharacterProfile> _selfCreated = new List<CharacterProfile>();
 
         private bool _disposed;
+        private readonly PhotoAvatarStorage _photoStorage = new PhotoAvatarStorage();
 
         /// <summary>
         /// 构造角色库。
@@ -65,7 +111,11 @@ namespace PianoTeacher3D.Characters
         {
             AddBuiltIns();
 
-            if (includeResourceProfiles) LoadResourceProfiles();
+            if (includeResourceProfiles)
+            {
+                LoadResourceProfiles();
+                foreach (var data in _photoStorage.LoadAll()) RegisterPhoto(data);
+            }
         }
 
         /// <summary>全部已登记角色（顺序：内置 3 个 → Rocketbox → 外部资料）。</summary>
@@ -84,6 +134,52 @@ namespace PianoTeacher3D.Characters
 
         /// <summary>ID 是否已注册。</summary>
         public bool IsRegistered(string id) => !string.IsNullOrEmpty(id) && _byId.ContainsKey(id);
+
+        public bool SavePhotoAvatar(PhotoAvatarData data, out CharacterProfile profile, out string error)
+        {
+            profile = null;
+            int photoCount = 0;
+            foreach (var item in _all) if (item.PhotoAvatar != null) photoCount++;
+            if (photoCount >= PhotoAvatarStorage.MaxProfiles)
+            {
+                error = "角色库已满，请先移除一个照片角色。";
+                return false;
+            }
+            if (!_photoStorage.Save(data, out error)) return false;
+            profile = RegisterPhoto(data);
+            if (profile != null) return true;
+            _photoStorage.Archive(data, out _);
+            error = "角色档案未能加入角色库。";
+            return false;
+        }
+
+        public bool ArchivePhotoAvatar(CharacterProfile profile, out string error)
+        {
+            if (profile == null || !_byId.TryGetValue(profile.CharacterId, out var registered)
+                || registered != profile)
+            {
+                error = "这个角色不在当前角色库。";
+                return false;
+            }
+            if (!_photoStorage.Archive(profile.PhotoAvatar, out error)) return false;
+            _all.Remove(profile);
+            _byId.Remove(profile.CharacterId);
+            _selfCreated.Remove(profile);
+            DestroyProfile(profile);
+            return true;
+        }
+
+        private CharacterProfile RegisterPhoto(PhotoAvatarData data)
+        {
+            var profile = data.CreateProfile();
+            if (!Register(profile).Ok)
+            {
+                DestroyProfile(profile);
+                return null;
+            }
+            _selfCreated.Add(profile);
+            return profile;
+        }
 
         /// <summary>
         /// 注册一个角色资料。失败（ID 非法 / 资料不完整 / ID 重复）时返回原因，且不改变现有集合。
@@ -135,57 +231,56 @@ namespace PianoTeacher3D.Characters
         {
             if (index < 0 || index >= BuiltInIds.Length) return null;
 
-            int tier = index == 2 ? 0 : 1;
-            int memory = index == 0 ? 9 : (index == 1 ? 10 : 7);
-
-            var profile = ScriptableObject.CreateInstance<CharacterProfile>();
-            profile.name = BuiltInIds[index];
-            profile.CharacterId = BuiltInIds[index];
-            profile.DisplayName = BuiltInDisplayNames[index];
-            profile.Style = index == 2 ? CharacterStyle.Cartoon : CharacterStyle.Realistic;
-            profile.Source = CharacterSource.ProceduralBuiltIn;
-            profile.ProceduralIndex = index;
-            profile.Prefab = null;
-            profile.ResourcesPath = string.Empty;
-            profile.SupportedAppearanceSlots = new[] { AppearanceSlot.Thumbnail, AppearanceSlot.BodyTint };
-            profile.RootScale = 1f;
-            profile.RootYawDegrees = 0f;
-            profile.SeatHeightOffset = 0f;
-            profile.QualityTier = tier;
-            profile.EstimatedMemoryMb = memory;
-            profile.LicenseName = "MIT";
-            profile.LicenseUrl = string.Empty;
-            profile.SourceUrl = string.Empty;
-            profile.AssetVersion = "procedural-1";
-            profile.Notes = "由项目自有代码程序化生成的几何与材质（Unity 内置图元 + 自写放样网格），无第三方模型资产。";
-            return profile;
+            switch (index)
+            {
+                case 0:
+                    return CreateRocketboxProfile(
+                        RocketboxFemaleId, BuiltInDisplayNames[0], RocketboxResourcesPath, 42,
+                        "Female_Adult_01（FBX，Humanoid 导入）");
+                case 1:
+                    return CreateRocketboxProfile(
+                        RocketboxMaleId, BuiltInDisplayNames[1], RocketboxMaleResourcesPath, 46,
+                        "Male_Adult_01（FBX，Humanoid 导入）");
+                default:
+                    return CreateRocketboxProfile(
+                        RocketboxChildId, BuiltInDisplayNames[2], RocketboxChildResourcesPath, 38,
+                        "Female_Child_01（FBX，Humanoid 导入，比例与成人不同，手部参数需单独标定）");
+            }
         }
 
         /// <summary>创建 Rocketbox 导入角色的资料（每次调用都是新实例，调用方负责销毁）。</summary>
         public static CharacterProfile CreateRocketbox()
         {
+            return CreateRocketboxProfile(
+                RocketboxFemaleId, "写实女性", RocketboxResourcesPath, 42,
+                "Female_Adult_01（FBX，Humanoid 导入）");
+        }
+
+        /// <summary>按 Rocketbox 模型创建资料；三个内置槽位共用这一条构建路径。</summary>
+        public static CharacterProfile CreateRocketboxProfile(
+            string id, string displayName, string resourcesPath, int estimatedMemoryMb, string assetVersion)
+        {
             var profile = ScriptableObject.CreateInstance<CharacterProfile>();
-            profile.name = RocketboxFemaleId;
-            profile.CharacterId = RocketboxFemaleId;
-            profile.DisplayName = "Rocketbox 女性";
+            profile.name = id;
+            profile.CharacterId = id;
+            profile.DisplayName = displayName;
             profile.Style = CharacterStyle.Realistic;
             profile.Source = CharacterSource.Prefab;
             profile.Prefab = null;                      // 走 ResourcesPath，避免资料资产反向引用预制体
-            profile.ResourcesPath = RocketboxResourcesPath;
+            profile.ResourcesPath = resourcesPath;
             profile.ProceduralIndex = -1;
             profile.SupportedAppearanceSlots = new[] { AppearanceSlot.Thumbnail, AppearanceSlot.BodyTint };
             profile.RootScale = 1f;
             profile.RootYawDegrees = 0f;
             profile.SeatHeightOffset = 0f;
             profile.QualityTier = 2;
-            profile.EstimatedMemoryMb = 42;
+            profile.EstimatedMemoryMb = estimatedMemoryMb;
             profile.LicenseName = "MIT";
             profile.LicenseUrl = "https://github.com/microsoft/Microsoft-Rocketbox";
             profile.SourceUrl = "https://github.com/microsoft/Microsoft-Rocketbox";
-            profile.AssetVersion = "Female_Adult_01（FBX，Humanoid 导入）";
-            profile.Notes = "站位 T-Pose 绑定，需坐姿适配：SittingPoseApplier 的默认角度来自人体测量估算，" +
-                            "尚未在 Unity 内标定，需人工核对髋/膝/踝与肩/肘角度。手部骨骼为 Biped 命名，" +
-                            "指尖位置由绑定姿态推导，不满足内置角色的 +Z/+Y/+X 局部基约定。";
+            profile.AssetVersion = assetVersion;
+            profile.Notes = "站位 T-Pose 绑定，需坐姿适配；手部骨骼为 Biped 命名，指尖位置由绑定姿态推导，" +
+                            "贴图由 Tools/fetch_rocketbox_avatar.py 下载（TGA 原件降采样到 2048 PNG）。";
             return profile;
         }
 
@@ -200,10 +295,6 @@ namespace PianoTeacher3D.Characters
                 _byId[profile.CharacterId] = profile;
             }
 
-            var rocketbox = CreateRocketbox();
-            _selfCreated.Add(rocketbox);
-            _all.Add(rocketbox);
-            _byId[rocketbox.CharacterId] = rocketbox;
         }
 
         private void LoadResourceProfiles()
@@ -243,12 +334,17 @@ namespace PianoTeacher3D.Characters
             {
                 var profile = _selfCreated[i];
                 if (profile == null) continue;
-                if (Application.isPlaying) UnityEngine.Object.Destroy(profile);
-                else UnityEngine.Object.DestroyImmediate(profile);
+                DestroyProfile(profile);
             }
             _selfCreated.Clear();
             _all.Clear();
             _byId.Clear();
+        }
+
+        private static void DestroyProfile(CharacterProfile profile)
+        {
+            if (Application.isPlaying) UnityEngine.Object.Destroy(profile);
+            else UnityEngine.Object.DestroyImmediate(profile);
         }
     }
 }

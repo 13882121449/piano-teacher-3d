@@ -111,8 +111,13 @@ namespace PianoTeacher3D.Characters
 
             if (IsBusy) Abort(CharacterSwitchState.Cancelled, "被新的切换请求取消。");
 
-            // 同一角色重复请求：不创建第二个实例（连续点击同一张卡片是常见误操作）
-            if (CurrentView != null && string.Equals(CurrentView.CharacterId, profile.CharacterId, StringComparison.Ordinal))
+            // 同一角色重复请求：不创建第二个实例（连续点击同一张卡片是常见误操作）。
+            // 但「同一个 id」不等于「同一类视图」：内置程序化包装会用 BuiltInIds[_index] 冒充
+            // Rocketbox 的 id（见 ProceduralCharacterView.CharacterId），若不区分视图种类，
+            // 请求真人角色会被当成重复请求短路掉，画面永远停在方块人上。
+            bool sameId = CurrentView != null &&
+                          string.Equals(CurrentView.CharacterId, profile.CharacterId, StringComparison.Ordinal);
+            if (sameId && SameViewKind(CurrentView, profile))
             {
                 CommitNoOp(profile.CharacterId);
                 return true;
@@ -388,5 +393,14 @@ namespace PianoTeacher3D.Characters
             State = state;
             OnStateChanged?.Invoke(state);
         }
+        /// <summary>目标资料要的是「程序化内置视图」还是「外部/预制体视图」。</summary>
+        private static bool SameViewKind(ICharacterView view, CharacterProfile profile)
+        {
+            bool targetIsBuiltIn = profile.Source == CharacterSource.ProceduralBuiltIn;
+            var rigSource = view as ICharacterRigSource;
+            if (rigSource == null) return !targetIsBuiltIn;
+            return rigSource.IsBuiltInBacked == targetIsBuiltIn;
+        }
+
     }
 }

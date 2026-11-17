@@ -440,7 +440,7 @@ namespace PianoTeacher3D.UI
             _avatarInitial = UIKit.Label(initialBg, "写", UITheme.FontStatusLabel, UITheme.TextPrimary,
                 TextAnchor.MiddleCenter, FontStyle.Bold, "Initial");
 
-            _avatarName = UIKit.Label(avatarChip.transform, "—", UITheme.FontBodySmall, UITheme.TextSecondary,
+            _avatarName = UIKit.Label(avatarChip.transform, "—", UITheme.FontBodySmall, UITheme.TextPrimary,
                 TextAnchor.MiddleLeft, FontStyle.Normal, "AvatarName");
             UITheme.StretchAll(_avatarName.rectTransform, BarInnerGap + 16f + BarInnerGap, BarInnerGap, 0f, 0f);
 

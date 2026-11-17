@@ -13,7 +13,7 @@ namespace PianoTeacher3D.Core
         /// <summary>展示模式：完整手部动画 + 用户自选的高亮提示。</summary>
         Showcase = 0,
 
-        /// <summary>教学模式：隐藏手部，高亮固定为「仅被按下的琴键」（左右手分色）。</summary>
+        /// <summary>教学模式：隐藏手部，默认高亮被按下的琴键，可在更多工具中切换。</summary>
         Teaching = 1
     }
 
@@ -27,7 +27,7 @@ namespace PianoTeacher3D.Core
         /// <summary>完整说明（悬停提示 / 帮助用）。</summary>
         public static string Describe(this DisplayMode mode)
             => mode == DisplayMode.Teaching
-                ? "教学模式：隐藏手部动画，仅高亮被按下的琴键（左手冷蓝 · 右手暖橙）"
+                ? "教学模式：隐藏手部动画，可自由设置琴键高亮"
                 : "展示模式：完整手部动画与演奏动作（高亮提示按你的设置）";
 
         /// <summary>该模式下手部（含手臂）是否可见。</summary>

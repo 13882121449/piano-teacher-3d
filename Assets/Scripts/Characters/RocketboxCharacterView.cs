@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using PianoTeacher3D.Avatar;
 using UnityEngine;
@@ -37,12 +37,14 @@ namespace PianoTeacher3D.Characters
         private readonly RocketboxHandRig _leftHand;
         private readonly RocketboxHandRig _rightHand;
         private readonly string _handError;
+        private Transform _stool;
 
         /// <summary>由绑定姿态推导的手指关节轴策略（左右手合一；推导失败时退回默认策略）。</summary>
         private IFingerJointAxes _jointAxes = DefaultFingerJointAxes.Instance;
 
         private readonly List<Renderer> _renderers = new List<Renderer>();
         private readonly List<Material> _ownMaterials = new List<Material>();
+        private readonly ConcertGownAppearance _concertGown;
         private readonly Dictionary<Material, Color> _originalColors = new Dictionary<Material, Color>();
 
         private Texture2D _thumbnail;
@@ -63,6 +65,8 @@ namespace PianoTeacher3D.Characters
             _handError = handError;
             _definition = definition;
             _pose = new SittingPoseApplier(poseSettings);
+            if (profile.CharacterId == CharacterRegistry.RocketboxFemaleId && profile.PhotoAvatar == null)
+                _concertGown = new ConcertGownAppearance(root.transform, skeleton, scope);
         }
 
         /// <summary>
@@ -124,6 +128,12 @@ namespace PianoTeacher3D.Characters
             var left = RocketboxHandRig.Create(true, bones, out string leftError);
             var right = RocketboxHandRig.Create(false, bones, out string rightError);
             string handError = leftError ?? rightError;
+            if (handError == null && left != null && right != null)
+            {
+                var skinned = root.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                left.CalibrateThumbPad(skinned);
+                right.CalibrateThumbPad(skinned);
+            }
 
             var skeleton = BuildSkeleton(root.transform, animator, bones, left, right);
             var definition = BuildDefinition(profile);
@@ -139,7 +149,19 @@ namespace PianoTeacher3D.Characters
             var view = new RocketboxCharacterView(profile, scope, root, animator, skeleton,
                 left, right, handError, poseSettings, definition);
             view.CollectRenderers();
+            // 材质必须在 ValidateRig 之前准备好：资产门禁检查的是「材质有没有主贴图」，
+            // 而贴图是运行时从 Resources 绑上去的（FBX 内的引用永远解析不到）。
+            // 不前置的话门禁看到的是导入器生成的空材质，必然拒绝这个角色。
+            view.EnsureMaterials();
             view.BuildJointAxes();
+            view._concertGown?.ApplyToBindPose(bones);
+
+            if (profile.PhotoAvatar != null &&
+                !Customization.PhotoAvatarAppearance.Apply(root, skeleton?.Head, profile.PhotoAvatar, scope, out error))
+            {
+                view.DisposeCharacterResources();
+                return null;
+            }
 
             if (left == null || right == null)
             {
@@ -150,6 +172,95 @@ namespace PianoTeacher3D.Characters
             }
 
             return view;
+        }
+
+        private const float StoolFrameHeight = 0.05f;
+        private const float StoolCushionHeight = 0.026f;
+
+        private void BuildStool()
+        {
+            _stool = new GameObject("StoolRoot").transform;
+            // 保留世界尺寸，角色缩放不改变琴凳尺寸。
+            _stool.SetParent(_root.transform, true);
+            const float seatWidth = 0.40f;
+            const float seatDepth = 0.30f;
+            var frame = CreateStoolMaterial("StoolFrame", new Color(0.56f, 0.68f, 0.72f), 0.34f);
+            var cushion = CreateStoolMaterial("StoolCushion", new Color(0.76f, 0.80f, 0.81f), 0.09f);
+            CreateStoolPart(PrimitiveType.Cube, _stool, "Stool",
+                Vector3.down * (StoolCushionHeight + StoolFrameHeight * 0.5f),
+                new Vector3(seatWidth, StoolFrameHeight, seatDepth), frame);
+            CreateStoolPart(PrimitiveType.Cube, _stool, "StoolCushion",
+                Vector3.down * (StoolCushionHeight * 0.5f),
+                new Vector3(seatWidth * 0.96f, StoolCushionHeight, seatDepth * 0.96f), cushion);
+
+            for (int sx = -1; sx <= 1; sx += 2)
+            {
+                for (int sz = -1; sz <= 1; sz += 2)
+                {
+                    CreateStoolPart(PrimitiveType.Cylinder, _stool, $"StoolLeg_{sx}_{sz}",
+                        new Vector3(sx * seatWidth * 0.40f, 0f, sz * seatDepth * 0.38f),
+                        new Vector3(0.028f, 1f, 0.028f), frame);
+                }
+            }
+        }
+
+        private void FitStoolToPose()
+        {
+            if (_stool == null) BuildStool();
+            var hip = _pose.LastHipPosition;
+            float seatTop = hip.y - _pose.Settings.HipAboveSeat;
+            _stool.SetPositionAndRotation(new Vector3(hip.x, seatTop, hip.z), Quaternion.identity);
+
+            // 座垫顶面是坐姿基准，凳腿从凳框底面延伸到舞台地面。
+            float frameBottom = StoolCushionHeight + StoolFrameHeight;
+            float legHeight = Mathf.Max(0.001f, seatTop - frameBottom);
+            for (int i = 2; i < _stool.childCount; i++)
+            {
+                var leg = _stool.GetChild(i);
+                var position = leg.localPosition;
+                position.y = -(frameBottom + legHeight * 0.5f);
+                leg.localPosition = position;
+                var scale = leg.localScale;
+                scale.y = legHeight * 0.5f;
+                leg.localScale = scale;
+            }
+        }
+
+        private void CreateStoolPart(PrimitiveType type, Transform parent, string name,
+            Vector3 localPos, Vector3 localScale, Material mat)
+        {
+            var go = GameObject.CreatePrimitive(type);
+            go.name = name;
+            var t = go.transform;
+            t.SetParent(parent, false);
+            t.localPosition = localPos;
+            t.localScale = localScale;
+
+            // 非 MonoBehaviour 类没有实例 Destroy，必须显式走 UnityEngine.Object
+            var collider = go.GetComponent<Collider>();
+            if (collider != null) UnityEngine.Object.Destroy(collider);
+
+            if (mat != null)
+            {
+                _scope.Own(mat);
+                go.GetComponent<Renderer>().sharedMaterial = mat;
+            }
+        }
+
+        private static Material CreateStoolMaterial(string name, Color color, float smoothness)
+        {
+            var shader = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
+                ? Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard")
+                : Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) return null;
+
+            var m = new Material(shader) { name = name };
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", color);
+            if (m.HasProperty("_Color")) m.SetColor("_Color", color);
+            if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", smoothness);
+            if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", smoothness);
+            if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
+            return m;
         }
 
         public string CharacterId => _profile.CharacterId;
@@ -221,6 +332,7 @@ namespace PianoTeacher3D.Characters
         /// </summary>
         public bool Supports(AppearanceSlot slot)
         {
+            if (_profile.PhotoAvatar != null) return false;
             if (slot == AppearanceSlot.Thumbnail) return true;
             if (slot != AppearanceSlot.BodyTint) return false;
             return _profile != null && _profile.SupportsSlot(slot);
@@ -242,7 +354,11 @@ namespace PianoTeacher3D.Characters
         {
             if (_root == null) return;
             if (!_root.activeSelf) _root.SetActive(true);
-            _pose.Apply(_animator);
+            if (_pose.Apply(_animator))
+            {
+                FitStoolToPose();
+                _concertGown?.BuildSeatedSkirt();
+            }
             _activated = true;
         }
 
@@ -257,6 +373,7 @@ namespace PianoTeacher3D.Characters
             // 还原绑定姿态：坐姿应用器改了骨骼旋转与根节点位置，
             // 不还原的话实例会一直停在「摆好的坐姿」上，重新激活或外部检查时状态不可预期。
             _pose.Restore(_animator);
+            _concertGown?.RestoreStandingSkirt();
 
             if (_root.activeSelf) _root.SetActive(false);
             _activated = false;
@@ -457,43 +574,71 @@ namespace PianoTeacher3D.Characters
             if (def == null) return null;
             def.Id = profile.CharacterId;
             def.DisplayName = profile.DisplayName;
-            def.HandHeightOffset = 0f;
+            // 标定：真人骨架的腕部目标比程序化角色低约 30 mm，腕背伸 30° 才能让掌指关节
+            // 落在键面正上方（见 RocketboxRestPoseTests）。三个角色骨架尺寸不同，
+            // 用同一个常量会让成人的指尖悬空、儿童的指尖扎进键面，因此按 id 分别标定。
+            def.HandHeightOffset = HandHeightOffsetFor(profile);
             def.HandDepthOffset = 0f;
+            if (profile.CharacterId == CharacterRegistry.RocketboxMaleId || profile.PhotoAvatar?.ShortHair == true)
+                def.Hand.PlayingWristHeightOffset = -0.022f;
+            def.Hand.WristPitch = 8f;
             def.Cartoon = false;
+            // 导入骨架的腕骨绑定姿态带旋转：腕部朝向必须按「静止姿态 × 增量」合成，
+            // 否则绝对覆写会让整只手滚转（实测指尖悬空 20–77 mm）。
+            def.Hand.WristOrientationFromRest = true;
             return def;
         }
 
         // ==================== 整体色调（材质实例化 + 登记） ====================
 
+        /// <summary>
+        /// 材质实例化 + 管线重映射 + 贴图绑定（幂等，可重复调用）。
+        /// <para>
+        /// 必须在 <see cref="ValidateRig"/> 之前调用：资产门禁检查的是「材质有没有主贴图」，
+        /// 而贴图由 <see cref="RocketboxTextureLibrary"/> 在运行时从 Resources 绑上去
+        /// （FBX 内的引用指向建模机临时目录，导入器永远解析不到）。
+        /// </para>
+        /// </summary>
+        /// <returns>是否已具备可用材质。</returns>
+        public bool EnsureMaterials()
+        {
+            if (_ownMaterials.Count > 0) return true;
+            if (_renderers.Count == 0) return false;
+
+            for (int i = 0; i < _renderers.Count; i++)
+            {
+                var renderer = _renderers[i];
+                if (renderer == null) continue;
+
+                var shared = renderer.sharedMaterials;
+                if (shared == null || shared.Length == 0) continue;
+
+                var instances = new Material[shared.Length];
+                for (int m = 0; m < shared.Length; m++)
+                {
+                    var src = shared[m];
+                    if (src == null) continue;
+                    // 必须实例化：直接改 sharedMaterial 会污染工程里的共享资产
+                    var inst = new Material(src) { name = src.name + " (Character)" };
+                    RemapShaderToActivePipeline(inst);   // URP 下内置 shader 渲染为洋红，须先迁移
+                    // FBX 内的贴图路径指向建模机的临时目录，导入器永远解析不到 → 必须运行时绑定，
+                    // 否则整套材质没有主贴图，角色是白模（资产门禁会据此拒绝该角色）
+                    RocketboxTextureLibrary.Bind(inst, src.name,
+                        PianoTeacher3D.Characters.CharacterRegistry.TexturePrefixFor(_profile.ResourcesPath));
+                    _scope.Own(inst);
+                    _ownMaterials.Add(inst);
+                    instances[m] = inst;
+                    if (inst.HasProperty("_Color")) _originalColors[inst] = inst.color;
+                }
+                renderer.sharedMaterials = instances;
+            }
+
+            return _ownMaterials.Count > 0;
+        }
+
         private void ApplyTint(Color tint)
         {
-            if (_renderers.Count == 0) return;
-
-            if (_ownMaterials.Count == 0)
-            {
-                for (int i = 0; i < _renderers.Count; i++)
-                {
-                    var renderer = _renderers[i];
-                    if (renderer == null) continue;
-
-                    var shared = renderer.sharedMaterials;
-                    if (shared == null || shared.Length == 0) continue;
-
-                    var instances = new Material[shared.Length];
-                    for (int m = 0; m < shared.Length; m++)
-                    {
-                        var src = shared[m];
-                        if (src == null) continue;
-                        // 必须实例化：直接改 sharedMaterial 会污染工程里的共享资产
-                        var inst = new Material(src) { name = src.name + " (Character)" };
-                        _scope.Own(inst);
-                        _ownMaterials.Add(inst);
-                        instances[m] = inst;
-                        if (inst.HasProperty("_Color")) _originalColors[inst] = inst.color;
-                    }
-                    renderer.sharedMaterials = instances;
-                }
-            }
+            if (!EnsureMaterials()) return;
 
             const float strength = 0.35f;
             for (int i = 0; i < _ownMaterials.Count; i++)
@@ -505,6 +650,62 @@ namespace PianoTeacher3D.Characters
                 mat.color = target;
             }
             _tinted = true;
+        }
+
+        /// <summary>
+        /// URP 激活时把内置管线 shader 的实例材质重映射为 URP/Lit（写实化批次 2）。
+        /// <para>
+        /// Rocketbox 的共享材质由模型导入器生成，指向内置 Standard——SRP 下能被引用但<b>渲染为洋红</b>。
+        /// 属性映射：_Color→_BaseColor、_MainTex→_BaseMap、_Glossiness→_Smoothness（法线 _BumpMap 两侧同名，
+        /// new Material 复制时已自动带上）。透明/裁切按 Standard 的 RenderType tag 映射 URP 的
+        /// Surface / AlphaClip（发片用 alpha test）。找不到 URP/Lit 时保持原样不炸——由资产校验门禁兜底报错。
+        /// </para>
+        /// </summary>
+        private static void RemapShaderToActivePipeline(Material inst)
+        {
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null) return; // 内置管线：无需重映射
+
+            var shader = inst.shader;
+            if (shader == null) return;
+            string shaderName = shader.name;
+            bool isBuiltInLit = shaderName == "Standard" || shaderName == "Standard (Specular setup)";
+            if (!isBuiltInLit) return;
+
+            var urpLit = Shader.Find("Universal Render Pipeline/Lit");
+            if (urpLit == null) return;
+
+            var color = inst.HasProperty("_Color") ? inst.color : Color.white;
+            var mainTex = inst.HasProperty("_MainTex") ? inst.GetTexture("_MainTex") : null;
+            var bump = inst.HasProperty("_BumpMap") ? inst.GetTexture("_BumpMap") : null;
+            float gloss = inst.HasProperty("_Glossiness") ? inst.GetFloat("_Glossiness") : -1f;
+            float metallic = inst.HasProperty("_Metallic") ? inst.GetFloat("_Metallic") : -1f;
+            float cutoff = inst.HasProperty("_Cutoff") ? inst.GetFloat("_Cutoff") : 0.5f;
+            // Shader 类没有 renderQueue 属性；材质实例的队列由原 shader 的 RenderType tag 推导（Geometry 2000 / AlphaTest 2450 / Transparent 3000）
+            string renderType = inst.renderQueue >= (int)UnityEngine.Rendering.RenderQueue.Transparent
+                ? "Transparent"
+                : (inst.renderQueue >= (int)UnityEngine.Rendering.RenderQueue.AlphaTest ? "TransparentCutout" : "Opaque");
+
+            inst.shader = urpLit;
+            if (inst.HasProperty("_BaseColor")) inst.SetColor("_BaseColor", color);
+            if (mainTex != null && inst.HasProperty("_BaseMap")) inst.SetTexture("_BaseMap", mainTex);
+            if (bump != null && inst.HasProperty("_BumpMap")) inst.SetTexture("_BumpMap", bump);
+            if (gloss >= 0f && inst.HasProperty("_Smoothness")) inst.SetFloat("_Smoothness", gloss);
+            if (metallic >= 0f && inst.HasProperty("_Metallic")) inst.SetFloat("_Metallic", metallic);
+
+            if (renderType == "Transparent")
+            {
+                if (inst.HasProperty("_Surface")) inst.SetFloat("_Surface", 1f);   // 1 = Transparent
+                if (inst.HasProperty("_Cutoff")) inst.SetFloat("_Cutoff", cutoff);
+                inst.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                inst.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            }
+            else if (renderType == "TransparentCutout")
+            {
+                if (inst.HasProperty("_AlphaClip")) inst.SetFloat("_AlphaClip", 1f);
+                if (inst.HasProperty("_Cutoff")) inst.SetFloat("_Cutoff", cutoff);
+                inst.EnableKeyword("_ALPHATEST_ON");
+                inst.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
+            }
         }
 
         /// <summary>是否存在可染色的材质（渲染器缺失时不该谎报成功）。</summary>
@@ -572,5 +773,25 @@ namespace PianoTeacher3D.Characters
                 return false;
             }
         }
+        /// <summary>
+        /// 每个导入角色各自的腕高标定值（米）。
+        /// <para>
+        /// 判据不是「五个指尖都在键面上」——真人静止手型的拇指本来就比其余四指低 20 mm 上下
+        /// （拇指搭在键沿前方）。这里按<b>食指</b>指尖落点标定：目标 +2 mm 左右，
+        /// 中/无名指允许 −5~+5 mm，小指略高，拇指允许低到 −25 mm。
+        /// </para>
+        /// </summary>
+        private static float HandHeightOffsetFor(CharacterProfile profile)
+        {
+            if (profile == null) return 0.016f;
+            if (profile.PhotoAvatar?.ShortHair == true) return 0.016f;
+            switch (profile.CharacterId)
+            {
+                case CharacterRegistry.RocketboxMaleId: return 0.016f;
+                case CharacterRegistry.RocketboxChildId: return -0.029f;
+                default: return -0.022f;   // 女性成人（默认）
+            }
+        }
+
     }
 }

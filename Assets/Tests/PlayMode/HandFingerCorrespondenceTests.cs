@@ -64,6 +64,271 @@ namespace PianoTeacher3D.Tests.PlayMode
             yield return null;
         }
 
+        private sealed class SingleThumbFingering : IFingeringProvider
+        {
+            public string Name => "拇指回归测试指法";
+            public FingeringPlan Assign(in FingeringContext context) => new FingeringPlan
+            {
+                FingerByPitch = new[] { 0 },
+                Confidence = 1f
+            };
+        }
+
+        [UnityTest]
+        public IEnumerator RightThumb_ReleasesToLightlyCurledPose()
+        {
+            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            yield return null;
+            var rig = (IFingerJointRig)_avatar.RightHand;
+            Assert.IsTrue(rig.TryGetJoints(0, out _, out var middle, out var tip));
+            _fingerPose.Provider = new SingleThumbFingering();
+            var note = new MidiNoteEvent(60, 0f, 1f, 85, 0, 0) { Hand = NoteHand.Right };
+            _handIK.OnNoteOn(note);
+            _fingerPose.OnNoteOn(note);
+            yield return new WaitForSeconds(0.4f);
+            Assert.AreEqual(60, _fingerPose.GetFingerPitch(false, 0));
+            _handIK.OnNoteOff(note);
+            _fingerPose.OnNoteOff(note);
+            yield return new WaitForSeconds(0.65f);
+
+            // 与绑定旋转比较，只测拇指屈曲，排除腕部移动和转动。
+            var axes = ((Characters.ICharacterJointAxesProvider)_session.CurrentCharacterView).JointAxes;
+            float curl = Quaternion.Angle(axes.CurlLocalRotation(middle, 1, 0f), middle.localRotation)
+                + Quaternion.Angle(axes.CurlLocalRotation(tip, 2, 0f), tip.localRotation);
+            Assert.That(curl, Is.InRange(17f, 28f), "松键后的中节与末节合计应保持轻弯");
+        }
+
+        [UnityTest]
+        public IEnumerator ImportedThumb_ReachesWhiteAndBlackKeysOnBothHands()
+        {
+            var failures = new List<string>();
+            var keys = _session.GetComponent<PianoKeyAnimator>();
+            foreach (string id in new[] { Characters.CharacterRegistry.RocketboxFemaleId,
+                         Characters.CharacterRegistry.RocketboxMaleId, Characters.CharacterRegistry.RocketboxChildId })
+            {
+                _session.RestoreCharacter(id);
+                yield return null;
+                Assert.AreEqual(id, _session.CurrentCharacterView.CharacterId);
+                _fingerPose.Provider = new SingleThumbFingering();
+                Assert.IsTrue((_avatar.LeftHand as IThumbContactRig)?.HasThumbPad == true, id);
+                Assert.IsTrue((_avatar.RightHand as IThumbContactRig)?.HasThumbPad == true, id);
+
+                foreach (int pitch in new[] { 51, 52, 60, 61 })
+                {
+                    bool left = pitch < 60;
+                    var note = new MidiNoteEvent(pitch, 0f, 1f, 85, 0, 0)
+                    {
+                        Hand = left ? NoteHand.Left : NoteHand.Right
+                    };
+                    keys.OnNoteOn(note);
+                    _highlighter.OnNoteOn(note);
+                    _handIK.OnNoteOn(note);
+                    _fingerPose.OnNoteOn(note);
+                    yield return new WaitForSeconds(0.40f);
+                    Assert.AreEqual(pitch, _fingerPose.GetFingerPitch(left, 0));
+                    Assert.IsTrue(_handIK.TryGetFingertipTarget(left, 0, out var target));
+                    var rig = (IFingerJointRig)(left ? _avatar.LeftHand : _avatar.RightHand);
+                    rig.TryGetJoints(0, out var proximal, out var intermediate, out var distal);
+                    var pad = rig.GetFingertip(0).position;
+                    var skin = MeasureThumbSkin(pitch, proximal, intermediate, distal);
+                    Assert.IsTrue(_keyMap.TryGetKey(pitch, out var key));
+                    var top = key.Find("Mesh").GetComponent<MeshFilter>();
+                    float surfaceHeight = top.sharedMesh.bounds.max.y;
+                    float height = top.transform.InverseTransformPoint(pad).y - surfaceHeight;
+                    float horizontal = new Vector2(pad.x - target.x, pad.z - target.z).magnitude;
+                    string result = $"{id} {(left ? "左" : "右")} {pitch}：水平 {horizontal * 1000:0.0} mm，" +
+                        $"高度 {height * 1000:0.0} mm，" +
+                        $"末节 {(top.transform.InverseTransformPoint(distal.position).y - surfaceHeight) * 1000:0.0} mm，" +
+                        $"中节 {(top.transform.InverseTransformPoint(intermediate.position).y - surfaceHeight) * 1000:0.0} mm，" +
+                        $"蒙皮触键 {skin.target * 1000:0.0} mm，邻键余量 {skin.nearby * 1000:0.0} mm";
+                    Debug.Log("[THUMB] " + result);
+                    if (height < -0.001f || height > 0.006f || horizontal > 0.009f ||
+                        skin.target < -0.003f || skin.target > 0.004f || skin.nearby < -0.004f ||
+                        Mathf.Min(top.transform.InverseTransformPoint(intermediate.position).y,
+                            top.transform.InverseTransformPoint(distal.position).y) < surfaceHeight + 0.001f)
+                        failures.Add(result);
+                    keys.OnNoteOff(note);
+                    _highlighter.OnNoteOff(note);
+                    _handIK.OnNoteOff(note);
+                    _fingerPose.OnNoteOff(note);
+                    yield return new WaitForSeconds(0.12f);
+                }
+            }
+            Assert.IsEmpty(failures, string.Join("\n", failures));
+        }
+
+        private (float target, float nearby) MeasureThumbSkin(int pitch, Transform proximal,
+            Transform intermediate, Transform distal)
+        {
+            var tops = new MeshFilter[5];
+            for (int i = 0; i < tops.Length; i++)
+                if (_keyMap.TryGetKey(pitch + i - 2, out var key))
+                    tops[i] = key.Find("Mesh")?.GetComponent<MeshFilter>();
+
+            float target = float.PositiveInfinity;
+            float nearby = float.PositiveInfinity;
+            var baked = new Mesh();
+            try
+            {
+                foreach (var skinned in _session.CurrentCharacterView.RootTransform.GetComponentsInChildren<SkinnedMeshRenderer>())
+                {
+                    var mesh = skinned.sharedMesh;
+                    if (mesh == null || !mesh.isReadable) continue;
+                    var bones = skinned.bones;
+                    int root = System.Array.IndexOf(bones, proximal);
+                    int middle = System.Array.IndexOf(bones, intermediate);
+                    int end = System.Array.IndexOf(bones, distal);
+                    if (end < 0) continue;
+                    var weights = mesh.boneWeights;
+                    skinned.BakeMesh(baked);
+                    var vertices = baked.vertices;
+
+                    bool IsThumb(int index) => index == root || index == middle || index == end;
+                    for (int vertex = 0; vertex < weights.Length; vertex++)
+                    {
+                        var w = weights[vertex];
+                        float influence = (IsThumb(w.boneIndex0) ? w.weight0 : 0f) +
+                            (IsThumb(w.boneIndex1) ? w.weight1 : 0f) +
+                            (IsThumb(w.boneIndex2) ? w.weight2 : 0f) +
+                            (IsThumb(w.boneIndex3) ? w.weight3 : 0f);
+                        if (influence < 0.50f) continue;
+                        var point = skinned.transform.TransformPoint(vertices[vertex]);
+                        for (int i = 0; i < tops.Length; i++)
+                        {
+                            var top = tops[i];
+                            if (top == null) continue;
+                            var local = top.transform.InverseTransformPoint(point);
+                            var bounds = top.sharedMesh.bounds;
+                            const float Edge = 0.0013f;
+                            if (local.x < bounds.min.x + Edge || local.x > bounds.max.x - Edge ||
+                                local.z < bounds.min.z + Edge || local.z > bounds.max.z - Edge) continue;
+                            float height = local.y - bounds.max.y;
+                            if (i == 2) target = Mathf.Min(target, height);
+                            else nearby = Mathf.Min(nearby, height);
+                        }
+                    }
+                }
+            }
+            finally { Object.Destroy(baked); }
+            return (target, nearby);
+        }
+
+        [UnityTest]
+        public IEnumerator ImportedFinger_DoesNotTwistTowardAKeyBehindTheKnuckle()
+        {
+            const int pitch = 64;
+            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            yield return null;
+            var right = (IFingerJointRig)_avatar.RightHand;
+            var note = new MidiNoteEvent(pitch, 0f, 2f, 80, 0, 0) { Hand = NoteHand.Right };
+            _fingerPose.OnNoteOn(note);
+            yield return null;
+            int index = _fingerPose.GetFingerIndexForPitch(false, pitch);
+            Assert.That(index, Is.InRange(0, 4));
+            _fingerPose.UseAnatomicalContact = true;
+            _fingerPose.TargetSource = new BehindKnuckleTarget(right, index);
+            yield return new WaitForSeconds(0.35f);
+            Assert.IsTrue(right.TryGetJoints(index, out var proximal, out var intermediate, out _));
+            var axes = _fingerPose.JointAxes;
+            var current = proximal.localRotation;
+            float nearestHingeAngle = 180f;
+            for (int curl = 0; curl <= 82; curl++)
+                nearestHingeAngle = Mathf.Min(nearestHingeAngle,
+                    Quaternion.Angle(current, axes.CurlLocalRotation(proximal, 0, curl)));
+            Assert.LessOrEqual(nearestHingeAngle, index == 0 ? 25.5f : 15.5f,
+                "够不到的琴键不应把掌指关节拉出合理的侧摆范围");
+            Assert.Greater(Vector3.SqrMagnitude(intermediate.position - proximal.position), 0f);
+        }
+
+        private sealed class BehindKnuckleTarget : IFingertipTargetSource
+        {
+            private readonly IFingerJointRig _hand;
+            private readonly int _finger;
+            public BehindKnuckleTarget(IFingerJointRig hand, int finger)
+            {
+                _hand = hand;
+                _finger = finger;
+            }
+
+            public bool TryGetFingertipTarget(bool leftHand, int fingerIndex, out Vector3 point)
+            {
+                point = default;
+                return !leftHand && fingerIndex == _finger && TryGetKeyPressPoint(64, out point);
+            }
+
+            public bool TryGetKeyPressPoint(int pitch, out Vector3 point)
+            {
+                _hand.TryGetJoints(_finger, out var root, out _, out _);
+                var tip = _hand.GetFingertip(_finger);
+                point = root.position + Quaternion.AngleAxis(65f, Vector3.up) * (tip.position - root.position);
+                return true;
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator UpcomingNote_PreparesAFingerBeforeTheKeyMoves()
+        {
+            const int pitch = 64;
+            Assert.IsTrue(_handIK.TryGetKeyPressPoint(pitch, out var surface));
+            _handIK.SetUpcomingPitches(-1, pitch);
+            // 两个组件挂在同一对象。只运行动作组件，保留测试注入的预备音。
+            const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic;
+            typeof(HandIKController).GetMethod("Update", flags).Invoke(_handIK, null);
+            typeof(FingerPoseController).GetMethod("Update", flags).Invoke(_fingerPose, null);
+
+            int readyFinger = -1;
+            for (int finger = 0; finger < 5; finger++)
+            {
+                if (_fingerPose.GetPhase(false, finger) != FingerPhase.Approach) continue;
+                Assert.AreEqual(-1, readyFinger, "预备时只有负责下一音的手指取落点");
+                readyFinger = finger;
+            }
+
+            Assert.GreaterOrEqual(readyFinger, 0, "手指应在音符起音前开始预备");
+            Assert.IsTrue(_handIK.TryGetFingertipTarget(false, readyFinger, out var approach));
+            Assert.AreEqual(surface.x, approach.x, 0.001f);
+            Assert.Greater(approach.y, surface.y + 0.004f, "预备手指应悬在正确按键上方");
+            Assert.AreEqual(-1, _fingerPose.GetFingerIndexForPitch(false, pitch), "预备阶段不应提交按键状态");
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator OverlappingMiddleC_ChangesHandsOnlyWhenTheOtherNoteEnds()
+        {
+            _highlighter.Mode = HighlightMode.Active;
+            var left = new MidiNoteEvent(60, 0f, 2f, 80, 0, 0) { Hand = NoteHand.Left };
+            var right = new MidiNoteEvent(60, 0.5f, 0.5f, 80, 1, 0) { Hand = NoteHand.Right };
+            var animator = Object.FindFirstObjectByType<PianoKeyAnimator>();
+
+            _handIK.OnNoteOn(left);
+            _fingerPose.OnNoteOn(left);
+            animator.OnNoteOn(left);
+            yield return null;
+            Assert.IsTrue(_handIK.IsActivePitchLeft(60));
+            Assert.GreaterOrEqual(_fingerPose.GetFingerIndexForPitch(true, 60), 0);
+
+            _handIK.OnNoteOn(right);
+            _fingerPose.OnNoteOn(right);
+            _highlighter.OnNoteOn(left);
+            AssertColorsApproximately(PianoKeyHighlighter.LeftHandColor, KeyColor(60), "跨 C4 仍为左手色");
+            _highlighter.OnNoteOn(right);
+            animator.OnNoteOn(right);
+            AssertColorsApproximately(PianoKeyHighlighter.RightHandColor, KeyColor(60), "同时同音沿用键的音域优先级");
+            _highlighter.OnNoteOff(right);
+            AssertColorsApproximately(PianoKeyHighlighter.LeftHandColor, KeyColor(60), "右手松开时恢复左手色");
+            yield return null;
+            Assert.IsFalse(_handIK.IsActivePitchLeft(60));
+
+            _handIK.OnNoteOff(right);
+            _fingerPose.OnNoteOff(right);
+            animator.OnNoteOff(right);
+            yield return null;
+            Assert.IsTrue(_handIK.IsActivePitchLeft(60));
+            Assert.AreEqual(1, animator.PressedKeyCount);
+            Assert.GreaterOrEqual(_fingerPose.GetFingerIndexForPitch(true, 60), 0);
+        }
+
         // ==================================================================
         // ① 左右手空间位置
         // ==================================================================
@@ -216,14 +481,14 @@ namespace PianoTeacher3D.Tests.PlayMode
             // （Stop 语义为完全复位），而真实运行时的着色时机也正是 Note On 当帧。
             var low = new MidiNoteEvent(45, 0f, 2f, 90, 0, 0);
             _highlighter.OnNoteOn(low);
-            Assert.AreEqual(PianoKeyHighlighter.LeftHandColor, KeyColor(45),
+            AssertColorsApproximately(PianoKeyHighlighter.LeftHandColor, KeyColor(45),
                 "低音键（左手侧）必须用左手色（冷蓝）高亮");
             Assert.Greater(KeyX(45), 0f, "低音键应位于世界 +X 侧（与左手同侧）");
             _highlighter.OnNoteOff(low);
 
             var high = new MidiNoteEvent(76, 0f, 2f, 90, 0, 0);
             _highlighter.OnNoteOn(high);
-            Assert.AreEqual(PianoKeyHighlighter.RightHandColor, KeyColor(76),
+            AssertColorsApproximately(PianoKeyHighlighter.RightHandColor, KeyColor(76),
                 "高音键（右手侧）必须用右手色（暖橙）高亮");
             Assert.Less(KeyX(76), 0f, "高音键应位于世界 -X 侧（与右手同侧）");
             _highlighter.OnNoteOff(high);
@@ -268,8 +533,16 @@ namespace PianoTeacher3D.Tests.PlayMode
                     $"找不到音高 {pitch} 的键面按压点");
                 Assert.IsTrue(_handIK.TryGetFingertipTarget(left, finger, out Vector3 target),
                     $"手指 {finger} 没有指尖目标（弯的手指与伸的手指不同步）");
-                Assert.AreEqual(pressPoint, target,
-                    $"手指 {finger} 的指尖目标不是音高 {pitch} 的键面按压点（手指与琴键错配）");
+                // 指尖目标 = 该音的键面按压点 + 指腹半径（仅垂直方向）。
+                // 横向/纵向必须完全一致：手指指向的琴键不能有任何错位；
+                // 垂直方向高出一个指腹半径是因为贴键的是指腹（有厚度的软垫），
+                // 骨骼末端继续压到键面上就会穿模。
+                Assert.AreEqual(pressPoint.x, target.x, 1e-5f,
+                    $"手指 {finger} 的指尖目标横向偏离音高 {pitch} 的键位");
+                Assert.AreEqual(pressPoint.z, target.z, 1e-5f,
+                    $"手指 {finger} 的指尖目标纵向偏离音高 {pitch} 的键位");
+                Assert.AreEqual(pressPoint.y + _handIK.FingertipPadRadius, target.y, 1e-4f,
+                    $"指尖目标应比键面高一个指腹半径（指腹贴键，不是骨骼末端穿键）");
 
                 // 该音不应被第二根手指同时认领
                 for (int other = 0; other < 5; other++)
@@ -404,6 +677,23 @@ namespace PianoTeacher3D.Tests.PlayMode
             var block = new MaterialPropertyBlock();
             renderer.GetPropertyBlock(block);
             return block.GetColor(Shader.PropertyToID("_Color"));
+        }
+
+        // Linear 色彩空间（写实化批次 2）下，颜色经 GPU/原生侧 sRGB↔线性往返会引入 ULP 级
+        // 浮点差：实测 Expected 与 But was 显示到 3 位小数完全相同仍断言失败（位级不同）。
+        // 断言意图是「用哪只手的颜色」而非位级相等，因此改用通道级容差（1e-3，远小于
+        // Color32 量化步长 1/255 ≈ 3.9e-3，不可能掩盖真实的颜色错配）。
+        private const float ColorTolerance = 1e-3f;
+
+        private static void AssertColorsApproximately(Color expected, Color actual, string message)
+        {
+            float maxDiff = Mathf.Max(
+                Mathf.Abs(expected.r - actual.r),
+                Mathf.Abs(expected.g - actual.g),
+                Mathf.Abs(expected.b - actual.b),
+                Mathf.Abs(expected.a - actual.a));
+            Assert.LessOrEqual(maxDiff, ColorTolerance, string.Format(
+                "{0}（期望 {1}，实际 {2}，最大通道差 {3:E2}）", message, expected, actual, maxDiff));
         }
     }
 }

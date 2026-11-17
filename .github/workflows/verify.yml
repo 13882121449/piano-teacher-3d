@@ -4,11 +4,14 @@ name: verify
 #
 # 两层门禁：
 #   static —— 任何装了 Python 的机器都能跑，不需要 Unity（纯文本规则 + 依赖扫描）；
+#             P1-8：它跑得起、秒级，应当设为分支保护的 required check。
 #   unity  —— 编译 + EditMode + PlayMode，需要一台装有 Unity 2022.3.22f1c1 并注册了
 #             [self-hosted, windows, unity] 标签的 Windows 机器。
 #
-# 说明：GitHub 托管的 runner 没有 Unity 授权，因此 unity job 用自托管标签；
-# 未注册 runner 时该 job 会一直排队，静态门禁仍然生效（本地用 Tools/verify.py 跑完整验证）。
+# 说明：GitHub 托管的 runner 没有 Unity 授权，因此 unity job 用自托管标签。
+# 未注册 runner 时它会永远 pending、把 PR 卡死在"等待检查"上，所以改成显式开关：
+# 只有仓库变量 UNITY_JOB_ENABLED=true 时才运行（Settings → Variables）。
+# 日常门禁以 static 作业为准，完整验证用本地 Tools/verify.py。
 
 on:
   push:
@@ -28,7 +31,10 @@ jobs:
         run: python Tools/static_checks.py
 
   unity:
-    name: 编译 + EditMode + PlayMode
+    name: 编译 + EditMode + PlayMode（自托管，按需启用）
+    # P1-8：自托管 runner 未注册时该 job 会无限排队。改成显式开关后，
+    # 没有 runner 的机器/分支不会被它阻塞；需要时把仓库变量 UNITY_JOB_ENABLED 设为 true。
+    if: ${{ vars.UNITY_JOB_ENABLED == 'true' }}
     runs-on: [ self-hosted, windows, unity ]
     steps:
       - uses: actions/checkout@v4

@@ -112,6 +112,253 @@ namespace PianoTeacher3D.Piano
         public static Mesh CreateRoundedPanel(float width, float height, float depth, float radius)
             => CreateChamferedBox(width, height, depth, radius, ChamferMode.AllEdges);
 
+        /// <summary>以键盘宽度为基准生成三角琴的非对称轮廓，从键后挡板延伸到圆弧琴尾。</summary>
+        internal static Vector2[] GrandOutline(float keyboardWidth)
+        {
+            var left = new[]
+            {
+                new Vector2(-0.057f, -0.107f), new Vector2(-0.061f, -0.138f),
+                new Vector2(-0.064f, -0.23f), new Vector2(-0.064f, -0.43f),
+                new Vector2(-0.064f, -0.68f), new Vector2(-0.063f, -0.92f),
+                new Vector2(-0.060f, -1.14f), new Vector2(-0.047f, -1.33f),
+                new Vector2(-0.008f, -1.49f), new Vector2(0.056f, -1.61f),
+                new Vector2(0.139f, -1.68f), new Vector2(0.227f, -1.713f)
+            };
+            var right = new[]
+            {
+                new Vector2(1.041f, -0.107f), new Vector2(1.050f, -0.138f),
+                new Vector2(1.050f, -0.23f), new Vector2(1.016f, -0.43f),
+                new Vector2(0.937f, -0.68f), new Vector2(0.831f, -0.92f),
+                new Vector2(0.705f, -1.14f), new Vector2(0.592f, -1.33f),
+                new Vector2(0.504f, -1.49f), new Vector2(0.445f, -1.61f),
+                new Vector2(0.380f, -1.68f), new Vector2(0.302f, -1.713f)
+            };
+
+            // 两条顺滑边线按相反方向连接，封合键侧与琴尾。线性距离保留米制琴深。
+            var points = new List<Vector2>(66);
+            AppendGrandSide(points, right, keyboardWidth, false);
+            AppendGrandSide(points, left, keyboardWidth, true);
+            return points.ToArray();
+        }
+
+        private static void AppendGrandSide(List<Vector2> points, Vector2[] side, float width, bool reverse)
+        {
+            const int subdivisions = 3;
+            int samples = (side.Length - 1) * subdivisions;
+            for (int i = 0; i <= samples; i++)
+            {
+                int step = reverse ? samples - i : i;
+                int segment = Mathf.Min(step / subdivisions, side.Length - 2);
+                float t = (step - segment * subdivisions) / (float)subdivisions;
+                Vector2 a = side[Mathf.Max(segment - 1, 0)];
+                Vector2 b = side[segment];
+                Vector2 c = side[segment + 1];
+                Vector2 d = side[Mathf.Min(segment + 2, side.Length - 1)];
+                Vector2 point = 0.5f * ((2f * b) + (c - a) * t
+                    + (2f * a - 5f * b + 4f * c - d) * t * t
+                    + (3f * b - a - 3f * c + d) * t * t * t);
+                points.Add(new Vector2(point.x * width, point.y));
+            }
+        }
+
+        /// <summary>生成开口琴壳。顶沿有实体厚度；内壁、外壁和顶沿使用各自法线。</summary>
+        internal static Mesh CreateGrandRim(Vector2[] outline, float height, float edgeX, Vector2 center)
+        {
+            int count = outline.Length;
+            var vertices = new Vector3[count * 6];
+            var triangles = new List<int>(count * 18);
+            for (int i = 0; i < count; i++)
+            {
+                Vector2 a = outline[i];
+                Vector2 b = outline[(i + count - 1) % count];
+                Vector2 c = outline[(i + 1) % count];
+                Vector2 tangent = (a - b).normalized + (c - a).normalized;
+                tangent.Normalize();
+                Vector2 normal = new Vector2(-tangent.y, tangent.x);
+                if (Vector2.Dot(normal, a - center) < 0f) normal = -normal;
+                Vector2 inside = a - normal * edgeX;
+
+                vertices[i] = new Vector3(a.x, 0f, a.y);
+                vertices[count + i] = new Vector3(a.x, height, a.y);
+                vertices[count * 2 + i] = new Vector3(inside.x, 0f, inside.y);
+                vertices[count * 3 + i] = new Vector3(inside.x, height, inside.y);
+                vertices[count * 4 + i] = vertices[count + i];
+                vertices[count * 5 + i] = vertices[count * 3 + i];
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                int j = (i + 1) % count;
+                Vector2 edge = outline[j] - outline[i];
+                Vector3 outward = new Vector3(-edge.y, 0f, edge.x);
+                Vector2 relative = (outline[i] + outline[j]) * 0.5f - center;
+                if (Vector3.Dot(outward, new Vector3(relative.x, 0f, relative.y)) < 0f) outward = -outward;
+                AddQuad(triangles, vertices, i, j, count + j, count + i, outward);
+                AddQuad(triangles, vertices, count * 2 + i, count * 2 + j,
+                    count * 3 + j, count * 3 + i, -outward);
+                AddQuad(triangles, vertices, count * 4 + i, count * 4 + j,
+                    count * 5 + j, count * 5 + i, Vector3.up);
+            }
+
+            var mesh = new Mesh { name = "GrandRim" };
+            Apply(mesh, vertices, triangles);
+            return mesh;
+        }
+
+        /// <summary>生成沿弧线封闭的薄板，可复用同一轮廓制作音板、琴底和开放琴盖。</summary>
+        internal static Mesh CreateGrandPlate(Vector2[] outline, Vector2 center, float thickness, float scale)
+        {
+            int count = outline.Length;
+            var vertices = new Vector3[count * 4 + 2];
+            var triangles = new List<int>(count * 12);
+            int bottomCenter = count * 4;
+            int topCenter = bottomCenter + 1;
+            vertices[bottomCenter] = new Vector3(center.x, 0f, center.y);
+            vertices[topCenter] = new Vector3(center.x, thickness, center.y);
+
+            for (int i = 0; i < count; i++)
+            {
+                Vector2 point = center + (outline[i] - center) * scale;
+                vertices[i] = new Vector3(point.x, 0f, point.y);
+                vertices[count + i] = new Vector3(point.x, thickness, point.y);
+                vertices[count * 2 + i] = vertices[i];
+                vertices[count * 3 + i] = vertices[count + i];
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                int j = (i + 1) % count;
+                AddTri(triangles, vertices, bottomCenter, i, j, Vector3.down);
+                AddTri(triangles, vertices, topCenter, count + i, count + j, Vector3.up);
+                Vector2 edge = outline[j] - outline[i];
+                Vector3 outward = new Vector3(-edge.y, 0f, edge.x);
+                Vector2 relative = (outline[i] + outline[j]) * 0.5f - center;
+                if (Vector3.Dot(outward, new Vector3(relative.x, 0f, relative.y)) < 0f) outward = -outward;
+                AddQuad(triangles, vertices, count * 2 + i, count * 2 + j,
+                    count * 3 + j, count * 3 + i, outward);
+            }
+
+            var mesh = new Mesh { name = "GrandPlate" };
+            Apply(mesh, vertices, triangles);
+            return mesh;
+        }
+
+        /// <summary>生成带实体圆角的封闭琴盖。主面法线保持垂直，圆边法线沿剖面过渡。</summary>
+        internal static Mesh CreateBeveledLid(Vector2[] outline, Vector2 center)
+        {
+            const float thickness = 0.038f;
+            const float bevel = 0.009f;
+            const int rings = 8;
+            int count = outline.Length;
+            var vertices = new Vector3[count * rings + 2];
+            var normals = new Vector3[vertices.Length];
+            var triangles = new List<int>(count * rings * 6);
+            int bottom = vertices.Length - 2;
+            int top = bottom + 1;
+            vertices[bottom] = new Vector3(center.x, 0f, center.y);
+            vertices[top] = vertices[bottom] + Vector3.up * thickness;
+            normals[bottom] = Vector3.down;
+            normals[top] = Vector3.up;
+
+            for (int i = 0; i < count; i++)
+            {
+                Vector2 point = outline[i];
+                Vector2 before = outline[(i + count - 1) % count];
+                Vector2 after = outline[(i + 1) % count];
+                Vector2 tangent = ((point - before).normalized + (after - point).normalized).normalized;
+                Vector2 outward = new Vector2(-tangent.y, tangent.x);
+                if (Vector2.Dot(outward, point - center) < 0f) outward = -outward;
+
+                for (int ring = 0; ring < rings; ring++)
+                {
+                    float angle = (ring < 4 ? ring - 3 : ring - 4) * Mathf.PI / 6f;
+                    float rimY = ring < 4 ? bevel : thickness - bevel;
+                    Vector2 edge = center + (point - center) * 1.012f - outward * (bevel * (1f - Mathf.Cos(angle)));
+                    int v = ring * count + i;
+                    vertices[v] = new Vector3(edge.x, rimY + bevel * Mathf.Sin(angle), edge.y);
+                    normals[v] = new Vector3(outward.x * Mathf.Cos(angle), Mathf.Sin(angle), outward.y * Mathf.Cos(angle));
+                }
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                int j = (i + 1) % count;
+                Vector2 edge = outline[j] - outline[i];
+                Vector3 outward = new Vector3(-edge.y, 0f, edge.x);
+                Vector2 relative = (outline[i] + outline[j]) * 0.5f - center;
+                if (Vector3.Dot(outward, new Vector3(relative.x, 0f, relative.y)) < 0f) outward = -outward;
+                for (int ring = 0; ring < rings - 1; ring++)
+                    AddQuad(triangles, vertices, ring * count + i, ring * count + j,
+                        (ring + 1) * count + j, (ring + 1) * count + i, outward);
+                AddTri(triangles, vertices, bottom, i, j, Vector3.down);
+                AddTri(triangles, vertices, top, (rings - 1) * count + i, (rings - 1) * count + j, Vector3.up);
+            }
+            var mesh = new Mesh { name = "GrandLidBevel" };
+            Apply(mesh, vertices, triangles);
+            mesh.normals = normals;
+            return mesh;
+        }
+
+        /// <summary>渐细琴腿，八边剖面保留中央平面和两侧窄反光面。</summary>
+        internal static Mesh CreateTaperedLeg(float height)
+        {
+            const int sides = 8;
+            float[] levels = { 0f, 0.09f, 0.37f, 0.72f, 0.91f, 1f };
+            float[] widths = { 0.045f, 0.049f, 0.058f, 0.086f, 0.100f, 0.091f };
+            var vertices = new Vector3[sides * levels.Length + 2];
+            var triangles = new List<int>(sides * levels.Length * 6);
+            for (int level = 0; level < levels.Length; level++)
+            for (int side = 0; side < sides; side++)
+            {
+                float angle = (side + 0.5f) * (2f * Mathf.PI / sides);
+                float half = widths[level] * 0.5f;
+                vertices[level * sides + side] = new Vector3(Mathf.Cos(angle) * half,
+                    levels[level] * height, Mathf.Sin(angle) * half * 0.92f);
+            }
+
+            int lastRing = (levels.Length - 1) * sides;
+            int bottom = vertices.Length - 2;
+            int top = bottom + 1;
+            vertices[top] = Vector3.up * height;
+            for (int i = 0; i < sides; i++)
+            {
+                int j = (i + 1) % sides;
+                Vector3 outward = vertices[i] + vertices[j];
+                for (int ring = 0; ring < lastRing; ring += sides)
+                    AddQuad(triangles, vertices, ring + i, ring + j, ring + j + sides, ring + i + sides, outward);
+                AddTri(triangles, vertices, bottom, i, j, Vector3.down);
+                AddTri(triangles, vertices, top, lastRing + i, lastRing + j, Vector3.up);
+            }
+            var mesh = new Mesh { name = "GrandTaperedLeg" };
+            Apply(mesh, vertices, triangles);
+            return mesh;
+        }
+
+        /// <summary>给琴弦等平行细线生成一个网格，避免每条线建立独立渲染器。</summary>
+        internal static Mesh CreateGrandStrings(float width)
+        {
+            const int count = 44;
+            var vertices = new Vector3[count * 4];
+            var triangles = new List<int>(count * 6);
+            for (int i = 0; i < count; i++)
+            {
+                float t = i / (float)(count - 1);
+                float frontX = Mathf.Lerp(0.09f, 0.94f, t) * width;
+                float backX = Mathf.Lerp(0.18f, 0.77f, t) * width;
+                float depth = Mathf.Lerp(-1.565f, -0.63f, t);
+                float halfWidth = Mathf.Lerp(0.0027f, 0.0008f, t);
+                int v = i * 4;
+                vertices[v] = new Vector3(frontX - halfWidth, 0f, -0.19f);
+                vertices[v + 1] = new Vector3(frontX + halfWidth, 0f, -0.19f);
+                vertices[v + 2] = new Vector3(backX + halfWidth, 0f, depth);
+                vertices[v + 3] = new Vector3(backX - halfWidth, 0f, depth);
+                AddQuad(triangles, vertices, v, v + 1, v + 2, v + 3, Vector3.up);
+            }
+            var mesh = new Mesh { name = "GrandStrings" };
+            Apply(mesh, vertices, triangles);
+            return mesh;
+        }
+
         /// <summary>三角形是否退化（面积 ≈ 0）。测试与构建期自检共用。</summary>
         public static bool IsDegenerateTriangle(Vector3 a, Vector3 b, Vector3 c)
             => Vector3.Cross(b - a, c - a).sqrMagnitude <= DegenerateEpsilon;
@@ -264,6 +511,40 @@ namespace PianoTeacher3D.Piano
 
         // ==================== 组装与法线 ====================
 
+        /// <summary>
+        /// 三平面 UV 的世界尺度（米）：一次纹理平铺覆盖 0.32 m。
+        /// 取值的依据是「年轮密度」——木纹纹理每个平铺周期约 13 条年轮，0.32 m 对应约 2.5 cm 一条，
+        /// 与真实胡桃木的观感接近；过大则纹理糊成一片，过小则像斑马纹。
+        /// </summary>
+        private const float TriplanarTiling = 0.32f;
+
+        /// <summary>
+        /// 顶点级三平面 UV：按顶点所属的面朝向选择投影平面，<b>不拆顶点、不改变顶点数</b>。
+        /// <para>
+        /// 为什么不做标准 UV：拆 UV 会产生接缝，接缝必须拆顶点，而顶点一旦不共享，
+        /// <see cref="ComputeAreaWeightedNormals"/> 的平滑倒角高光就没了——那是琴体「实体感」的唯一来源。
+        /// 顶点级三平面用「同一顶点按面朝向取不同投影」绕开了这个矛盾，代价是倒角面上的 UV
+        /// 由相邻两个投影混合（倒角面积占比极小，肉眼不可辨）。
+        /// </para>
+        /// <para>
+        /// 投影方向经过挑选，使木纹在每个面上都沿「木料自然走向」：
+        /// 竖直面（±X / ±Z 法向）纹理沿高度走，顶面沿琴体长度走。
+        /// </para>
+        /// </summary>
+        private static Vector2[] BuildTriplanarUV(Vector3[] verts)
+        {
+            var uv = new Vector2[verts.Length];
+            for (int i = 0; i + 2 < verts.Length; i += 3)
+            {
+                // 每 3 个连续顶点属于同一个角的 NX / NY / NZ 贴面顶点
+                // （结构见 BuildAllEdgesChamferedBox 的 v[k*3+0..2]）
+                uv[i]     = new Vector2(verts[i].z, verts[i].y) / TriplanarTiling;      // ±X 面：u=z, v=y（木纹竖直）
+                uv[i + 1] = new Vector2(verts[i + 1].z, verts[i + 1].x) / TriplanarTiling; // ±Y 面：u=z, v=x（木纹沿长度）
+                uv[i + 2] = new Vector2(verts[i + 2].x, verts[i + 2].y) / TriplanarTiling; // ±Z 面：u=x, v=y（木纹竖直）
+            }
+            return uv;
+        }
+
         /// <summary>写入网格数据，并按相邻三角形叉积做面积加权法线（共享顶点 → 柔和边缘高光）。</summary>
         private static void Apply(Mesh mesh, Vector3[] verts, List<int> triangles)
         {
@@ -272,6 +553,9 @@ namespace PianoTeacher3D.Piano
             mesh.vertices = verts;
             mesh.triangles = tris;
             mesh.normals = ComputeAreaWeightedNormals(verts, tris);
+            // 24 顶点 = AllEdges 倒角盒的结构（8 角 × 3 贴面顶点），才能用三平面 UV；
+            // 其它结构（TopOnly 12 顶点、手部网格等）给零 UV —— 它们不采样程序化纹理。
+            mesh.uv = verts.Length == 24 ? BuildTriplanarUV(verts) : new Vector2[verts.Length];
             mesh.RecalculateBounds();
         }
 

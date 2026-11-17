@@ -3,6 +3,7 @@ using System.IO;
 using NUnit.Framework;
 using PianoTeacher3D.UI;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
@@ -52,6 +53,73 @@ namespace PianoTeacher3D.Tests
                 "点击曲目卡片应进入课程场景");
             Assert.IsTrue(File.Exists(MainMenuUI.SelectedSongPath),
                 $"选中的曲目路径应真实存在：{MainMenuUI.SelectedSongPath}");
+        }
+
+        [UnityTest]
+        public IEnumerator MainMenu_UsesOneLibraryAndOffersAPlayablePrimaryAction()
+        {
+            Assert.IsNull(GameObject.Find("EntryCard_选曲"), "首页已经提供曲库，不能再打开重复的选曲浮层");
+            var library = GameObject.Find("LibraryViewport");
+            Assert.IsNotNull(library, "所有曲目都应显示在唯一的可滚动曲库里");
+            Assert.Greater(library.GetComponentsInChildren<Button>().Length, 0);
+            var start = GameObject.Find("PracticePrimary");
+            Assert.IsNotNull(start);
+            Assert.IsTrue(start.GetComponent<Button>().interactable);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Settings_CloseRestoresFocusToItsTrigger()
+        {
+            var trigger = GameObject.Find("EntryCard_设置");
+            Assert.IsNotNull(trigger);
+            EventSystem.current.SetSelectedGameObject(trigger);
+            trigger.GetComponent<Button>().onClick.Invoke();
+            yield return null;
+
+            var overlay = GameObject.Find("OverlaySettings");
+            Assert.IsNotNull(overlay);
+            var close = overlay.GetComponentInChildren<Button>(true);
+            foreach (var button in overlay.GetComponentsInChildren<Button>())
+                if (button.name == "Btn_关闭") close = button;
+            Assert.AreEqual("Btn_关闭", close.name);
+            Assert.AreEqual(close.gameObject, EventSystem.current.currentSelectedGameObject);
+            close.onClick.Invoke();
+            yield return null;
+
+            Assert.AreEqual(trigger, EventSystem.current.currentSelectedGameObject);
+        }
+
+        [UnityTest]
+        public IEnumerator StageVisual_MotionCanBeDisabled()
+        {
+            const string pref = "piano.reduceMotion";
+            int previous = PlayerPrefs.GetInt(pref, -1);
+            try
+            {
+                var stage = GameObject.Find("MenuStageArt");
+                var toggle = GameObject.Find("MenuMotionToggle");
+                Assert.IsNotNull(stage, "首页展示三角琴背景");
+                Assert.IsNotNull(toggle, "首页提供减少动效开关");
+
+                Assert.IsNotNull(stage.GetComponent<RawImage>().texture, "首页美术资产需要随构建加载");
+                var ribbon = stage.transform.Find("MenuKeyRibbon");
+                Assert.IsNotNull(ribbon, "三角琴旁有独立的螺旋琴键层");
+                var button = toggle.GetComponent<Button>();
+                button.onClick.Invoke();
+                Assert.AreEqual(previous == 1 ? 0 : 1, PlayerPrefs.GetInt(pref),
+                    "切换减少动效时记住选择");
+                Assert.AreEqual("减少动效：" + (previous == 1 ? "关" : "开"),
+                    UITheme.GetLabel(button).text);
+                Assert.IsTrue(ribbon.gameObject.activeSelf, "减少动效时保留静态琴键图案");
+            }
+            finally
+            {
+                if (previous >= 0) PlayerPrefs.SetInt(pref, previous);
+                else PlayerPrefs.DeleteKey(pref);
+                PlayerPrefs.Save();
+            }
+            yield return null;
         }
 
         private static System.Collections.Generic.List<Button> FindSongCards()

@@ -127,10 +127,14 @@ namespace PianoTeacher3D.Avatar
                     d.RoundTips = true;
                     break;
                 default:
-                    d.RingSegments = 10;
+                    // 12 环：10 环在特写下能看出多边形棱边（掌心与指节最明显），
+                    // 12 环的顶点增量约 20%，换掉「低模塑料感」值得。
+                    // 指甲开启：特写是俯视，指节弯曲在这个视角下只表现为「手指变短」，
+                    // 真正能被看见的手部细节就是指甲与指节的明暗过渡（真实教学视频同理）。
+                    d.RingSegments = 12;
                     d.PalmRings = 9;
                     d.FingerRings = 5;
-                    d.IncludeNails = false;
+                    d.IncludeNails = true;
                     d.RoundTips = true;
                     break;
             }
@@ -267,7 +271,9 @@ namespace PianoTeacher3D.Avatar
 
             float length = Mathf.Max(0.004f, d.SegmentLength(finger, segment));
             float baseRadius = Mathf.Max(0.002f, d.SegmentRadius(finger, segment));
-            float endRadius = Mathf.Max(0.0015f, d.SegmentRadius(finger, segment) * 0.88f);
+            // 段末收缩不能太大：0.88 会让每段都像独立的小锥体，段与段之间出现「竹节」。
+            // 真实手指各段的粗细差异主要来自指腹厚度而非骨径，0.93 更接近连续的手指外形。
+            float endRadius = Mathf.Max(0.0015f, d.SegmentRadius(finger, segment) * 0.93f);
 
             var vertices = new List<Vector3>(rings * ring + ring + 1);
             var triangles = new List<int>((rings - 1) * ring * 6 + ring * 6);
@@ -296,7 +302,12 @@ namespace PianoTeacher3D.Avatar
                 AddCap(vertices, triangles, ring, (rings - 1) * ring, 1f, endRadius * 0.30f);
             }
 
-            AddCap(vertices, triangles, ring, 0, -1f, baseRadius * 0.18f);
+            // 起点端：中节与末节用关节球（PIP / DIP 是弯曲最大、缝隙最刺眼的两处），
+            // 近节起点被手掌端面覆盖，保持平封口就够。
+            if (segment > 0)
+                AddHemisphereCapBackward(vertices, triangles, ring, 0, z0, baseRadius * 0.92f, 3);
+            else
+                AddCap(vertices, triangles, ring, 0, -1f, baseRadius * 0.18f);
 
             return BuildMesh($"HandFinger{finger}Seg{segment}", vertices, triangles);
         }
@@ -304,8 +315,8 @@ namespace PianoTeacher3D.Avatar
         /// <summary>指节起始处的渐入（避免与上一段的重叠区出现台阶）。</summary>
         private static float StartTaper(float t) => 0.90f + 0.10f * SmoothStep01(t / 0.18f);
 
-        /// <summary>关节处轻微加宽：让指节有起伏，而不是等粗圆柱。</summary>
-        private static float JointBulge(float t) => 1f + 0.055f * Gaussian(t, 0.06f, 0.10f);
+        /// <summary>关节处加宽：让指节有起伏，而不是等粗圆柱。与关节球配合形成「指节」的视觉锚点。</summary>
+        private static float JointBulge(float t) => 1f + 0.085f * Gaussian(t, 0.06f, 0.10f);
 
         /// <summary>指甲薄片（仅视觉提示，不改变指尖目标点）。</summary>
         public static Mesh BuildNail(HandMeshDefinition d, int finger)
@@ -417,6 +428,50 @@ namespace PianoTeacher3D.Avatar
             {
                 int j1 = (j + 1) % ring;
                 triangles.Add(prevStart + j); triangles.Add(prevStart + j1); triangles.Add(apex);
+            }
+        }
+
+        /// <summary>
+        /// 反向半球（向 −Z 凸出）：把指节起点做成<b>关节球</b>。
+        /// <para>
+        /// 每段指节是独立的锥台，弯曲 30° 以上时相邻两段会在关节处露出硬折角与缝隙，
+        /// 视觉上就是「几截管子拼的手指」。真实手指在关节处是连续皮肤：背侧拉伸、掌侧褶皱，
+        /// 外形是一段圆润的过渡。用球面填充这段过渡是低多边形手部的标准做法。
+        /// </para>
+        /// </summary>
+        private static void AddHemisphereCapBackward(List<Vector3> vertices, List<int> triangles, int ring,
+            int startIndex, float z, float radius, int capRings)
+        {
+            int prevStart = startIndex;
+            for (int k = 1; k < capRings; k++)
+            {
+                float a = (k / (float)capRings) * Mathf.PI * 0.5f;
+                float ringRadius = radius * Mathf.Cos(a) * 0.98f;
+                float ringZ = z - radius * Mathf.Sin(a);
+
+                int curStart = vertices.Count;
+                AddOvalRing(vertices, ring, ringZ, ringRadius);
+
+                for (int j = 0; j < ring; j++)
+                {
+                    int j1 = (j + 1) % ring;
+                    int a0 = prevStart + j;
+                    int b0 = prevStart + j1;
+                    int c0 = curStart + j;
+                    int d0 = curStart + j1;
+                    // 与正向半球相反的绕序：z 递减方向要保持法线朝外
+                    triangles.Add(a0); triangles.Add(c0); triangles.Add(b0);
+                    triangles.Add(b0); triangles.Add(c0); triangles.Add(d0);
+                }
+                prevStart = curStart;
+            }
+
+            int apex = vertices.Count;
+            vertices.Add(new Vector3(0f, 0f, z - radius));
+            for (int j = 0; j < ring; j++)
+            {
+                int j1 = (j + 1) % ring;
+                triangles.Add(prevStart + j); triangles.Add(apex); triangles.Add(prevStart + j1);
             }
         }
 

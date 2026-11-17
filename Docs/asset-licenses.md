@@ -1,5 +1,13 @@
 # 资产许可证清单（asset-licenses.md）
 
+默认老师的 `f001_concert_body_color.png` 改编自项目内 Microsoft Rocketbox 的
+`f001_body_color.tga`，改动为同一 UV 上的衬衫与裤装配色。按原资产的 MIT 条款分发，
+版权声明与许可证原文随 [Rocketbox 资产](../Assets/Characters/Rocketbox/LICENSE.md) 保留。
+
+首页 `Assets/Resources/Menu/ConcertGrand.png` 为本项目生成的三角琴效果图。
+SHA-256 为 `55f4c05e84875c33f6d80d607b8b583f2a5829d96ec07b31a86af074f4163c33`。
+课堂的开盖三角琴和音乐厅由项目代码生成。
+
 > 对应方案 **2.1 设计原则「遵守资源许可证」**、**5.2 中期「为人物和钢琴分别建立资源适配层」**、
 > **6.5 资源评估原则**、**7.3 音频优先级**、**9.2 用户数据与内容分离**；审查 **1.1 方案 B**「模型、贴图、字体及其他资产的来源与许可证登记在 Docs/asset-licenses.md」。
 >
@@ -12,7 +20,7 @@
 
 | 资产类型 | 来源 | 许可证 | 说明 |
 |---|---|---|---|
-| 钢琴模型（88 键 + 立式琴体） | `PianoKeyMap` / `PianoMeshFactory` 程序化生成（倒角键身、黑键三层次、侧板 / 底座 / 键盘盖 / 踏板） | 自研（无第三方） | 无需授权 |
+| 钢琴模型（88 键 + 开盖三角琴） | `PianoKeyMap` / `PianoMeshFactory` 程序化生成（倒角键身、黑键三层次、侧板 / 底座 / 键盘盖 / 踏板） | 自研（无第三方） | 无需授权 |
 | 3D 人物（3 角色 + 手部三段指节） | `AvatarManager` / `AvatarDefinition` / `AvatarRigBuilder` 程序化生成 | 自研（无第三方） | 无需授权 |
 | 人物骨架 | `AvatarRigBuilder` 程序化构建标准 Humanoid 骨架（`AvatarBuilder.BuildHumanAvatar`） | 自研（无第三方） | 不含外部骨骼与权重 |
 | 材质 / 贴图 | `Shader.Find("Standard")`（URP Lit / Sprites/Default 兜底）+ 纯色 / 程序化径向渐变贴图（`PianoSceneEnvironment`） | Unity 内置 Shader + 自研程序化贴图 | 随 Unity 许可；无外部贴图文件 |

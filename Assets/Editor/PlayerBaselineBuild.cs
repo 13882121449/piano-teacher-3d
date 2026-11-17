@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
@@ -24,31 +25,40 @@ namespace PianoTeacher3D.EditorTools
     {
         private const string LessonScene = "Assets/Scenes/PianoLesson.unity";
 
-        public static void Build()
+        public static void Build() => BuildWindows(new[] { LessonScene }, BuildOptions.Development, Path.Combine("_verify_out", "player"));
+
+        /// <summary>构建包含主菜单与课程的 Windows 使用版。</summary>
+        public static void BuildRelease()
+        {
+            var scenes = EditorBuildSettings.scenes.Where(scene => scene.enabled).Select(scene => scene.path).ToArray();
+            BuildWindows(scenes, BuildOptions.None, Path.Combine("Builds", "Windows", DateTime.Now.ToString("yyyyMMdd_HHmmss")));
+        }
+
+        private static void BuildWindows(string[] scenes, BuildOptions options, string defaultFolder)
         {
             string output = Environment.GetEnvironmentVariable("PT3D_PLAYER_OUT");
             if (string.IsNullOrEmpty(output))
-                output = Path.GetFullPath(Path.Combine("_verify_out", "player", "PianoTeacher3D.exe"));
+                output = Path.GetFullPath(Path.Combine(defaultFolder, "PianoTeacher3D.exe"));
 
             string dir = Path.GetDirectoryName(output);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
-            if (!File.Exists(LessonScene))
+            if (scenes.Length == 0 || scenes.Any(scene => !File.Exists(scene)))
             {
-                Debug.LogError("[PT3D][Build] 找不到场景：" + LessonScene);
+                Debug.LogError("[PT3D][Build] 构建场景为空或缺失：" + string.Join(", ", scenes));
                 EditorApplication.Exit(2);
                 return;
             }
 
-            var options = new BuildPlayerOptions
+            var build = new BuildPlayerOptions
             {
-                scenes = new[] { LessonScene },
+                scenes = scenes,
                 locationPathName = output,
                 target = BuildTarget.StandaloneWindows64,
-                options = BuildOptions.Development
+                options = options
             };
 
-            BuildReport report = BuildPipeline.BuildPlayer(options);
+            BuildReport report = BuildPipeline.BuildPlayer(build);
             BuildSummary summary = report.summary;
 
             Debug.Log($"[PT3D][Build] result={summary.result} errors={summary.totalErrors} " +

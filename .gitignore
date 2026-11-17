@@ -50,3 +50,12 @@ __pycache__/
 
 # 会话工作目录（不进版本库）
 .workbuddy/
+
+# brainstorming 可视化伴侣的临时产物
+.superpowers/
+
+# 演示预览产物（一次性 PNG/HTML，约 11MB，本地保留不入库）
+Docs/demos/
+
+# PowerShell 误重定向产生的垃圾文件（`2> $null` 在非 PowerShell 下会建同名文件）
+/$null

@@ -6,6 +6,31 @@ using System.Linq;
 namespace PianoTeacher3D.MIDI
 {
     /// <summary>
+    /// 一段延音踏板（CC64）保持区间，秒制，已按时间升序。
+    /// 用于驱动脚部踏板动作；没有 CC64 事件的曲目返回空列表。
+    /// </summary>
+    public readonly struct SustainSpan
+    {
+        /// <summary>踏板按下的时刻（秒）。</summary>
+        public readonly float Start;
+
+        /// <summary>踏板抬起的时刻（秒），恒大于 <see cref="Start"/>。</summary>
+        public readonly float End;
+
+        public SustainSpan(float start, float end)
+        {
+            Start = start;
+            End = end;
+        }
+
+        /// <summary>给定播放时刻是否处于踏板按下区间内。</summary>
+        public bool Contains(float seconds)
+        {
+            return seconds >= Start && seconds < End;
+        }
+    }
+
+    /// <summary>
     /// MIDI 解析结果。成功时携带标准化音符事件与总时长；失败时携带错误信息。
     /// </summary>
     public sealed class MidiParseResult
@@ -48,10 +73,17 @@ namespace PianoTeacher3D.MIDI
         /// </summary>
         public IReadOnlyList<string> Warnings { get; }
 
+        /// <summary>
+        /// 延音踏板（CC64）保持区间，秒制升序；曲目没有 CC64 时为空列表（永不为 null）。
+        /// </summary>
+        public IReadOnlyList<SustainSpan> SustainSpans { get; }
+        public bool HasRecordedSustain { get; }
+
         public MidiParseResult(bool success, string error, List<MidiNoteEvent> notes,
             float totalDuration, ushort division, int trackCount,
             IReadOnlyList<TempoChange> tempoChanges = null, int danglingNoteCount = 0,
-            int midiFormat = 0, IReadOnlyList<string> warnings = null)
+            int midiFormat = 0, IReadOnlyList<string> warnings = null,
+            IReadOnlyList<SustainSpan> sustainSpans = null, bool hasRecordedSustain = false)
         {
             Success = success;
             Error = error;
@@ -63,7 +95,11 @@ namespace PianoTeacher3D.MIDI
             DanglingNoteCount = danglingNoteCount < 0 ? 0 : danglingNoteCount;
             MidiFormat = midiFormat;
             Warnings = warnings ?? NoWarnings;
+            SustainSpans = sustainSpans ?? NoSustain;
+            HasRecordedSustain = hasRecordedSustain || SustainSpans.Count > 0;
         }
+
+        private static readonly SustainSpan[] NoSustain = new SustainSpan[0];
 
         public static MidiParseResult Fail(string error)
         {
@@ -127,6 +163,8 @@ namespace PianoTeacher3D.MIDI
 
                 var events = new List<(long tick, bool isOn, int pitch, int velocity, int track, int channel)>();
                 var tempoEvents = new List<(long tick, int tempo, int track)>();
+                // 延音踏板（CC64）：只关心「按下/抬起」，值 ≥64 视为踩下（MIDI 规范）
+                var sustainEvents = new List<(long tick, bool down, int track)>();
                 var trackSpan = new long[trackCount];
                 long maxTick = 0;
 
@@ -218,7 +256,11 @@ namespace PianoTeacher3D.MIDI
                             {
                                 events.Add((tick, false, data1, 0, t, channel));
                             }
-                            // 其余通道消息（CC/弯音/触后等）首版忽略
+                            else if (high == 0xB0 && data1 == 64)
+                            {
+                                sustainEvents.Add((tick, data2 >= 64, t));
+                            }
+                            // 其余通道消息（弯音/触后/其它 CC 等）首版忽略
                         }
                     }
 
@@ -254,6 +296,13 @@ namespace PianoTeacher3D.MIDI
                             if (off == 0) continue;
                             var te = tempoEvents[i];
                             tempoEvents[i] = (te.tick + off, te.tempo, te.track);
+                        }
+                        for (int i = 0; i < sustainEvents.Count; i++)
+                        {
+                            long off = offsetByTrack[sustainEvents[i].track];
+                            if (off == 0) continue;
+                            var se = sustainEvents[i];
+                            sustainEvents[i] = (se.tick + off, se.down, se.track);
                         }
 
                         if (acc > maxTick) maxTick = acc;
@@ -356,8 +405,43 @@ namespace PianoTeacher3D.MIDI
                 if (tempoChanges.Count == 0 || tempoChanges[0].TimeSeconds > 1e-4f)
                     tempoChanges.Insert(0, new TempoChange(0f, DefaultTempo));
 
-                return new MidiParseResult(true, null, notes, (float)maxEndSeconds,
-                    division, trackCount, tempoChanges, danglingCount, format, warnings);
+                // ---- 延音踏板：按 tick 顺序配对成区间（踏板可能跨轨，这里统一成一条时间轴）----
+                var sustainSpans = new List<SustainSpan>();
+                if (sustainEvents.Count > 0)
+                {
+                    sustainEvents.Sort((a, b) => a.tick.CompareTo(b.tick));
+                    bool pedalling = false;
+                    long spanStartTick = 0;
+                    foreach (var se in sustainEvents)
+                    {
+                        if (se.down)
+                        {
+                            if (!pedalling)
+                            {
+                                pedalling = true;
+                                spanStartTick = se.tick;
+                            }
+                        }
+                        else if (pedalling)
+                        {
+                            pedalling = false;
+                            AddSpan(spanStartTick, se.tick);
+                        }
+                    }
+                    // 一直踩到结尾没有抬起：以全曲末尾收尾
+                    if (pedalling && maxTick > spanStartTick)
+                        AddSpan(spanStartTick, maxTick);
+
+                    void AddSpan(long fromTick, long toTick)
+                    {
+                        if (toTick <= fromTick) return;
+                        var span = new SustainSpan((float)TickToSeconds(fromTick), (float)TickToSeconds(toTick));
+                        if (span.End > span.Start) sustainSpans.Add(span);
+                    }
+                }
+
+                return new MidiParseResult(true, null, PianoNoteFilter.AssignHands(notes), (float)maxEndSeconds,
+                    division, trackCount, tempoChanges, danglingCount, format, warnings, sustainSpans, sustainEvents.Count > 0);
             }
             catch (EndOfStreamException)
             {
