@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using NUnit.Framework;
 using PianoTeacher3D.Characters;
 using UnityEngine;
@@ -58,6 +58,7 @@ namespace PianoTeacher3D.Tests
                 Assert.IsNotNull(view.RootTransform, "视图应暴露根节点");
                 var smrs = view.RootTransform.GetComponentsInChildren<SkinnedMeshRenderer>(true);
                 int totalSlots = 0, texturedSlots = 0;
+                bool hasConcertOutfit = false;
                 foreach (var smr in smrs)
                 {
                     foreach (var mat in smr.sharedMaterials)
@@ -67,17 +68,28 @@ namespace PianoTeacher3D.Tests
                         bool hasTex = (mat.HasProperty("_BaseMap") && mat.GetTexture("_BaseMap") != null)
                                    || (mat.HasProperty("_MainTex") && mat.GetTexture("_MainTex") != null);
                         if (hasTex) texturedSlots++;
+                        var albedo = mat.HasProperty("_BaseMap") ? mat.GetTexture("_BaseMap") : mat.mainTexture;
+                        if (albedo != null && albedo.name == "f001_concert_body_color") hasConcertOutfit = true;
                     }
                 }
                 Assert.Greater(totalSlots, 0, "角色应至少有一个材质槽");
                 Assert.AreEqual(totalSlots, texturedSlots,
                     string.Format("所有材质槽都必须绑定主贴图（{0}/{1}）——否则仍会露出白模", texturedSlots, totalSlots));
+                Assert.IsTrue(hasConcertOutfit, "默认老师应绑定保留皮肤区域的演奏服贴图");
 
+                Assert.IsNotNull(view.RootTransform.Find("SatinCowlBodice")?.GetComponent<SkinnedMeshRenderer>());
+                Assert.IsNotNull(view.RootTransform.Find("FineSatinStraps")?.GetComponent<SkinnedMeshRenderer>());
+                Assert.IsNotNull(view.RootTransform.Find("StandingSatinGown"));
+                Assert.IsNotNull(view.Skeleton.Head.Find("ReferencePerformerHead")?.GetComponent<MeshRenderer>());
                 Assert.IsTrue(view.IsActivated == false, "未激活前 IsActivated 应为 false");
                 view.OnCharacterActivated();
                 Assert.IsTrue(view.IsActivated);
                 Assert.IsNotNull(view.RootTransform);
                 Assert.IsTrue(view.RootTransform.gameObject.activeSelf);
+                Assert.IsNotNull(view.RootTransform.Find("SeatedSatinGown"), "女演奏者需要实体长裙");
+                var renderers = view.RootTransform.GetComponentsInChildren<MeshRenderer>();
+                Assert.IsTrue(System.Array.Exists(renderers, renderer => renderer.name == "BraidedChignon"),
+                    "女演奏者需要随头骨移动的低发髻");
             }
             finally
             {

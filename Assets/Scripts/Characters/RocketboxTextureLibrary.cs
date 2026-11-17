@@ -43,8 +43,11 @@ namespace PianoTeacher3D.Characters
 
             var semantic = ClassifySemantic(materialName);
             var prefix = string.IsNullOrEmpty(texturePrefix) ? "f001" : texturePrefix;
-            var color = Load($"{ResourceRoot}{prefix}_{semantic}_color");
-            var normal = Load($"{ResourceRoot}{prefix}_{semantic}_normal");
+            bool isTeacherOutfit = prefix == "f001" && semantic == "body";
+            var color = isTeacherOutfit ? Load(ResourceRoot + "f001_concert_body_color") : null;
+            if (color == null) color = Load($"{ResourceRoot}{prefix}_{semantic}_color");
+            // 发片与睫毛只有透明颜色贴图，缺少法线贴图属于正常资产配置。
+            var normal = semantic == "opacity" ? null : Load($"{ResourceRoot}{prefix}_{semantic}_normal");
 
             // 颜色：内置 Standard 用 _MainTex，URP/Lit 用 _BaseMap，两者都设（不存在的属性 SetTexture 是安全的空操作）
             if (color != null)
@@ -62,7 +65,8 @@ namespace PianoTeacher3D.Characters
             if (normal != null && mat.HasProperty("_BumpMap"))
             {
                 mat.SetTexture("_BumpMap", normal);
-                if (mat.HasProperty("_BumpScale")) mat.SetFloat("_BumpScale", 1f);
+                if (mat.HasProperty("_BumpScale"))
+                    mat.SetFloat("_BumpScale", isTeacherOutfit ? 0.48f : 1f);
 
                 // 只 SetTexture 不打开关键字的话，Standard / URP Lit 会整张忽略法线贴图，
                 // 皮肤就变成「一块没有毛孔和皱纹的塑料」——这正是「纹理不符合物理常识」的来源。
@@ -72,8 +76,9 @@ namespace PianoTeacher3D.Characters
                 normal.wrapMode = TextureWrapMode.Repeat;
             }
 
-            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", SkinSmoothness);
-            if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", SkinSmoothness);
+            float smoothness = isTeacherOutfit ? 0.20f : SkinSmoothness;
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
+            if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", smoothness);
             if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0f);
 
             // 透明层（睫毛/眉毛/发片）：开 alpha clip，避免整片方形不透明
@@ -87,7 +92,7 @@ namespace PianoTeacher3D.Characters
         }
 
         /// <summary>材质名 → 贴图语义。匹配不到时按 body 处理（body 是面积最大、兜底最安全的）。</summary>
-        private static string ClassifySemantic(string materialName)
+        internal static string ClassifySemantic(string materialName)
         {
             if (string.IsNullOrEmpty(materialName)) return "body";
             var n = materialName.ToLowerInvariant();

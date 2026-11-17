@@ -37,12 +37,14 @@ namespace PianoTeacher3D.Characters
         private readonly RocketboxHandRig _leftHand;
         private readonly RocketboxHandRig _rightHand;
         private readonly string _handError;
+        private Transform _stool;
 
         /// <summary>由绑定姿态推导的手指关节轴策略（左右手合一；推导失败时退回默认策略）。</summary>
         private IFingerJointAxes _jointAxes = DefaultFingerJointAxes.Instance;
 
         private readonly List<Renderer> _renderers = new List<Renderer>();
         private readonly List<Material> _ownMaterials = new List<Material>();
+        private readonly ConcertGownAppearance _concertGown;
         private readonly Dictionary<Material, Color> _originalColors = new Dictionary<Material, Color>();
 
         private Texture2D _thumbnail;
@@ -63,6 +65,8 @@ namespace PianoTeacher3D.Characters
             _handError = handError;
             _definition = definition;
             _pose = new SittingPoseApplier(poseSettings);
+            if (profile.CharacterId == CharacterRegistry.RocketboxFemaleId && profile.PhotoAvatar == null)
+                _concertGown = new ConcertGownAppearance(root.transform, skeleton, scope);
         }
 
         /// <summary>
@@ -124,6 +128,12 @@ namespace PianoTeacher3D.Characters
             var left = RocketboxHandRig.Create(true, bones, out string leftError);
             var right = RocketboxHandRig.Create(false, bones, out string rightError);
             string handError = leftError ?? rightError;
+            if (handError == null && left != null && right != null)
+            {
+                var skinned = root.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                left.CalibrateThumbPad(skinned);
+                right.CalibrateThumbPad(skinned);
+            }
 
             var skeleton = BuildSkeleton(root.transform, animator, bones, left, right);
             var definition = BuildDefinition(profile);
@@ -143,10 +153,15 @@ namespace PianoTeacher3D.Characters
             // 而贴图是运行时从 Resources 绑上去的（FBX 内的引用永远解析不到）。
             // 不前置的话门禁看到的是导入器生成的空材质，必然拒绝这个角色。
             view.EnsureMaterials();
-            // 琴凳：外部角色此前没有凳子——BuildStool 挂在程序化 rig 的根下，
-            // Rocketbox 视图走不到那段代码，切过去就是「悬空坐着」（实测 V15 截图臀部下方完全空着）。
-            view.BuildStool(root.transform, profile);
             view.BuildJointAxes();
+            view._concertGown?.ApplyToBindPose(bones);
+
+            if (profile.PhotoAvatar != null &&
+                !Customization.PhotoAvatarAppearance.Apply(root, skeleton?.Head, profile.PhotoAvatar, scope, out error))
+            {
+                view.DisposeCharacterResources();
+                return null;
+            }
 
             if (left == null || right == null)
             {
@@ -159,64 +174,55 @@ namespace PianoTeacher3D.Characters
             return view;
         }
 
-        /// <summary>
-        /// 琴凳：以<b>髋部世界坐标</b>定位，而不是角色根的局部坐标。
-        /// <para>
-        /// 为什么不能用局部坐标：内置角色的 rig 根被旋转了 180°（面向 −Z），所以它的
-        /// <c>z = +0.10</c> 表示「身体前方」；Rocketbox 的 FBX 根没有这个旋转，同一套局部数值
-        /// 会把凳子放到脚下偏前的位置（实测第一版就是这样，凳子落到人和琴之间）。
-        /// 用髋部世界位置反算，既绕开朝向差异，也自动对齐 <see cref="SittingPoseApplier"/> 的坐姿。
-        /// </para>
-        /// <para>
-        /// 座面高度 = 髋关节中心 − 75 mm（坐姿标定的髋-凳面高差，见 SittingPoseApplier 的落座目标）。
-        /// </para>
-        /// </summary>
-        private void BuildStool(Transform parent, CharacterProfile profile)
+        private const float StoolFrameHeight = 0.05f;
+        private const float StoolCushionHeight = 0.026f;
+
+        private void BuildStool()
         {
-            if (parent == null) return;
+            _stool = new GameObject("StoolRoot").transform;
+            // 保留世界尺寸，角色缩放不改变琴凳尺寸。
+            _stool.SetParent(_root.transform, true);
+            const float seatWidth = 0.40f;
+            const float seatDepth = 0.30f;
+            var frame = CreateStoolMaterial("StoolFrame", new Color(0.56f, 0.68f, 0.72f), 0.34f);
+            var cushion = CreateStoolMaterial("StoolCushion", new Color(0.76f, 0.80f, 0.81f), 0.09f);
+            CreateStoolPart(PrimitiveType.Cube, _stool, "Stool",
+                Vector3.down * (StoolCushionHeight + StoolFrameHeight * 0.5f),
+                new Vector3(seatWidth, StoolFrameHeight, seatDepth), frame);
+            CreateStoolPart(PrimitiveType.Cube, _stool, "StoolCushion",
+                Vector3.down * (StoolCushionHeight * 0.5f),
+                new Vector3(seatWidth * 0.96f, StoolCushionHeight, seatDepth * 0.96f), cushion);
 
-            var hips = _skeleton != null ? _skeleton.Hips : null;
-            Vector3 hipsWorld = hips != null
-                ? hips.position
-                : parent.position + Vector3.up * 0.52f;
-
-            const float hipsToSeatDrop = 0.075f;   // 髋关节中心 → 凳面（坐姿标定值）
-            float seatTop = Mathf.Max(0.30f, hipsWorld.y - hipsToSeatDrop);
-
-            // 凳子根挂在角色下（随角色生命周期释放），但位置/缩放用世界值，
-            // 避免父级的旋转与缩放把尺寸和方向带偏。
-            var stoolRoot = new GameObject("StoolRoot").transform;
-            stoolRoot.SetParent(parent, true);
-            stoolRoot.position = new Vector3(hipsWorld.x, seatTop, hipsWorld.z);
-            stoolRoot.rotation = Quaternion.identity;
-            stoolRoot.localScale = Vector3.one;
-
-            const float seatT = 0.05f;
-            const float seatW = 0.40f;
-            const float seatD = 0.30f;
-
-            var wood = CreateStoolMaterial("StoolWood", new Color(0.085f, 0.070f, 0.062f), 0.16f);
-            var cushion = CreateStoolMaterial("StoolCushion", new Color(0.150f, 0.095f, 0.098f), 0.05f);
-
-            // 座面：顶面正好在 y = 0（即 seatTop 世界高度）
-            CreateStoolPart(PrimitiveType.Cube, stoolRoot, "Stool",
-                new Vector3(0f, -seatT * 0.5f, 0f), new Vector3(seatW, seatT, seatD), wood);
-
-            // 软垫：略高于座面，给臀部落点一个可读的接触体
-            CreateStoolPart(PrimitiveType.Cube, stoolRoot, "StoolCushion",
-                new Vector3(0f, 0.013f, 0f), new Vector3(seatW * 0.96f, 0.026f, seatD * 0.96f), cushion);
-
-            // 四条腿：从座面底部落到世界地面（stoolRoot 的 y = seatTop，地面即局部 −seatTop）
-            float legH = seatTop - seatT;
-            float legCenterY = -(seatT + legH * 0.5f);
             for (int sx = -1; sx <= 1; sx += 2)
             {
                 for (int sz = -1; sz <= 1; sz += 2)
                 {
-                    CreateStoolPart(PrimitiveType.Cylinder, stoolRoot, $"StoolLeg_{sx}_{sz}",
-                        new Vector3(sx * seatW * 0.40f, legCenterY, sz * seatD * 0.38f),
-                        new Vector3(0.022f, legH * 0.5f, 0.022f), wood);
+                    CreateStoolPart(PrimitiveType.Cylinder, _stool, $"StoolLeg_{sx}_{sz}",
+                        new Vector3(sx * seatWidth * 0.40f, 0f, sz * seatDepth * 0.38f),
+                        new Vector3(0.028f, 1f, 0.028f), frame);
                 }
+            }
+        }
+
+        private void FitStoolToPose()
+        {
+            if (_stool == null) BuildStool();
+            var hip = _pose.LastHipPosition;
+            float seatTop = hip.y - _pose.Settings.HipAboveSeat;
+            _stool.SetPositionAndRotation(new Vector3(hip.x, seatTop, hip.z), Quaternion.identity);
+
+            // 座垫顶面是坐姿基准，凳腿从凳框底面延伸到舞台地面。
+            float frameBottom = StoolCushionHeight + StoolFrameHeight;
+            float legHeight = Mathf.Max(0.001f, seatTop - frameBottom);
+            for (int i = 2; i < _stool.childCount; i++)
+            {
+                var leg = _stool.GetChild(i);
+                var position = leg.localPosition;
+                position.y = -(frameBottom + legHeight * 0.5f);
+                leg.localPosition = position;
+                var scale = leg.localScale;
+                scale.y = legHeight * 0.5f;
+                leg.localScale = scale;
             }
         }
 
@@ -326,6 +332,7 @@ namespace PianoTeacher3D.Characters
         /// </summary>
         public bool Supports(AppearanceSlot slot)
         {
+            if (_profile.PhotoAvatar != null) return false;
             if (slot == AppearanceSlot.Thumbnail) return true;
             if (slot != AppearanceSlot.BodyTint) return false;
             return _profile != null && _profile.SupportsSlot(slot);
@@ -347,7 +354,11 @@ namespace PianoTeacher3D.Characters
         {
             if (_root == null) return;
             if (!_root.activeSelf) _root.SetActive(true);
-            _pose.Apply(_animator);
+            if (_pose.Apply(_animator))
+            {
+                FitStoolToPose();
+                _concertGown?.BuildSeatedSkirt();
+            }
             _activated = true;
         }
 
@@ -362,6 +373,7 @@ namespace PianoTeacher3D.Characters
             // 还原绑定姿态：坐姿应用器改了骨骼旋转与根节点位置，
             // 不还原的话实例会一直停在「摆好的坐姿」上，重新激活或外部检查时状态不可预期。
             _pose.Restore(_animator);
+            _concertGown?.RestoreStandingSkirt();
 
             if (_root.activeSelf) _root.SetActive(false);
             _activated = false;
@@ -567,6 +579,8 @@ namespace PianoTeacher3D.Characters
             // 用同一个常量会让成人的指尖悬空、儿童的指尖扎进键面，因此按 id 分别标定。
             def.HandHeightOffset = HandHeightOffsetFor(profile);
             def.HandDepthOffset = 0f;
+            if (profile.CharacterId == CharacterRegistry.RocketboxMaleId || profile.PhotoAvatar?.ShortHair == true)
+                def.Hand.PlayingWristHeightOffset = -0.022f;
             def.Hand.WristPitch = 8f;
             def.Cartoon = false;
             // 导入骨架的腕骨绑定姿态带旋转：腕部朝向必须按「静止姿态 × 增量」合成，
@@ -770,6 +784,7 @@ namespace PianoTeacher3D.Characters
         private static float HandHeightOffsetFor(CharacterProfile profile)
         {
             if (profile == null) return 0.016f;
+            if (profile.PhotoAvatar?.ShortHair == true) return 0.016f;
             switch (profile.CharacterId)
             {
                 case CharacterRegistry.RocketboxMaleId: return 0.016f;

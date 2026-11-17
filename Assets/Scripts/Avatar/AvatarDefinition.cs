@@ -110,6 +110,8 @@ namespace PianoTeacher3D.Avatar
     /// </summary>
     public sealed class HandMetrics
     {
+        /// <summary>触键时相对静止标定的腕高修正，单位为米。</summary>
+        public float PlayingWristHeightOffset;
         /// <summary>手部整体缩放（在体型系数之外，用于同身高角色的手大手小差异）。</summary>
         public float Scale = 1f;
 
@@ -224,6 +226,7 @@ namespace PianoTeacher3D.Avatar
         public void CopyFrom(HandMetrics other)
         {
             if (other == null) return;
+            PlayingWristHeightOffset = other.PlayingWristHeightOffset;
 
             Scale = other.Scale;
             PalmLength = other.PalmLength;

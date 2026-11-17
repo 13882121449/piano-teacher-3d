@@ -4,6 +4,13 @@ using UnityEngine;
 
 namespace PianoTeacher3D.Avatar
 {
+    /// <summary>可选的拇指蒙皮触键点。</summary>
+    public interface IThumbContactRig
+    {
+        /// <summary>拇指的参考点是否取自模型蒙皮外侧的指腹。</summary>
+        bool HasThumbPad { get; }
+    }
+
     /// <summary>
     /// 统一手部控制接口（方案 3.2）：手腕、手掌、手指。
     /// 各角色共用此接口，使 IK 与姿态控制与具体模型解耦。

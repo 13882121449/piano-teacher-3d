@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -165,7 +165,8 @@ namespace PianoTeacher3D.Tests.PlayMode
             primed[3] = true;
             _fingerPose.UseDampedJointMotion = true;
             type.GetMethod("ApplyJoint", flags).Invoke(_fingerPose,
-                new object[] { joint, 0, _fingerPose.MaxMcpDegrees, _fingerPose.MaxMcpDegrees, true, 1 });
+                new object[] { joint, 0, _fingerPose.MaxMcpDegrees, _fingerPose.MaxMcpDegrees,
+                    true, 1, false, false, 0f, 540f });
 
             Assert.LessOrEqual(angles[3], _fingerPose.MaxMcpDegrees, "实际角度必须受关节上限约束");
             Assert.LessOrEqual(velocities[3], 0f, "触及上限时应消除继续屈曲的速度");

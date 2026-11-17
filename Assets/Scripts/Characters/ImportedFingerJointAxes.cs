@@ -106,6 +106,10 @@ namespace PianoTeacher3D.Characters
                         ? nexts[j].position - joint.position
                         : Vector3.zero;
 
+                    // 指腹偏向末节侧面，拇指末节的屈伸轴仍沿骨干推导。
+                    if (f == 0 && j == 2)
+                        worldDirection = joint.position - joints[j - 1].position;
+
                     if (worldDirection.sqrMagnitude < 1e-8f && j > 0)
                     {
                         // 末节常常没有独立「指尖节点」（GetFingertip 直接返还 distal），

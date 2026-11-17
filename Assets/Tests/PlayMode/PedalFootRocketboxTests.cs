@@ -19,6 +19,86 @@ namespace PianoTeacher3D.Tests
         private const float Dt = 1f / 60f;
 
         [UnityTest]
+        public IEnumerator Pedal_FollowsTheCurrentAvatarAfterSwitching()
+        {
+            UnityEngine.SceneManagement.SceneManager.LoadScene("PianoLesson");
+            yield return null;
+            var session = Object.FindFirstObjectByType<PianoTeacher3D.Core.LessonSessionController>();
+            var driver = Object.FindFirstObjectByType<PedalFootAnimator>();
+            Assert.IsNotNull(session);
+            Assert.IsNotNull(driver);
+            session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+            yield return null;
+            var first = session.CurrentCharacterView.Animator;
+            Assert.IsNotNull(first);
+            Assert.AreSame(first, driver.BoundAnimator);
+            session.SwitchAvatar(0);
+            yield return null;
+            var second = session.CurrentCharacterView.Animator;
+            Assert.AreNotSame(first, driver.BoundAnimator, "换角色后必须解除原骨架");
+            Assert.AreSame(second != null && second.isHuman ? second : null, driver.BoundAnimator);
+            session.RestoreCharacter(CharacterRegistry.RocketboxMaleId);
+            yield return null;
+            Assert.AreSame(session.CurrentCharacterView.Animator, driver.BoundAnimator);
+            Assert.IsTrue(driver.IsBound);
+        }
+
+        [UnityTest]
+        public IEnumerator Pedal_Cc64SeekSetsContactAndPauseKeepsAudioSilent()
+        {
+            UnityEngine.SceneManagement.SceneManager.LoadScene("PianoLesson");
+            yield return null;
+            var session = Object.FindFirstObjectByType<PianoTeacher3D.Core.LessonSessionController>();
+            var driver = Object.FindFirstObjectByType<PedalFootAnimator>();
+            var audio = Object.FindFirstObjectByType<PianoTeacher3D.Piano.PianoAudioSynth>();
+            session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+            string song = System.IO.Path.Combine(Application.streamingAssetsPath, "Songs", "bench",
+                "articulation", "pedal_cc64.mid");
+            session.LoadSong(song);
+            float deadline = Time.realtimeSinceStartup + 5f;
+            while (session.IsLoading && Time.realtimeSinceStartup < deadline) yield return null;
+            Assert.IsTrue(session.HasSong);
+            session.Play();
+            session.Pause();
+            session.Seek(0.45f);
+            yield return null;
+            Assert.Greater(driver.CurrentAngleDegrees, 8f);
+            Assert.LessOrEqual(driver.ContactErrorMeters, 0.01f, "鞋掌到踏板接触点应在 10 mm 内");
+            Assert.AreEqual(0, audio.ActiveVoiceCount, "暂停拖动只重建画面");
+        }
+
+        [UnityTest]
+        public IEnumerator PedalAudio_ReleasesOnlyNotesWithNoFingersDown()
+        {
+            var host = new GameObject("延音声部测试");
+            try
+            {
+                var audio = host.AddComponent<PianoTeacher3D.Piano.PianoAudioSynth>();
+                audio.Initialize();
+                Assert.IsTrue(audio.Initialized, audio.LastInitError);
+                var first = new PianoTeacher3D.MIDI.MidiNoteEvent(60, 0f, 0.3f, 70, 0, 0);
+                var second = new PianoTeacher3D.MIDI.MidiNoteEvent(64, 0f, 1f, 80, 0, 0);
+
+                audio.SetSustain(true);
+                audio.OnNoteOn(first);
+                audio.OnNoteOn(second);
+                audio.OnNoteOff(first);
+                Assert.AreEqual(2, audio.ActiveVoiceCount);
+
+                audio.SetSustain(false);
+                Assert.AreEqual(1, audio.ActiveVoiceCount);
+                audio.OnNoteOff(second);
+                Assert.AreEqual(0, audio.ActiveVoiceCount);
+            }
+            finally
+            {
+                Object.Destroy(host);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Pedal_DrivesRightFootAndReturnsToRest()
         {
             var profile = CharacterRegistry.CreateRocketbox();

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using PianoTeacher3D.MIDI;
 using UnityEngine;
 
@@ -43,6 +43,11 @@ namespace PianoTeacher3D.Characters
         private Transform _foot;
         private Transform _toes;
         private Transform _pedal;
+        private Transform _contact;
+        private Transform _heel;
+        private Animator _boundAnimator;
+        private Vector3 _ballLocal;
+        private Vector3 _heelLocal;
         private Quaternion _pedalRest;
         private Quaternion _restWorld;
         private Vector3 _pitchAxis;
@@ -55,17 +60,26 @@ namespace PianoTeacher3D.Characters
         /// <summary>是否已绑定到可驱动的脚骨。</summary>
         public bool IsBound => _foot != null;
 
+        public Animator BoundAnimator => IsBound ? _boundAnimator : null;
+
+        /// <summary>鞋掌代理点到踏板的距离，未绑定时无样本。</summary>
+        public float ContactErrorMeters => _foot != null && _contact != null
+            ? Vector3.Distance(_foot.TransformPoint(_ballLocal), _contact.position)
+            : float.NaN;
+
         /// <summary>当前脚尖抬起角度（度），供测试与调试读取。</summary>
         public float CurrentAngleDegrees => _angle;
 
         /// <summary>绑定 Humanoid 骨架。重复绑定同一骨架是幂等的；不可用时不改变状态。</summary>
         public void Bind(Animator animator)
         {
+            if (_boundAnimator == animator) return;
+            Unbind();
+            _boundAnimator = animator;
             if (animator == null || animator.avatar == null || !animator.isHuman) return;
 
             var foot = animator.GetBoneTransform(HumanBodyBones.RightFoot);
             if (foot == null) return;
-            if (_foot == foot) return;
 
             _foot = foot;
             _toes = animator.GetBoneTransform(HumanBodyBones.RightToes);
@@ -85,8 +99,9 @@ namespace PianoTeacher3D.Characters
             Vector3 axis = Vector3.Cross(Vector3.up, forward.normalized);
             _pitchAxis = axis.sqrMagnitude < 1e-8f ? foot.right : axis.normalized;
 
-            _angle = 0f;
-            _targetAngle = 0f;
+            _ballLocal = foot.InverseTransformPoint((_toes != null ? _toes.position : foot.position + forward.normalized * 0.12f)
+                - Vector3.up * 0.025f);
+            _heelLocal = foot.InverseTransformPoint(foot.position - forward.normalized * 0.045f - Vector3.up * 0.045f);
         }
 
         /// <summary>
@@ -101,7 +116,7 @@ namespace PianoTeacher3D.Characters
         /// 把大腿摆到「髋 → 目标」方向上。每帧从绑定姿态重建，不累加。
         /// </para>
         /// </summary>
-        private void SolveLegIk()
+        private void SolveLegIk(Vector3 target)
         {
             if (_upperLeg == null || _lowerLeg == null || _foot == null || _pedal == null) return;
 
@@ -116,21 +131,20 @@ namespace PianoTeacher3D.Characters
             float l2 = Vector3.Distance(knee, ankle);
             if (l1 < 1e-4f || l2 < 1e-4f) return;
 
-            Vector3 target = _pedal.position + new Vector3(0f, _legIkOffsetY, 0.02f);
             Vector3 toTarget = target - hip;
             float dist = Mathf.Clamp(toTarget.magnitude,
                 Mathf.Abs(l1 - l2) + 2e-3f, l1 + l2 - 2e-3f);
             Vector3 dir = toTarget.sqrMagnitude > 1e-8f ? toTarget.normalized : Vector3.down;
 
             Vector3 bendAxis = Vector3.Cross(knee - hip, ankle - knee);
-            if (bendAxis.sqrMagnitude < 1e-8f) bendAxis = Vector3.Cross(dir, Vector3.forward);
+            if (bendAxis.sqrMagnitude < 1e-8f) bendAxis = _upperLeg.right;
             bendAxis.Normalize();
 
             float kneeNow = Vector3.Angle(knee - hip, ankle - knee) * Mathf.Deg2Rad;
-            float cosWant = Mathf.Clamp((dist * dist - l1 * l1 - l2 * l2) / (-2f * l1 * l2), -1f, 1f);
+            float cosWant = Mathf.Clamp((dist * dist - l1 * l1 - l2 * l2) / (2f * l1 * l2), -1f, 1f);
             float kneeWant = Mathf.Acos(cosWant);
 
-            _lowerLeg.rotation = Quaternion.AngleAxis((kneeNow - kneeWant) * Mathf.Rad2Deg, bendAxis) *
+            _lowerLeg.rotation = Quaternion.AngleAxis((kneeWant - kneeNow) * Mathf.Rad2Deg, bendAxis) *
                                  _lowerLeg.rotation;
 
             Vector3 ankleNow = _foot.position;
@@ -144,11 +158,11 @@ namespace PianoTeacher3D.Characters
         /// <summary>解除绑定（换角色时调用），把脚恢复为绑定时的姿态。</summary>
         public void Unbind()
         {
+            if (_upperLeg != null) _upperLeg.rotation = _upperRest;
+            if (_lowerLeg != null) _lowerLeg.rotation = _lowerRest;
             if (_foot != null) _foot.rotation = _restWorld;
-            if (_pedal != null) _pedal.localRotation = _pedalRest;
-            _foot = null;
-            _toes = null;
-            _angle = 0f;
+            _boundAnimator = null;
+            _upperLeg = _lowerLeg = _foot = _toes = null;
         }
 
         /// <summary>
@@ -158,53 +172,65 @@ namespace PianoTeacher3D.Characters
         {
             if (_foot == null && _pedal == null) return;
 
-            // 先做腿 IK：每帧从绑定姿态重建，避免逐帧叠加漂移。
-            if (_useLegIk) SolveLegIk();
-
             _targetAngle = pressed ? _pressAngleDegrees : 0f;
-            bool atRest = Mathf.Approximately(_angle, _targetAngle) && Mathf.Approximately(_angle, 0f);
-            if (!atRest)
-            {
-                float k = _smoothSeconds <= 1e-4f ? 1f : Mathf.Clamp01(deltaTime / _smoothSeconds);
-                _angle = Mathf.Lerp(_angle, _targetAngle, k);
-                if (Mathf.Abs(_angle - _targetAngle) < 0.05f) _angle = _targetAngle;
-            }
-
-            // 绕水平俯仰轴负转 = 脚尖抬起（脚跟着地），这正是踩踏板的方向（符号按 Rocketbox 实测）
-            if (_foot != null)
-            {
-                // 抬脚轴每帧按当前脚指向重算：腿 IK 会把整条腿搬到踏板上，
-                // 绑定瞬间算出的世界轴在搬腿后已经不等于「脚的左右轴」。
-                Vector3 footForward = _toes != null ? _toes.position - _foot.position : _foot.forward;
-                Vector3 axis = footForward.sqrMagnitude > 1e-8f
-                    ? Vector3.Cross(Vector3.up, footForward.normalized)
-                    : _pitchAxis;
-                if (axis.sqrMagnitude < 1e-8f) axis = _pitchAxis;
-                else axis.Normalize();
-
-                // 基准恒为绑定姿态：腿 IK 若执行过，会先把 foot 复位到 _restWorld（只改踝的位置）。
-                _foot.rotation = Quaternion.AngleAxis(-_angle, axis) * _restWorld;
-            }
-
-            // 踏板本体：绕自身左右轴下压（远端下沉），角度与脚同步
-            if (_pedal != null)
-            {
-                float t01 = _pressAngleDegrees > 1e-3f ? _angle / _pressAngleDegrees : 0f;
-                _pedal.localRotation = Quaternion.AngleAxis(_pedalTravelDegrees * t01, Vector3.right) * _pedalRest;
-            }
+            float k = _smoothSeconds <= 1e-4f ? 1f : Mathf.Clamp01(deltaTime / _smoothSeconds);
+            _angle = Mathf.Lerp(_angle, _targetAngle, k);
+            if (Mathf.Abs(_angle - _targetAngle) < 0.05f) _angle = _targetAngle;
+            ApplyPose();
         }
 
-        /// <summary>
-        /// 绑定踏板模型（按名字在场景里找，找不到就静默跳过）。
-        /// <para>为什么单独一条链路：程序化角色没有 Humanoid 骨架，脚动不了，但踏板该动。</para>
-        /// </summary>
+        public void SetImmediate(bool pressed)
+        {
+            _angle = _targetAngle = pressed ? _pressAngleDegrees : 0f;
+            ApplyPose();
+        }
+
+        private void ApplyPose()
+        {
+            if (_pedal != null)
+            {
+                float amount = _pressAngleDegrees > 1e-3f ? _angle / _pressAngleDegrees : 0f;
+                _pedal.localRotation = _pedalRest * Quaternion.AngleAxis(_pedalTravelDegrees * amount, Vector3.right);
+            }
+
+            if (_foot == null) return;
+            if (_contact != null && _heel != null && _useLegIk)
+            {
+                // 先移动踏板，以当前鞋掌接触点和鞋跟为基准求踝部。
+                Vector3 ball = _contact.position;
+                Vector3 shoeDirection = ball - _heel.position;
+                Vector3 sole = _ballLocal - _heelLocal;
+                if (shoeDirection.sqrMagnitude > 1e-8f && sole.sqrMagnitude > 1e-8f)
+                {
+                    Quaternion aim = Quaternion.FromToRotation(_restWorld * sole, shoeDirection) * _restWorld;
+                    Vector3 target = ball - aim * _ballLocal;
+                    SolveLegIk(target);
+                    _foot.rotation = aim;
+                    return;
+                }
+            }
+
+            if (_useLegIk && _pedal != null)
+                SolveLegIk(_pedal.position + new Vector3(0f, _legIkOffsetY, 0.02f));
+            _foot.rotation = Quaternion.AngleAxis(-_angle, _pitchAxis) * _restWorld;
+        }
+
+        /// <summary>按琴的铰链和接触标记绑定，琴体重建时恢复旧姿态。</summary>
+        public void BindPedal(Transform hinge, Transform contact, Transform heel)
+        {
+            if (_pedal == hinge && _contact == contact && _heel == heel) return;
+            if (_pedal != null) _pedal.localRotation = _pedalRest;
+            _pedal = hinge;
+            _contact = contact;
+            _heel = heel;
+            if (_pedal != null) _pedalRest = _pedal.localRotation;
+        }
+
+        /// <summary>旧场景和独立诊断可以按名称绑定。</summary>
         public void BindPedal(string pedalName = "Pedal_R")
         {
             if (_pedal != null) return;
-            var go = GameObject.Find(pedalName);
-            if (go == null) return;
-            _pedal = go.transform;
-            _pedalRest = _pedal.localRotation;
+            BindPedal(GameObject.Find(pedalName)?.transform, null, null);
         }
 
         /// <summary>

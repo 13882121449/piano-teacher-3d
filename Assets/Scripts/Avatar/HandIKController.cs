@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
+using PianoTeacher3D.MIDI;
 using UnityEngine;
 
 namespace PianoTeacher3D.Avatar
@@ -23,8 +24,9 @@ namespace PianoTeacher3D.Avatar
     /// ⑧ <b>和弦先成形再下压</b>：和弦出现时指尖目标从（成型的）手型上方在 <see cref="ChordFormationSeconds"/>
     ///    内过渡到键面，避免所有指尖在同一帧突然到位。
     /// </para>
-    /// 左右手以 C4（pitch=60）分界；不承诺专业指法准确性（方案 2.3）。
+    /// 左右手读取曲目加载时的分配，指法由估算器给出（方案 2.3）。
     /// </summary>
+    [DefaultExecutionOrder(3)]
     public class HandIKController : MonoBehaviour, IFingertipTargetSource
     {
         [Header("手部目标几何（真实钢琴尺度，米）")]
@@ -189,6 +191,9 @@ namespace PianoTeacher3D.Avatar
         /// <summary>是否让手腕按角色配置做受限俯仰 / 滚转（只影响姿态，不改变单帧位移上限）。</summary>
         public bool EnableWristOrientation = true;
 
+        /// <summary>与手指关节约束配合，在触键前规划实际指根可达的腕位。</summary>
+        public bool UseAnatomicalContact = true;
+
         /// <summary>角色未提供 <see cref="HandMetrics.WristPitch"/> 时的默认俯仰（度）。</summary>
         public float DefaultWristPitch = 8f;
 
@@ -277,7 +282,7 @@ namespace PianoTeacher3D.Avatar
         public float BlackKeyTargetLift = 0f;
         /// <summary>按住黑键时抬腕的高度（米）：黑键键面比白键高 22 mm，试 11 mm 实测无效（R2 残差 20.9→21.0 mm），默认关。</summary>
         public float BlackKeyHandLift = 0f;
-        /// <summary>绕手指轴扭转的钳制上限（度）。只用于防止法线与手指近平行时的病态跳变。</summary>
+        /// <summary>绕手指轴附加侧倾的上限（度）。</summary>
         public float MaxWristTwistDegrees = 120f;
 
         private const int MaxRecordedIssues = 8;
@@ -285,6 +290,7 @@ namespace PianoTeacher3D.Avatar
         private AvatarManager _avatar;
         private Piano.PianoKeyMap _keyMap;
         private readonly HashSet<int> _pressed = new();
+        private readonly MIDI.ActiveNoteHands _pressedHands = new();
 
         // 腕骨「静止姿态」缓存（rest-relative 朝向用）：只在第一次施加朝向之前采样，
         // 之后不再被 IK 写入污染。左右手分开存，因为两手绑定姿态不同。
@@ -315,8 +321,34 @@ namespace PianoTeacher3D.Avatar
 
         private int _upcomingLeftPitch = -1;
         private int _upcomingRightPitch = -1;
+        private float _upcomingLeftTime, _upcomingRightTime;
+        private int _upcomingLeftVelocity, _upcomingRightVelocity;
+        private bool _primeOpeningThumb;
+        private const float FingerPreparationSeconds = 0.17f;
 
         // 手腕速度状态（临界阻尼二阶跟随的内部状态；每手独立）
+        private Quaternion _leftWristOrientation;
+        private Quaternion _rightWristOrientation;
+        private struct WristContactFit
+        {
+            public long NoteSet;
+            public Vector3 Position;
+            public float Yaw;
+        }
+
+        private WristContactFit _leftContactFit;
+        private WristContactFit _rightContactFit;
+        private readonly Vector3[] _contactFitTargets = new Vector3[5];
+        private readonly int[] _contactFitFingers = new int[5];
+        private readonly int[] _leftUpcomingChord = { -1, -1, -1, -1, -1 };
+        private readonly int[] _rightUpcomingChord = { -1, -1, -1, -1, -1 };
+
+        private bool _leftHasWristOrientation;
+        private bool _rightHasWristOrientation;
+        private float _leftContactHeight;
+        private float _rightContactHeight;
+        private float _leftPlayingWristHeight;
+        private float _rightPlayingWristHeight;
         private Vector3 _leftWristVelocity;
         private Vector3 _rightWristVelocity;
 
@@ -352,7 +384,7 @@ namespace PianoTeacher3D.Avatar
 
         // ---- 键面目标点（初始化时预计算，Update 路径零分配复用）----
         private readonly Dictionary<int, KeyTouchPoint> _keyTouches = new();
-        private readonly Vector2[] _chordReachCenters = new Vector2[5];
+        private readonly Vector3[] _chordReachCenters = new Vector3[5];
         private readonly float[] _chordReachRadii = new float[5];
 
         // ---- 指尖目标（每手 5 个，预分配） + 和弦成形过渡进度 ----
@@ -407,20 +439,36 @@ namespace PianoTeacher3D.Avatar
         /// <summary>一个琴键的可复用按压目标点（键面前半段 + 该键真实键面高度）。</summary>
         private readonly struct KeyTouchPoint
         {
+            private readonly Transform _key;
+            private readonly Vector3 _localPress;
+            private readonly Vector3 _localThumbPress;
+            public readonly Vector3 Rest;
+            public readonly Vector3 Depressed;
+            public readonly Vector3 ThumbRest;
+            public readonly Vector3 ThumbDepressed;
+
             /// <summary>按压点世界坐标（落在键面合理按压区域，而不是键位中心的任意高度）。</summary>
-            public readonly Vector3 Press;
+            public Vector3 Press => _key.TransformPoint(_localPress);
+            public Vector3 ThumbPress => _key.TransformPoint(_localThumbPress);
 
             /// <summary>是否为黑键（用于分组指标与独立目标高度）。</summary>
             public readonly bool Black;
 
-            /// <summary>该键键面世界高度（黑键 = 键根 y + BlackHeight，白键 = 键根 y + WhiteHeight）。</summary>
-            public readonly float SurfaceY;
+            /// <summary>本帧按压点的键面世界高度，随琴键下沉变化。</summary>
+            public float SurfaceY => Press.y;
 
-            public KeyTouchPoint(Vector3 press, bool black, float surfaceY)
+            public KeyTouchPoint(Transform key, Vector3 localPress, Vector3 localThumbPress, bool black,
+                Quaternion depressedRotation)
             {
-                Press = press;
+                _key = key;
+                _localPress = localPress;
+                _localThumbPress = localThumbPress;
+                Rest = key.TransformPoint(localPress);
+                ThumbRest = key.TransformPoint(localThumbPress);
+                var down = Matrix4x4.TRS(key.localPosition, depressedRotation, key.localScale);
+                Depressed = key.parent.TransformPoint(down.MultiplyPoint3x4(localPress));
+                ThumbDepressed = key.parent.TransformPoint(down.MultiplyPoint3x4(localThumbPress));
                 Black = black;
-                SurfaceY = surfaceY;
             }
         }
 
@@ -469,7 +517,7 @@ namespace PianoTeacher3D.Avatar
             return _hasLimits;
         }
 
-        /// <summary>取某音高的可复用键面按压目标点（初始化时预计算；音高越界或未建键时返回 false）。</summary>
+        /// <summary>取某音高在当前键面上的按压点。音高越界或未建键时返回 false。</summary>
         public bool TryGetKeyPressPoint(int pitch, out Vector3 point)
         {
             if (_keyTouches.TryGetValue(pitch, out var touch))
@@ -497,12 +545,12 @@ namespace PianoTeacher3D.Avatar
         /// <summary>黑白键键面高度差（米），供诊断与「黑键单独目标高度」验证。</summary>
         public float BlackWhiteSurfaceDelta => _keyMap != null ? (_keyMap.BlackHeight - _keyMap.WhiteHeight) : 0f;
 
-        public void Initialize(AvatarManager avatar, Piano.PianoKeyMap keyMap)
+        public void Initialize(AvatarManager avatar, Piano.PianoKeyMap keyMap, Piano.PianoKeyAnimator keyAnimator = null)
         {
             _avatar = avatar;
             _keyMap = keyMap;
             BuildLimits();
-            BuildKeyTouches();
+            BuildKeyTouches(keyAnimator != null ? keyAnimator.DepressedRotation : Quaternion.identity);
         }
 
         /// <summary>由控制器每帧传入统一时间轴时间（用于自适应速度与指标采样）。</summary>
@@ -512,6 +560,7 @@ namespace PianoTeacher3D.Avatar
         {
             if (Piano.PianoKeyMap.IsInRange(e.Pitch))
             {
+                _pressedHands.Press(e);
                 _pressed.Add(e.Pitch);
                 if (e.Duration > 0f) _pressedDurations[e.Pitch] = e.Duration;
             }
@@ -526,9 +575,13 @@ namespace PianoTeacher3D.Avatar
 
         public void OnNoteOff(MIDI.MidiNoteEvent e)
         {
+            if (!Piano.PianoKeyMap.IsInRange(e.Pitch) || !_pressedHands.Release(e)) return;
             _pressed.Remove(e.Pitch);
             _pressedDurations.Remove(e.Pitch);
         }
+
+        /// <summary>当前这个键由哪只手演示。重叠同音共用一个琴键。</summary>
+        public bool IsActivePitchLeft(int pitch) => _pressedHands.IsLeft(pitch);
 
         /// <summary>
         /// 由会话层每帧推入「该手即将到来、此刻尚未按下的音高」（无则 -1）。
@@ -537,33 +590,82 @@ namespace PianoTeacher3D.Avatar
         /// 因此该优化不会美化指标，只减少「换位途中错过音符」。
         /// </summary>
         public void SetUpcomingPitches(int leftPitch, int rightPitch)
+            => SetUpcomingPitches(leftPitch, rightPitch, _currentTime + 0.1f, _currentTime + 0.1f, 80, 80);
+
+        /// <summary>接收时间轴选出的各手下一个落键。时间和力度仅用于动作预备。</summary>
+        public void SetUpcomingPitches(int leftPitch, int rightPitch, float leftStartTime, float rightStartTime,
+            int leftVelocity, int rightVelocity, bool primeRightThumb = false)
         {
+            _primeOpeningThumb = primeRightThumb && rightPitch >= 0;
             _upcomingLeftPitch = leftPitch;
             _upcomingRightPitch = rightPitch;
+            _upcomingLeftTime = leftStartTime;
+            _upcomingRightTime = rightStartTime;
+            _upcomingLeftVelocity = leftVelocity;
+            _upcomingRightVelocity = rightVelocity;
+            System.Array.Fill(_leftUpcomingChord, -1);
+            System.Array.Fill(_rightUpcomingChord, -1);
+        }
+
+        internal void SetUpcomingChords(IReadOnlyList<MidiNoteEvent> notes)
+        {
+            for (int i = 0; i < notes.Count; i++)
+            {
+                var note = notes[i];
+                bool left = PianoNoteFilter.IsLeftHand(note);
+                int next = left ? _upcomingLeftPitch : _upcomingRightPitch;
+                float start = left ? _upcomingLeftTime : _upcomingRightTime;
+                if (next < 0 || Mathf.Abs(note.StartTime - start) > 0.0005f) continue;
+                int finger = Assignment.PreviewFinger(left, note.Pitch, note.StartTime);
+                if (finger >= 0 && finger < 5)
+                    (left ? _leftUpcomingChord : _rightUpcomingChord)[finger] = note.Pitch;
+            }
         }
 
         public void ReleaseAll()
         {
             _pressed.Clear();
+            _pressedHands.Clear();
             _pressedDurations.Clear();
             _lastNoteTime = float.NaN;   // 复位间隔统计，避免 Seek 后沿用旧节奏
             _avgNoteGap = 0.4f;
             _upcomingLeftPitch = -1;     // 复位预置目标，避免停止/切曲后手继续移向旧音符
             _upcomingRightPitch = -1;
-            // 复位手腕速度：Seek / 切曲 / 停止后必须清零，否则手会带着旧的动量冲过头
-            _leftWristVelocity = Vector3.zero;
-            _rightWristVelocity = Vector3.zero;
-            // 空闲锚点一并清除：真正的「停止 / 定位」应该回到默认手位，而不是停在旧键上
+            _primeOpeningThumb = false;
+            System.Array.Fill(_leftUpcomingChord, -1);
+            System.Array.Fill(_rightUpcomingChord, -1);
+            // 停止和定位时清除空闲键位。换人可沿用正在播放的键位。
             _hasLeftIdleAnchor = false;
             _hasRightIdleAnchor = false;
-            _leftPalmCorrection = Vector3.zero;   // 复位手掌修正，避免 Seek 后从旧修正量滑过去
-            _rightPalmCorrection = Vector3.zero;            _leftReachOffset = Vector3.zero;
+            ResetRigMotion();
+        }
+
+        /// <summary>复位依赖骨架的平滑状态，保留音符、指法和预备目标。</summary>
+        public void ResetRigMotion()
+        {
+            _leftContactHeight = 0f;
+            _rightContactHeight = 0f;
+            _leftPlayingWristHeight = 0f;
+            _rightPlayingWristHeight = 0f;
+            _leftWristVelocity = Vector3.zero;
+            _rightWristVelocity = Vector3.zero;
+            _leftContactFit = default;
+            _rightContactFit = default;
+            _leftHasWristOrientation = false;
+            _rightHasWristOrientation = false;
+            _leftPalmCorrection = Vector3.zero;
+            _rightPalmCorrection = Vector3.zero;
+            _leftReachOffset = Vector3.zero;
             _rightReachOffset = Vector3.zero;
-            _hasLeftSmoothed = false;    // 复位目标平滑，Seek 后重新对齐而非从旧目标滑过去（左右手各自复位）
+            _leftWristHeightAdapt = 0f;
+            _rightWristHeightAdapt = 0f;
+            _hasLeftSmoothed = false;
             _hasRightSmoothed = false;
-            _leftHadPrevTarget = false;  // 复位分组判定，避免 Seek 后的首个采样被误判为「跨手大位移」
+            _leftHadPrevTarget = false;
             _rightHadPrevTarget = false;
-            _hasPrevWrist = false;       // 复位过渡帧判定（否则首帧位移会被当成换位）
+            _leftLargeMotion = 0f;
+            _rightLargeMotion = 0f;
+            _hasPrevWrist = false;
             _transitionFrame = false;
             ResetFingertipTargets(leftHand: true);
             ResetFingertipTargets(leftHand: false);
@@ -681,7 +783,7 @@ namespace PianoTeacher3D.Avatar
             pitches.Clear();
             foreach (var pitch in _pressed)
             {
-                if (MIDI.PianoNoteFilter.IsLeftHand(pitch) == leftHand) pitches.Add(pitch);
+                if (IsActivePitchLeft(pitch) == leftHand) pitches.Add(pitch);
             }
             pitches.Sort();
             Assignment.Refresh(leftHand, pitches, _currentTime, Time.frameCount);
@@ -778,7 +880,7 @@ namespace PianoTeacher3D.Avatar
             int count = 0;
 
             bool usesChordPlacement = leftHand ? _leftUsesChordPlacement : _rightUsesChordPlacement;
-            if (!usesChordPlacement && hand != null && hand.Fingers != null)
+            if (hand != null && hand.Fingers != null && (!usesChordPlacement || !(hand is IHandOrientationRig)))
             {
                 int fingerCount = Mathf.Min(hand.Fingers.Count, 5);
                 for (int f = 0; f < fingerCount; f++)
@@ -793,7 +895,7 @@ namespace PianoTeacher3D.Avatar
             // 本帧残差来自已偏移的位置，到位后保留已生效的偏移。
             Vector3 want = count > 0 ? current + (sum / count) * PalmCorrectionGain : Vector3.zero;
             want.y = 0f;                                        // 高度不由手掌平移承担
-            want = Vector3.ClampMagnitude(want, MaxPalmCorrection);
+            want = Vector3.ClampMagnitude(want, usesChordPlacement ? 0.018f : MaxPalmCorrection);
 
             float k = 1f - Mathf.Exp(-PalmCorrectionSpeed * Time.deltaTime);
             Vector3 next = Vector3.Lerp(current, want, k);
@@ -884,7 +986,14 @@ namespace PianoTeacher3D.Avatar
             else _rightWristHeightAdapt = Mathf.Lerp(_rightWristHeightAdapt, want, k);
         }
 
-        private void UpdateHand(bool leftHand)
+        internal bool AlignOpeningRightThumb()
+        {
+            if (!_primeOpeningThumb || _upcomingRightTime > 0.0005f) return false;
+            RefreshAssignment(leftHand: false);
+            return UpdateHand(leftHand: false, alignOpeningThumb: true);
+        }
+
+        private bool UpdateHand(bool leftHand, bool alignOpeningThumb = false)
         {
             int? targetPitch = FindHandTarget(leftHand);
             bool hasTarget = targetPitch.HasValue && _keyMap.TryGetKey(targetPitch.Value, out _);
@@ -937,6 +1046,15 @@ namespace PianoTeacher3D.Avatar
                     rawTarget.z + def.HandDepthOffset);
             }
 
+            if (def != null && def.Hand.PlayingWristHeightOffset != 0f)
+            {
+                // 静置时食指轻搭键沿，演奏时腕部向实际落键高度过渡。
+                ref float playingHeight = ref (leftHand ? ref _leftPlayingWristHeight : ref _rightPlayingWristHeight);
+                float targetHeight = hasTarget || preselected ? def.Hand.PlayingWristHeightOffset : 0f;
+                playingHeight = Mathf.Lerp(playingHeight, targetHeight, 1f - Mathf.Exp(-24f * Time.deltaTime));
+                rawTarget.y += playingHeight;
+            }
+
             // 腕高自适应偏移（接触方案批次 2.4）：按每手反馈量微调腕高，不改公共 HandHeight 常量语义。
             // 与 def.HandHeightOffset 的叠加方式一致（参照 AvatarDefinition 叠加点先例）。
             if (WristHeightAdaptation)
@@ -950,10 +1068,40 @@ namespace PianoTeacher3D.Avatar
             // 指尖贴键的手掌修正（方案 5.3 第二阶段）：把手腕朝「消灭指尖平均误差」的方向平移。
             // 只修正 XZ（高度由手指弯曲负责），并夹在键盘允许范围内，避免把手腕推出琴键区触发姿态钳制。
             var hand = leftHand ? _avatar.LeftHand : _avatar.RightHand;
-            bool usesChordPlacement = hasTarget && TryPlaceChordWrist(hand, leftHand, ref rawTarget);
+            if (!hasTarget && !preselected && hand is IHandOrientationRig && hand is IFingertipRig restRig)
+            {
+                // 空闲食指轻搭键面。取相对腕高，避免把上一帧腕部位移再次叠加进去。
+                Transform index = restRig.GetFingertip(1);
+                if (index != null)
+                {
+                    float neutralHeight = _keyMap.KeySurfaceY + 0.003f + hand.Wrist.position.y - index.position.y;
+                    rawTarget.y = Mathf.Clamp(neutralHeight, rawTarget.y - 0.037f, rawTarget.y + 0.037f);
+                }
+            }
+            bool constrained = UseAnatomicalContact && hand is IHandOrientationRig;
+            int upcomingPitch = leftHand ? _upcomingLeftPitch : _upcomingRightPitch;
+            float upcomingTime = leftHand ? _upcomingLeftTime : _upcomingRightTime;
+            bool thumbPad = hand is IThumbContactRig { HasThumbPad: true };
+            // 和弦中拇指与其余手指共享腕位。用同一次试算找有足够抬腕空间的姿势。
+            bool directThumbFit = thumbPad && (hasTarget
+                ? Assignment.GetPitch(leftHand, 0) >= 0
+                : preselected && !constrained && Assignment.PreviewFinger(leftHand, upcomingPitch, upcomingTime) == 0);
+            ref WristContactFit fit = ref (leftHand ? ref _leftContactFit : ref _rightContactFit);
+            bool usesChordPlacement = hasTarget && TryPlaceChordWrist(hand, leftHand, ref rawTarget, constrained);
+            bool fitted = (constrained || directThumbFit) && (hasTarget || preselected)
+                && def != null && def.Hand.WristOrientationFromRest && PoseIssueSource is FingerPoseController pose
+                && TryFitContactWrist(hand, leftHand, hasTarget, pose, ref fit, ref rawTarget,
+                    directThumbFit && !hasTarget && !constrained ? upcomingPitch : -1);
+            if (!fitted) fit = default;
+            usesChordPlacement |= fitted;
+            if (constrained)
+            {
+                if (!fitted) rawTarget.y += AdjustContactHeight(hand, leftHand, hasTarget);
+                SeparateIdleWrist(leftHand, hasTarget || preselected, ref rawTarget);
+            }
             if (leftHand) _leftUsesChordPlacement = usesChordPlacement;
             else _rightUsesChordPlacement = usesChordPlacement;
-            if (!usesChordPlacement)
+            if (!usesChordPlacement || !(hand is IHandOrientationRig))
                 rawTarget += leftHand ? _leftPalmCorrection : _rightPalmCorrection;
 
             // H3 掌位解析解：只补「几何上够不到」的那部分位移，阻尼跟随避免抖动。
@@ -1001,13 +1149,37 @@ namespace PianoTeacher3D.Avatar
                 _rightHadPrevTarget = true;
             }
 
-            if (hand == null || shoulder == null || upperArm == null) return;
+            if (hand == null || shoulder == null || upperArm == null) return false;
+            if (alignOpeningThumb && (!fitted || !directThumbFit || _rightPitches.Count > 1)) return false;
 
             var current = hand.Wrist.position;
-            float speedScale = CurrentSpeedScale() * (preselected ? HandLeadSpeedScale : 1f);
+            float speedScale = CurrentSpeedScale();
+            if (preselected)
+            {
+                // 短间隔大跳优先让前臂跟上。邻键仍以较缓的速度预备。
+                float gap = Mathf.Abs(rawTarget.x - current.x);
+                float travel = Mathf.InverseLerp(0.10f, 0.24f, gap);
+                speedScale *= Mathf.Lerp(HandLeadSpeedScale, 1.15f, travel);
+            }
+
+            if (!leftHand && fitted && thumbPad &&
+                (hasTarget ? Assignment.GetPitch(false, 0) >= 0 : upcomingTime - _currentTime <= 0.09f))
+            {
+                // 手掌还离目标较远时才加快换位，贴键后回到普通阻尼，保留单帧安全上限。
+                float travel = Mathf.InverseLerp(0.036f, 0.15f, Mathf.Abs(rawTarget.x - current.x));
+                speedScale = Mathf.Lerp(speedScale, Mathf.Max(speedScale, 2.65f), travel);
+            }
 
             Vector3 next;
-            if (UseDampedSpring)
+            if (alignOpeningThumb)
+            {
+                next = rawTarget;
+                _rightSmoothedTarget = next;
+                _hasRightSmoothed = true;
+                _rightWristVelocity = Vector3.zero;
+                _rightHasWristOrientation = false;
+            }
+            else if (UseDampedSpring)
             {
                 // 目标限速保留（它抑制换手位时的单帧抖跳），但弹簧不受目标漂移影响——
                 // 这正是与 minimum jerk 的关键差别：没有「段」，就不会出现「每帧重建段」的死锁。
@@ -1058,9 +1230,10 @@ namespace PianoTeacher3D.Avatar
             // 手臂解算交给策略：程序化角色平移+拉伸胶囊；蒙皮角色只旋转骨骼（不写 position/scale）
             ArmSolver.Solve(shoulder, upperArm, foreArm, elbow, hand.Wrist, next, leftHand);
 
-            if (EnableWristOrientation) ApplyWristOrientation(hand, leftHand, def);
+            if (EnableWristOrientation) ApplyWristOrientation(hand, leftHand, def, fitted ? fit.Yaw : (float?)null);
 
             UpdateFingertipTargets(hand, leftHand, def);
+            return true;
         }
 
         /// <summary>
@@ -1069,7 +1242,7 @@ namespace PianoTeacher3D.Avatar
         /// ② 滚转在键盘两端产生轻微侧倾，幅度受限；
         /// ③ 只改姿态，<b>不影响</b> <see cref="MaxStepPerFrame"/> 的位置硬约束。
         /// </summary>
-        private void ApplyWristOrientation(IHandRig hand, bool leftHand, AvatarDefinition def)
+        private void ApplyWristOrientation(IHandRig hand, bool leftHand, AvatarDefinition def, float? contactYaw)
         {
             if (hand == null || hand.Wrist == null) return;
 
@@ -1093,7 +1266,8 @@ namespace PianoTeacher3D.Avatar
             // 俯仰带来的指根位移由 FingerPoseController 的指尖 IK 每帧重新求解（以实际指根为基准），
             // 掌体与键面之间仍有约 18 mm 余量，不会穿模。
             var delta = Quaternion.Euler(pitch, 0f, roll);
-            float k = 1f - Mathf.Exp(-WristOrientationSpeed * Time.deltaTime);
+            float speed = contactYaw.HasValue ? Mathf.Max(WristOrientationSpeed, 24f) : WristOrientationSpeed;
+            float k = 1f - Mathf.Exp(-speed * Time.deltaTime);
 
             // 【导入骨架】手臂用「旋转骨骼」解算，只约束肩→腕的连线，绕前臂轴的滚转是自由的，
             // 掌心朝向完全由绑定姿态决定（实测坐姿下五指指尖高度横跨 72 mm、拇指侧整体抬高）。
@@ -1101,48 +1275,23 @@ namespace PianoTeacher3D.Avatar
             // 令手背法线朝上（按 WristPitch 前倾）、手指朝前下方（按 roll 侧倾）。
             if (def != null && def.Hand.WristOrientationFromRest && hand is IHandOrientationRig basis)
             {
-                // 【为什么不用 LookRotation 拼基】
-                // 「手指前向 + 手背法线」两个约束无法确定绕手指轴的扭转：法线一旦被翻转 180°，
-                // 解出来的手就能左右互换（实测左手拇指朝外、看起来像右手，镜像错误来自这里）。
-                // 改为「先对齐手指方向，再绕该轴把拇指侧转到内侧」——拇指朝向是左右手唯一的判别依据。
-                //
-                // 内侧方向不写死：取另一只手腕相对本手腕的方向在水平面的分量。
-                // 这样不依赖琴/人物在世界里的朝向，换机位或换场景也不会翻手。
-                IHandRig other = leftHand ? _avatar.RightHand : _avatar.LeftHand;
-                Vector3 inward = Vector3.zero;
-                if (other != null && other.Wrist != null)
+                float yaw = contactYaw ?? NaturalWristYaw(hand.Wrist);
+                Quaternion aim = ContactWristRotation(basis, yaw, pitch, roll);
+                // 前臂旋转会带动腕骨。保留上次解算后的世界朝向作为插值起点。
+                if (leftHand)
                 {
-                    inward = other.Wrist.position - hand.Wrist.position;
-                    inward.y = 0f;
+                    _leftWristOrientation = _leftHasWristOrientation
+                        ? Quaternion.Slerp(_leftWristOrientation, aim, k) : aim;
+                    _leftHasWristOrientation = true;
+                    hand.Wrist.rotation = _leftWristOrientation;
                 }
-                if (inward.sqrMagnitude < 1e-6f)
-                    inward = leftHand ? Vector3.right : Vector3.left;   // 兜底：拇指指向身体中线
-
-                // 手指朝「远离演奏者、略微向下」，也就是指向键盘深处。
-                Vector3 desiredForward = new Vector3(0f, -0.30f, -1f).normalized;
-                if (Vector3.Dot(desiredForward, inward.normalized) != 0f)
-                    desiredForward = Vector3.ProjectOnPlane(desiredForward, inward.normalized).normalized;
-
-                Quaternion align = Quaternion.FromToRotation(basis.FingerForwardLocal.normalized, desiredForward);
-
-                // 第二自由度：「手背朝上」（= 掌心朝键面）。
-                // 上一版用「拇指朝内」做扭转约束，方向并不唯一：拇指可以朝内而手掌侧立，
-                // 结果右手被拧成 90°（特写里右手五指横着伸出去）；改成硬钳制后又翻成掌心朝镜头。
-                // 手背法线是**无左右手差异**的量（不像拇指），拿它做约束两侧自然对称，
-                // 也不会出现「解出来的手左右互换」——镜像错误来自拇指侧向量的符号，不是来自两个约束本身。
-                Vector3 backNow = align * basis.BackNormalLocal.normalized;
-                Vector3 backFlat = Vector3.ProjectOnPlane(backNow, desiredForward);
-                Vector3 upFlat = Vector3.ProjectOnPlane(Vector3.up, desiredForward);
-
-                Quaternion aim = align;
-                if (backFlat.sqrMagnitude > 1e-8f && upFlat.sqrMagnitude > 1e-8f)
+                else
                 {
-                    float twist = Vector3.SignedAngle(backFlat, upFlat, desiredForward);
-                    // 钳制只防病态（法线几乎与手指同向时 SignedAngle 会跳），正常解在 ±120° 内。
-                    twist = Mathf.Clamp(twist, -MaxWristTwistDegrees, MaxWristTwistDegrees);
-                    aim = Quaternion.AngleAxis(twist + roll, desiredForward) * align;
+                    _rightWristOrientation = _rightHasWristOrientation
+                        ? Quaternion.Slerp(_rightWristOrientation, aim, k) : aim;
+                    _rightHasWristOrientation = true;
+                    hand.Wrist.rotation = _rightWristOrientation;
                 }
-                hand.Wrist.rotation = Quaternion.Slerp(hand.Wrist.rotation, aim, k);
                 return;
             }
 
@@ -1189,7 +1338,6 @@ namespace PianoTeacher3D.Avatar
 
             // 复用 RefreshAssignment 本帧已经算好的「该手按下的音高」（已排序），不再重复遍历 _pressed。
             var pitches = leftHand ? _leftPitches : _rightPitches;
-            if (pitches.Count == 0) return;
 
             int fingerCount = Mathf.Min(hand.Fingers.Count, 5);
             if (fingerCount == 0) return;
@@ -1201,6 +1349,7 @@ namespace PianoTeacher3D.Avatar
             // 第 f 根手指的目标就是「分配给第 f 根手指的那个音高」的键面按压点。
             // 这样弯曲的手指、指向的目标、真正按下的琴键三者严格一一对应
             // （旧实现用「离键最近的指尖」自行配对，会与指法分配产生矛盾）。
+            bool anatomical = UseAnatomicalContact && hand is IHandOrientationRig;
             float reachAdjust = def != null ? def.Hand.FingertipReachAdjustment : 0f;
 
             for (int f = 0; f < fingerCount; f++)
@@ -1209,13 +1358,14 @@ namespace PianoTeacher3D.Avatar
                 if (pitch < 0) continue;
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) continue;
 
-                targets[f] = touch.Press;
-                // 指腹贴键（不是骨骼末端穿键）：抬指腹半径。见 FingertipPadRadius 的说明。
-                targets[f].y += FingertipPadRadius;
+                bool thumbPad = f == 0 && hand is IThumbContactRig { HasThumbPad: true };
+                targets[f] = thumbPad ? touch.ThumbPress : touch.Press;
+                // 拇指参考点落在蒙皮外侧，其他手指继续使用距键顶有余量的参考点。
+                targets[f].y += anatomical || thumbPad ? ContactPadHeight(hand, f) : FingertipPadRadius;
                 // 黑键按压（接触方案批次 2）：黑键键面高 10 mm，弯曲不足会让指尖压入键面；
                 // 只抬「控制目标」（FingerPoseController 朝目标弯曲），统计仍按真实键面口径。
                 if (touch.Black && BlackKeyTargetLift != 0f) targets[f].y += BlackKeyTargetLift;
-                if (reachAdjust != 0f) targets[f].y += reachAdjust;
+                if (reachAdjust != 0f && !thumbPad) targets[f].y += reachAdjust;
                 has[f] = true;
             }
 
@@ -1237,7 +1387,7 @@ namespace PianoTeacher3D.Avatar
             for (int i = 0; i < pitches.Count; i++)
             {
                 int pitch = pitches[i];
-                if (Assignment.GetFinger(leftHand, pitch) >= 0) continue;
+                if (Assignment.GetFinger(leftHand, pitch) >= 0 || Assignment.HasUnplayableNotes(leftHand)) continue;
                 if (!_keyTouches.TryGetValue(pitch, out var touch)) continue;
 
                 int free = -1;
@@ -1281,8 +1431,86 @@ namespace PianoTeacher3D.Avatar
                 if (chord) blend[f] = Mathf.Clamp01(blend[f] + rate);
                 else blend[f] = 1f;
 
-                targets[f].y += ChordApproachHeight * (1f - blend[f]);
+                // 蒙皮角色在起音前已准备手型。起音后只保留小幅缓冲，避免合奏时再抬一次指尖。
+                float approachHeight = hand is IHandOrientationRig
+                    ? (UseAnatomicalContact ? 0f : Mathf.Min(ChordApproachHeight, 0.005f)) : ChordApproachHeight;
+                targets[f].y += approachHeight * (1f - Mathf.SmoothStep(0f, 1f, blend[f]));
             }
+
+            if (anatomical)
+                PrepareUpcomingChord(hand, leftHand, fingerCount, targets, has);
+            else
+                PrepareUpcomingFinger(hand, leftHand, fingerCount, targets, has);
+        }
+
+        private void PrepareUpcomingChord(IHandRig hand, bool leftHand, int fingerCount,
+            Vector3[] targets, bool[] has)
+        {
+            float lead = FingerPreparationLead(leftHand);
+            if (lead <= 0f || lead > FingerPreparationSeconds || !(hand is IFingerJointRig rig)) return;
+            var upcoming = leftHand ? _leftUpcomingChord : _rightUpcomingChord;
+            float approach = 1f - Mathf.Clamp01(lead / FingerPreparationSeconds);
+            float blend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(approach * 3f));
+            for (int finger = 0; finger < fingerCount; finger++)
+            {
+                if (has[finger] || upcoming[finger] < 0 || !_keyTouches.TryGetValue(upcoming[finger], out var key))
+                    continue;
+                var tip = rig.GetFingertip(finger);
+                if (tip == null) continue;
+                bool thumbPad = finger == 0 && hand is IThumbContactRig { HasThumbPad: true };
+                float lift = thumbPad && !leftHand
+                    ? RightThumbApproachHeight(hand, approach, 0.65f)
+                    : ContactPadHeight(hand, finger) + 0.008f * Mathf.Sin(approach * Mathf.PI);
+                targets[finger] = Vector3.Lerp(tip.position, (thumbPad ? key.ThumbPress : key.Press) + Vector3.up * lift, blend);
+                has[finger] = true;
+            }
+        }
+
+        private void PrepareUpcomingFinger(IHandRig hand, bool leftHand, int fingerCount,
+            Vector3[] targets, bool[] has)
+        {
+            int pitch = leftHand ? _upcomingLeftPitch : _upcomingRightPitch;
+            if (pitch < 0 || _pressed.Contains(pitch) || !_keyTouches.TryGetValue(pitch, out var touch)) return;
+
+            float time = leftHand ? _upcomingLeftTime : _upcomingRightTime;
+            float lead = FingerPreparationLead(leftHand);
+            if (lead <= 0f || lead > FingerPreparationSeconds) return;
+
+            int finger = Assignment.PreviewFinger(leftHand, pitch, time);
+            if (finger < 0 || finger >= fingerCount || has[finger]) return;
+            if (!(hand is IFingerJointRig rig) || !rig.TryGetJoints(finger, out var root, out _, out _)) return;
+
+            float velocity = (leftHand ? _upcomingLeftVelocity : _upcomingRightVelocity) / 127f;
+            float approach = 1f - Mathf.Clamp01(lead / FingerPreparationSeconds);
+            // 先给指腹一个小弧线。力度影响抬指高度，接近发声时回落到键面上方。
+            bool thumbPad = finger == 0 && hand is IThumbContactRig { HasThumbPad: true };
+            float lift = thumbPad && !leftHand
+                ? RightThumbApproachHeight(hand, approach, velocity)
+                : 0.005f + Mathf.Sin(approach * Mathf.PI) * Mathf.Lerp(0.005f, 0.016f, velocity);
+            var target = (thumbPad ? touch.ThumbPress : touch.Press) + Vector3.up * lift;
+            float reach = rig.GetFingerLength(finger);
+            var pitches = leftHand ? _leftPitches : _rightPitches;
+            float reachWeight = pitches.Count == 0 ? 1f
+                : 1f - Mathf.InverseLerp(reach * 0.85f, reach * 1.05f, Vector3.Distance(root.position, target));
+            float entry = Mathf.SmoothStep(0f, 1f, approach * 3f) * reachWeight;
+            if (entry <= 0f) return;
+            var tip = rig.GetFingertip(finger);
+            targets[finger] = tip == null ? target : Vector3.Lerp(tip.position, target, entry);
+            has[finger] = true;
+        }
+
+        private float FingerPreparationLead(bool leftHand)
+        {
+            if (!leftHand && _primeOpeningThumb) return 1f / 60f;
+            return (leftHand ? _upcomingLeftTime : _upcomingRightTime) - _currentTime;
+        }
+
+        private static float RightThumbApproachHeight(IHandRig hand, float phase, float velocity)
+        {
+            // 拇指从略高于键面的弧线贴近指腹接触点，落键帧沿用实时键面高度。
+            float arch = Mathf.Sin(phase * Mathf.PI);
+            return ContactPadHeight(hand, 0) + Mathf.Lerp(0.009f, 0.014f, velocity) * arch * arch
+                + 0.004f * (1f - Mathf.SmoothStep(0f, 1f, phase));
         }
 
         /// <summary>每帧清空「该指是否已有目标」标志（blend 保留，用于和弦成形过渡）。</summary>
@@ -1642,9 +1870,10 @@ namespace PianoTeacher3D.Avatar
                 if (finger < 0) continue;
 
                 Vector3 tip = FingertipWorld(hand, finger);
-                sum += Vector3.Distance(tip, touch.Press);
+                Vector3 point = finger == 0 && hand is IThumbContactRig { HasThumbPad: true } ? touch.ThumbPress : touch.Press;
+                sum += Vector3.Distance(tip, point);
 
-                float surface = HandPoseValidator.SignedDistanceToSurface(tip.y, touch.SurfaceY);
+                float surface = HandPoseValidator.SignedDistanceToSurface(tip.y, point.y);
                 surfaceSum += surface;
                 if (surface < -FingertipPenetrationTolerance) penetration = true;
                 count++;
@@ -1712,7 +1941,7 @@ namespace PianoTeacher3D.Avatar
         /// 并按黑键 / 白键分别取真实键面高度（方案 5.3 第二阶段 / 审查 1.2B）。
         /// 该过程只在 <see cref="Initialize"/> 执行一次，Update 路径零分配。
         /// </summary>
-        private void BuildKeyTouches()
+        private void BuildKeyTouches(Quaternion depressedRotation)
         {
             _keyTouches.Clear();
             if (_keyMap == null) return;
@@ -1725,11 +1954,11 @@ namespace PianoTeacher3D.Avatar
                 bool black = Piano.PianoKeyMap.IsBlackKey(pitch);
                 float length = black ? _keyMap.BlackLength : _keyMap.WhiteLength;
                 float height = black ? _keyMap.BlackHeight : _keyMap.WhiteHeight;
-                float surfaceY = key.position.y + height;
-
                 // 键根在键后端：沿 +Z（向演奏者）偏移到按压区
-                var press = new Vector3(key.position.x, surfaceY, key.position.z + length * forward);
-                _keyTouches[pitch] = new KeyTouchPoint(press, black, surfaceY);
+                var press = new Vector3(0f, height, length * forward);
+                // 指腹落在白键前部，给键前沿及相邻黑键都保留余量。
+                var thumbPress = black ? press : new Vector3(0f, height, length * Mathf.Clamp(forward, 0.90f, 0.93f));
+                _keyTouches[pitch] = new KeyTouchPoint(key, press, thumbPress, black, depressedRotation);
             }
         }
 
@@ -1738,7 +1967,7 @@ namespace PianoTeacher3D.Avatar
             _pitchScratch.Clear();
             foreach (var pitch in _pressed)
             {
-                if (MIDI.PianoNoteFilter.IsLeftHand(pitch) == leftHand) _pitchScratch.Add(pitch);
+                if (IsActivePitchLeft(pitch) == leftHand) _pitchScratch.Add(pitch);
             }
         }
 
@@ -1747,8 +1976,9 @@ namespace PianoTeacher3D.Avatar
             int? best = null;
             foreach (var pitch in _pressed)
             {
-                bool isLeft = MIDI.PianoNoteFilter.IsLeftHand(pitch);
+                bool isLeft = IsActivePitchLeft(pitch);
                 if (isLeft != leftHand) continue;
+                if (Assignment.HasUnplayableNotes(leftHand) && Assignment.GetFinger(leftHand, pitch) < 0) continue;
                 if (!best.HasValue) { best = pitch; continue; }
                 if (leftHand && pitch < best.Value) best = pitch;    // 左手取最低音
                 if (!leftHand && pitch > best.Value) best = pitch;   // 右手取最高音
@@ -1762,12 +1992,14 @@ namespace PianoTeacher3D.Avatar
             return new Vector3(p.x, HandHeight, p.z + HandDepth);
         }
 
-        private bool TryPlaceChordWrist(IHandRig hand, bool leftHand, ref Vector3 target)
+        private bool TryPlaceChordWrist(IHandRig hand, bool leftHand, ref Vector3 target, bool constrained)
         {
             var pitches = leftHand ? _leftPitches : _rightPitches;
-            if (pitches.Count < 2 || !(hand is IFingerJointRig rig)) return false;
+            int minimumNotes = constrained ? 1 : 2;
+            if (pitches.Count < minimumNotes || !(hand is IFingerJointRig rig)) return false;
 
             int count = 0;
+            Vector3 anchors = Vector3.zero;
             float minimumDepth = float.NegativeInfinity;
             foreach (int pitch in pitches)
             {
@@ -1776,38 +2008,262 @@ namespace PianoTeacher3D.Avatar
                     || !rig.TryGetJoints(finger, out var root, out _, out _)) continue;
 
                 Vector3 offset = root.position - hand.Wrist.position;
-                float height = target.y + offset.y - key.SurfaceY;
-                float length = rig.GetFingerLength(finger) * 0.95f;
-                _chordReachCenters[count] = new Vector2(key.Press.x - offset.x, key.Press.z - offset.z);
-                _chordReachRadii[count] = Mathf.Sqrt(Mathf.Max(0f, length * length - height * height));
+                bool thumbPad = finger == 0 && hand is IThumbContactRig { HasThumbPad: true };
+                Vector3 point = thumbPad ? key.ThumbPress : key.Press;
+                float pad = thumbPad ? ContactPadHeight(hand, finger) : FingertipPadRadius;
+                _chordReachCenters[count] = point + Vector3.up * pad - offset;
+                float fingerLength = rig.GetFingerLength(finger);
+                _chordReachRadii[count] = fingerLength * 0.92f;
+                anchors += _chordReachCenters[count] + new Vector3(0f, fingerLength * 0.23f, fingerLength * 0.67f);
                 // 蒙皮骨架的指根需要留在琴键的演奏者一侧，避免手指反向折回。
                 if (hand is IHandOrientationRig)
-                    minimumDepth = Mathf.Max(minimumDepth, _chordReachCenters[count].y + 0.002f);
+                    minimumDepth = Mathf.Max(minimumDepth, _chordReachCenters[count].z + 0.003f);
                 count++;
             }
-            if (count < 2) return false;
+            if (count < minimumNotes) return false;
 
-            // 每根指头给出一个手腕可达圆。将腕位往圆内投影，和弦过宽时均摊超出的距离。
-            var origin = new Vector2(target.x, target.z);
-            var position = new Vector2(origin.x, Mathf.Max(origin.y, minimumDepth));
-            for (int iteration = 0; iteration < 8; iteration++)
+            // 每根手指给出腕部的可达球。只允许小幅降腕，兼顾短指的落键与掌面高度。
+            Vector3 origin = target;
+            Vector3 position = target;
+            if (constrained)
             {
-                var correction = Vector2.zero;
+                Vector3 anchor = anchors / count;
+                // 平均指根的自然落键位置。现有腕高仍作为上界，限制一次校正的幅度。
+                position.x = anchor.x;
+                position.y = Mathf.Max(origin.y, anchor.y + 0.014f);
+                position.z = anchor.z + 0.024f;
+            }
+            position.z = Mathf.Max(position.z, minimumDepth);
+            float minimumHeight = origin.y - 0.025f;
+            if (_hasLimits) minimumHeight = Mathf.Min(origin.y, Mathf.Max(minimumHeight, _limits.MinY));
+            float maxHeight = constrained ? origin.y + 0.020f : origin.y;
+            position.y = Mathf.Clamp(position.y, constrained ? origin.y : minimumHeight, maxHeight);
+            for (int iteration = 0; iteration < 12; iteration++)
+            {
+                var correction = Vector3.zero;
                 for (int i = 0; i < count; i++)
                 {
-                    Vector2 delta = _chordReachCenters[i] - position;
+                    Vector3 delta = _chordReachCenters[i] - position;
                     float distance = delta.magnitude;
                     if (distance > _chordReachRadii[i] && distance > 1e-5f)
                         correction += delta * (1f - _chordReachRadii[i] / distance);
                 }
                 if (correction.sqrMagnitude < 1e-8f) break;
                 position += correction / count;
-                position.y = Mathf.Max(position.y, minimumDepth);
+                position.y = Mathf.Clamp(position.y, constrained ? origin.y : minimumHeight, maxHeight);
+                position.z = Mathf.Max(position.z, minimumDepth);
             }
-            position = origin + Vector2.ClampMagnitude(position - origin, MaxPalmCorrection);
-            target.x = position.x;
-            target.z = position.y;
+            target = origin + Vector3.ClampMagnitude(position - origin, MaxPalmCorrection);
             return true;
+        }
+
+        private static float NaturalWristYaw(Transform wrist)
+        {
+            if (wrist.parent == null) return 0f;
+            var arm = Vector3.ProjectOnPlane(wrist.position - wrist.parent.position, Vector3.up);
+            return arm.sqrMagnitude > 1e-6f
+                ? Mathf.Clamp(Vector3.SignedAngle(Vector3.back, arm, Vector3.up), -28f, 28f) : 0f;
+        }
+
+        private static Quaternion ContactWristRotation(IHandOrientationRig basis, float yaw, float pitch, float roll)
+        {
+            Vector3 direction = Quaternion.AngleAxis(yaw, Vector3.up) * Vector3.back;
+            float slope = Mathf.Tan(Mathf.Clamp(pitch, 0f, 20f) * Mathf.Deg2Rad);
+            Vector3 forward = (direction + Vector3.down * slope).normalized;
+            var bind = Quaternion.LookRotation(basis.FingerForwardLocal, basis.BackNormalLocal);
+            return Quaternion.AngleAxis(roll, forward) * Quaternion.LookRotation(forward, Vector3.up)
+                * Quaternion.Inverse(bind);
+        }
+
+        // 指尖参考点略高于键面，给按下过程中仍在移动的键帽留余量。
+        private const float AnatomicalContactHeight = 0.0025f;
+
+        private static float ContactPadHeight(IHandRig hand, int finger) =>
+            finger == 0 && hand is IThumbContactRig { HasThumbPad: true } ? 0.0008f : AnatomicalContactHeight;
+
+        private bool TryFitContactWrist(IHandRig hand, bool leftHand, bool pressed, FingerPoseController pose,
+            ref WristContactFit fit, ref Vector3 target, int upcomingThumbPitch)
+        {
+            if (!(hand is IHandOrientationRig basis) || !(hand is IFingerJointRig rig)) return false;
+            var definition = _avatar.CurrentDefinition.Hand;
+            int count = 0;
+            long noteSet = 0;
+            var upcoming = leftHand ? _leftUpcomingChord : _rightUpcomingChord;
+            for (int finger = 0; finger < 5; finger++)
+            {
+                noteSet <<= 7;
+                int pitch = pressed ? Assignment.GetPitch(leftHand, finger)
+                    : upcomingThumbPitch < 0 ? upcoming[finger] : finger == 0 ? upcomingThumbPitch : -1;
+                if (pitch < 0 || !_keyTouches.ContainsKey(pitch)) continue;
+                noteSet |= (uint)(pitch + 1);
+                _contactFitFingers[count++] = finger;
+            }
+            if (count == 0) return false;
+            bool thumbSolo = count == 1 && _contactFitFingers[0] == 0 && hand is IThumbContactRig { HasThumbPad: true };
+            // 右拇指提前对齐压键时的腕位。起音后只用指节跟随键程，腕位不再换目标。
+            bool bridgeThumbStroke = thumbSolo && !leftHand;
+            if (thumbSolo && pressed && !bridgeThumbStroke) noteSet |= 1L << 35;
+            if (fit.NoteSet != noteSet)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    int finger = _contactFitFingers[i];
+                    int pitch = pressed ? Assignment.GetPitch(leftHand, finger)
+                        : upcomingThumbPitch >= 0 ? upcomingThumbPitch : upcoming[finger];
+                    var touch = _keyTouches[pitch];
+                    bool thumbPad = finger == 0 && hand is IThumbContactRig { HasThumbPad: true };
+                    float pad = ContactPadHeight(hand, finger);
+                    if (!thumbPad) pad += definition.FingertipReachAdjustment;
+                    if (touch.Black) pad += BlackKeyTargetLift;
+                    // 琴键运动期间，右拇指沿同一腕位完成预备和下压。
+                    bool down = count > 1 || bridgeThumbStroke || (thumbSolo && pressed);
+                    Vector3 point = thumbPad ? (down ? touch.ThumbDepressed : touch.ThumbRest)
+                        : (down ? touch.Depressed : touch.Rest);
+                    _contactFitTargets[i] = point + Vector3.up * pad;
+                }
+                Vector3 seed = target;
+                // 短音起音前先保证换位距离，和弦则容许较大腕位调整来同时覆盖多键。
+                float followCost = count == 1 ? 0.020f : 0.004f;
+                float naturalYaw = NaturalWristYaw(hand.Wrist);
+                Vector3 current = hand.Wrist.position;
+                Vector3 savedPosition = hand.Wrist.localPosition;
+                Quaternion savedRotation = hand.Wrist.localRotation;
+                Vector3 best = seed;
+                float bestYaw = naturalYaw;
+                float bestScore = float.PositiveInfinity;
+
+                void Consider(Vector3 position, float yaw)
+                {
+                    if (_hasLimits) position = HandPoseValidator.Clamp(position, _limits);
+                    yaw = Mathf.Clamp(yaw, -40f, 40f);
+                    float offset = _hasLimits
+                        ? Mathf.Clamp((position.x - (_limits.MinX + _limits.MaxX) * 0.5f) /
+                            Mathf.Max(0.001f, (_limits.MaxX - _limits.MinX) * 0.5f), -1f, 1f) : 0f;
+                    float roll = offset * definition.WristRollPerHandUnit * (leftHand ? -1f : 1f);
+                    float pitch = definition.WristPitch + Mathf.Abs(offset) * Mathf.Max(0f, OuterWristPitchBias);
+                    hand.Wrist.SetPositionAndRotation(position, ContactWristRotation(basis, yaw, pitch,
+                        Mathf.Clamp(roll, -MaxWristTwistDegrees, MaxWristTwistDegrees)));
+                    float error = 0f;
+                    float worst = 0f;
+                    for (int i = 0; i < count; i++)
+                    {
+                        Vector3 contact = _contactFitTargets[i];
+                        Vector3 miss = pose.PredictAnatomicalTip(hand, basis, rig, _contactFitFingers[i], contact) - contact;
+                        // 同一腕位下同时够到各键，避免用另一指的低误差抵消悬空。
+                        float heightWeight = count > 1 && miss.y > 0f ? 6f : 3f;
+                        bool thumb = _contactFitFingers[i] == 0 && hand is IThumbContactRig { HasThumbPad: true };
+                        float depthWeight = thumb ? 1f : 0.30f;
+                        float missCost = miss.x * miss.x + heightWeight * miss.y * miss.y + depthWeight * miss.z * miss.z;
+                        if (thumb && count > 1)
+                        {
+                            // 和弦中的短拇指容易偏到邻键。先将指腹留在键帽内，再兼顾其他指尖。
+                            float offCenter = Mathf.Max(0f, Mathf.Abs(miss.x) - 0.004f);
+                            float pastFront = Mathf.Max(0f, miss.z - 0.004f);
+                            missCost += 16f * offCenter * offCenter + 12f * pastFront * pastFront;
+                        }
+                        error += missCost;
+                        worst = Mathf.Max(worst, missCost);
+                    }
+                    float cost = error / count + worst * 0.6f + followCost * (position - current).sqrMagnitude
+                        + 0.00000006f * (yaw - naturalYaw) * (yaw - naturalYaw);
+                    if (cost >= bestScore) return;
+                    bestScore = cost;
+                    best = position;
+                    bestYaw = yaw;
+                }
+
+                // 先试几种不同掌位，再逐级缩小步长，避免当前腕位把所有候选困在指根后方。
+                Consider(seed, naturalYaw);
+                Consider(current, fit.NoteSet != 0 ? fit.Yaw : naturalYaw);
+                if (fit.NoteSet != 0) Consider(fit.Position, fit.Yaw);
+                foreach (float yaw in ContactYawSeeds)
+                {
+                    Consider(seed + Vector3.forward * 0.024f, yaw);
+                    Consider(seed + Vector3.back * 0.018f, yaw);
+                }
+                void Refine()
+                {
+                    for (float step = 0.024f, yawStep = 16f; step >= 0.0029f; step *= 0.5f, yawStep *= 0.5f)
+                    {
+                        Consider(best + Vector3.right * step, bestYaw);
+                        Consider(best - Vector3.right * step, bestYaw);
+                        Consider(best + Vector3.up * step, bestYaw);
+                        Consider(best - Vector3.up * step, bestYaw);
+                        Consider(best + Vector3.forward * step, bestYaw);
+                        Consider(best - Vector3.forward * step, bestYaw);
+                        Consider(best, bestYaw + yawStep);
+                        Consider(best, bestYaw - yawStep);
+                    }
+                }
+
+                Refine();
+                // 和弦再检查一条较低腕位的搜索路径。用同一代价淘汰较差结果。
+                if (count > 1 && bestScore > 0.000025f)
+                {
+                    Vector3 first = best;
+                    float firstYaw = bestYaw;
+                    float firstScore = bestScore;
+                    bestScore = float.PositiveInfinity;
+                    Consider(first - Vector3.up * 0.018f, firstYaw);
+                    Refine();
+                    if (bestScore >= firstScore)
+                    {
+                        best = first;
+                        bestYaw = firstYaw;
+                    }
+                }
+                hand.Wrist.localPosition = savedPosition;
+                hand.Wrist.localRotation = savedRotation;
+                fit = new WristContactFit { NoteSet = noteSet, Position = best, Yaw = bestYaw };
+            }
+            target = fit.Position;
+            return true;
+        }
+
+        private static readonly float[] ContactYawSeeds = { -24f, 0f, 24f };
+
+        private float AdjustContactHeight(IHandRig hand, bool leftHand, bool hasTarget)
+        {
+            ref float adjustment = ref (leftHand ? ref _leftContactHeight : ref _rightContactHeight);
+            if (!hasTarget || !(hand is IFingerJointRig rig))
+            {
+                adjustment = Mathf.MoveTowards(adjustment, 0f, 0.14f * Time.deltaTime);
+                return adjustment;
+            }
+
+            float lowest = float.PositiveInfinity;
+            for (int finger = 0; finger < hand.Fingers.Count; finger++)
+            {
+                int pitch = Assignment.GetPitch(leftHand, finger);
+                if (pitch < 0 || !_keyTouches.TryGetValue(pitch, out var touch)) continue;
+                var tip = rig.GetFingertip(finger);
+                if (tip == null || Mathf.Abs(tip.position.x - touch.Press.x) > 0.04f
+                    || Mathf.Abs(tip.position.z - touch.Press.z) > 0.06f) continue;
+                lowest = Mathf.Min(lowest, tip.position.y - touch.SurfaceY);
+            }
+
+            if (!float.IsPositiveInfinity(lowest))
+            {
+                float goal = Mathf.Clamp(adjustment + 0.003f - lowest, -0.016f, 0.028f);
+                adjustment = Mathf.Lerp(adjustment, goal, 1f - Mathf.Exp(-19f * Time.deltaTime));
+            }
+            return adjustment;
+        }
+
+        private void SeparateIdleWrist(bool leftHand, bool movingToKey, ref Vector3 target)
+        {
+            if (movingToKey) return;
+            var other = leftHand ? _avatar.RightHand : _avatar.LeftHand;
+            if (other?.Palm == null || !FindHandTarget(!leftHand).HasValue) return;
+
+            // 避让只发生在闲置手，活动手指仍以自己的键帽为准。
+            const float Clearance = 0.065f;
+            Vector3 delta = target - other.Wrist.position;
+            if (Mathf.Abs(delta.x) >= Clearance || Mathf.Abs(delta.z) >= Clearance) return;
+            float side = leftHand ? 1f : -1f;
+            float clearanceWeight = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Abs(delta.z) / Clearance);
+            float shift = Mathf.Max(0f, Clearance - side * delta.x) * clearanceWeight;
+            target.x += side * shift;
         }
 
         /// <summary>无目标时的手位（<paramref name="side"/>：左手 +1 = 世界 +X，右手 −1）。</summary>

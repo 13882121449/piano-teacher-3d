@@ -39,6 +39,9 @@ namespace PianoTeacher3D.Characters
         [Tooltip("角色库卡片缩略图；为空时 UI 用占位图")]
         public Texture2D Thumbnail;
 
+        /// <summary>只用于从本地照片角色库创建的资料。</summary>
+        [System.NonSerialized] public Customization.PhotoAvatarData PhotoAvatar;
+
         [Header("外观槽位（方案 9.5）")]
         [Tooltip("允许被照片生成结果替换的槽位；未声明的槽位不会在 UI 上出现「应用」按钮")]
         public AppearanceSlot[] SupportedAppearanceSlots = { AppearanceSlot.Thumbnail };

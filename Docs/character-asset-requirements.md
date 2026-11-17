@@ -110,6 +110,17 @@ Assets/Characters/
 
 ## 6. Rocketbox 适配现状
 
+默认老师沿用 `rocketbox.female01` 的 Humanoid 骨架和手部绑定。演奏服贴图
+`Assets/Characters/Rocketbox/Resources/Characters/Rocketbox/f001_concert_body_color.png`
+从原 `f001_body_color.tga` 的布料区域派生，将衬衫改为蓝灰色、裤装改为炭灰色。
+贴图离线生成，按原 UV 绑定，保留手、前臂和领口的皮肤颜色。
+`RocketboxTextureLibrary` 负责绑定，角色原有 ID、手部骨长和外观设置保持兼容。
+
+角色卡使用同目录下的 `*_portrait_render.png`。如需更新，在有图形设备的 Unity
+Test Runner 中执行 `CharacterPortraitTests.CaptureCharacterPortraits`。输出到
+`_verify_out/portraits/`，也可用 `PIANO_PORTRAIT_DIR` 指定项目内输出目录。
+确认脸、发顶与衣领完整入画后，才将生成的头像复制到角色资源目录。
+
 > 2026-10-31 复核：下表已按代码实测更新（早期「未标定 / 未验证」的条目多数已落地）。
 
 | 项 | 状态 |

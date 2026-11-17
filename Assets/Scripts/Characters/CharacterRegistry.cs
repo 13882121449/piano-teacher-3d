@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using PianoTeacher3D.Customization;
 using UnityEngine;
 
 namespace PianoTeacher3D.Characters
@@ -98,6 +99,7 @@ namespace PianoTeacher3D.Characters
         private readonly List<CharacterProfile> _selfCreated = new List<CharacterProfile>();
 
         private bool _disposed;
+        private readonly PhotoAvatarStorage _photoStorage = new PhotoAvatarStorage();
 
         /// <summary>
         /// 构造角色库。
@@ -109,7 +111,11 @@ namespace PianoTeacher3D.Characters
         {
             AddBuiltIns();
 
-            if (includeResourceProfiles) LoadResourceProfiles();
+            if (includeResourceProfiles)
+            {
+                LoadResourceProfiles();
+                foreach (var data in _photoStorage.LoadAll()) RegisterPhoto(data);
+            }
         }
 
         /// <summary>全部已登记角色（顺序：内置 3 个 → Rocketbox → 外部资料）。</summary>
@@ -128,6 +134,52 @@ namespace PianoTeacher3D.Characters
 
         /// <summary>ID 是否已注册。</summary>
         public bool IsRegistered(string id) => !string.IsNullOrEmpty(id) && _byId.ContainsKey(id);
+
+        public bool SavePhotoAvatar(PhotoAvatarData data, out CharacterProfile profile, out string error)
+        {
+            profile = null;
+            int photoCount = 0;
+            foreach (var item in _all) if (item.PhotoAvatar != null) photoCount++;
+            if (photoCount >= PhotoAvatarStorage.MaxProfiles)
+            {
+                error = "角色库已满，请先移除一个照片角色。";
+                return false;
+            }
+            if (!_photoStorage.Save(data, out error)) return false;
+            profile = RegisterPhoto(data);
+            if (profile != null) return true;
+            _photoStorage.Archive(data, out _);
+            error = "角色档案未能加入角色库。";
+            return false;
+        }
+
+        public bool ArchivePhotoAvatar(CharacterProfile profile, out string error)
+        {
+            if (profile == null || !_byId.TryGetValue(profile.CharacterId, out var registered)
+                || registered != profile)
+            {
+                error = "这个角色不在当前角色库。";
+                return false;
+            }
+            if (!_photoStorage.Archive(profile.PhotoAvatar, out error)) return false;
+            _all.Remove(profile);
+            _byId.Remove(profile.CharacterId);
+            _selfCreated.Remove(profile);
+            DestroyProfile(profile);
+            return true;
+        }
+
+        private CharacterProfile RegisterPhoto(PhotoAvatarData data)
+        {
+            var profile = data.CreateProfile();
+            if (!Register(profile).Ok)
+            {
+                DestroyProfile(profile);
+                return null;
+            }
+            _selfCreated.Add(profile);
+            return profile;
+        }
 
         /// <summary>
         /// 注册一个角色资料。失败（ID 非法 / 资料不完整 / ID 重复）时返回原因，且不改变现有集合。
@@ -282,12 +334,17 @@ namespace PianoTeacher3D.Characters
             {
                 var profile = _selfCreated[i];
                 if (profile == null) continue;
-                if (Application.isPlaying) UnityEngine.Object.Destroy(profile);
-                else UnityEngine.Object.DestroyImmediate(profile);
+                DestroyProfile(profile);
             }
             _selfCreated.Clear();
             _all.Clear();
             _byId.Clear();
+        }
+
+        private static void DestroyProfile(CharacterProfile profile)
+        {
+            if (Application.isPlaying) UnityEngine.Object.Destroy(profile);
+            else UnityEngine.Object.DestroyImmediate(profile);
         }
     }
 }
