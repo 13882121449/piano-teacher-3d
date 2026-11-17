@@ -58,7 +58,7 @@ namespace PianoTeacher3D.Piano
         private const float MaxPan = 0.30f;
 
         /// <summary>合成采样率（Hz）：最高音 C8 的 4 次谐波仍低于 Nyquist，不产生混叠。</summary>
-        private const int SampleRate = 44100;
+        public const int SampleRate = 44100;
         private const int OpeningPitchLimit = 12;
         private const float OpeningSeconds = 4f;
 
@@ -251,6 +251,9 @@ namespace PianoTeacher3D.Piano
             if (!Initialized || _muted || _allocator == null || _sources == null) return;
             if (!PianoKeyMap.IsInRange(e.Pitch)) return;
 
+            _sustainedPitches[e.Pitch] = false;
+            _pressedHands.Press(e);
+
             int slot = _allocator.NoteOn(e.Pitch, e.Velocity);
             if (slot < 0 || slot >= _sources.Length) return;
 
@@ -307,6 +310,13 @@ namespace PianoTeacher3D.Piano
         public void OnNoteOff(MIDI.MidiNoteEvent e)
         {
             if (!Initialized || _allocator == null) return;
+            if (!PianoKeyMap.IsInRange(e.Pitch) || !_pressedHands.Release(e)) return;
+
+            if (_sustainDown)
+            {
+                _sustainedPitches[e.Pitch] = true;
+                return;
+            }
 
             int slot = _allocator.NoteOff(e.Pitch);
             if (slot < 0) return;                     // 该音根本没在响（或已被抢占）
@@ -316,12 +326,34 @@ namespace PianoTeacher3D.Piano
             _damperSource.PlayOneShot(_damperClip);   // 允许重叠：连奏松键本来就密集
         }
 
+        private readonly MIDI.ActiveNoteHands _pressedHands = new();
+        private readonly bool[] _sustainedPitches = new bool[PianoKeyMap.MaxPitch + 1];
+        private bool _sustainDown;
+
+        /// <summary>抬踏板时释放已经松键的音；手指仍按住的音继续正常发声。</summary>
+        public void SetSustain(bool down)
+        {
+            if (_sustainDown == down) return;
+            _sustainDown = down;
+            if (down) return;
+
+            for (int pitch = PianoKeyMap.MinPitch; pitch <= PianoKeyMap.MaxPitch; pitch++)
+            {
+                if (!_sustainedPitches[pitch]) continue;
+                _sustainedPitches[pitch] = false;
+                _allocator?.NoteOff(pitch);
+            }
+        }
+
         /// <summary>
         /// 释放所有在发声部：立即把它们标记为淡出（槽位逻辑上立刻可复用），并在 0.12s 内停声并归还池。
         /// 用于停止 / 暂停 / 拖动进度 / 切曲 / A-B 循环边界（方案 7.3）。
         /// </summary>
         public void ReleaseAll()
         {
+            _pressedHands.Clear();
+            System.Array.Clear(_sustainedPitches, 0, _sustainedPitches.Length);
+            _sustainDown = false;
             _allocator?.ReleaseAll();
         }
 
@@ -365,7 +397,8 @@ namespace PianoTeacher3D.Piano
         private static AudioClip CreatePianoClip(int pitch, float duration)
             => CreateClipFromWaveform(pitch, GeneratePianoWaveform(pitch, duration));
 
-        private static float[] GeneratePianoWaveform(int pitch, float duration)
+        /// <summary>为现场播放或离线录制合成单音波形。</summary>
+        public static float[] GeneratePianoWaveform(int pitch, float duration)
         {
             float freq = 440f * Mathf.Pow(2f, (pitch - 69) / 12f);
             int samples = Mathf.Max(1, (int)(SampleRate * duration));

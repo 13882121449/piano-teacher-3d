@@ -31,7 +31,7 @@ namespace PianoTeacher3D.Piano
     /// 即使在 URP 下它也<b>不是</b> SSAO（真实 AO 由管线资产承担），请勿在文档 / UI 中混用表述。
     /// </para>
     /// <para>
-    /// <b>性能</b>（方案 7.2）：几何 / 材质 / 贴图只在 <see cref="Build"/> 期生成（约 9 个 Renderer + 4 个灯），
+    /// <b>性能</b>（方案 7.2）：几何 / 材质 / 贴图只在 <see cref="Build"/> 期生成，
     /// 组件<b>无 Update</b>，运行期零分配、零每帧查找；环境物体一律销毁 Collider（无物理需求）。
     /// </para>
     /// </summary>
@@ -42,65 +42,51 @@ namespace PianoTeacher3D.Piano
         /// <summary>环境几何根物体名（受 <see cref="SetEnvironmentVisible"/> 控制）。</summary>
         private const string RootName = "SceneEnvironment";
 
-        // —— 地面：忠实接替既有基线（位置 / 尺寸 / 深色基调不变，避免既有视觉基线整体跳变）——
-        private const float FloorY = -0.03f;
+        // —— 水面下的兜底地板与琴台接触高度 ——
+        private const float FloorY = -1.28f;
         private const float FloorZ = 0.2f;
-        private static readonly Vector3 FloorScale = new Vector3(6f, 0.06f, 6f);
-        private static readonly Color FloorColor = new Color(0.135f, 0.145f, 0.165f);
-        private const float FloorSmoothness = 0.25f; // 轻微粗糙度，避免地板成为镜面
+        private static readonly Vector3 FloorScale = new Vector3(80f, 0.06f, 80f);
+        private static readonly Color FloorColor = new Color(0.035f, 0.085f, 0.16f);
+        private const float FloorSmoothness = 0.26f;
+        private const float WaterY = -0.145f;
+        private static readonly Vector3 PlatformCenter = new Vector3(0f, 0f, -0.32f);
+        private static readonly int StageEffects = Shader.PropertyToID("_Effects");
+        private static readonly int StageSequenceParameters = Shader.PropertyToID("_StageSequence");
+        private static readonly int StageWaterTint = Shader.PropertyToID("_WaterTint");
 
-        // —— 背景远景：低饱和、低对比的素色板，放在琴体后方足够远（相机为 +Z 侧，故背景在 -Z）——
-        private static readonly Color BackdropColor = new Color(0.150f, 0.160f, 0.180f);
-        private const float BackdropSmoothness = 0.10f;
-
-        // —— 受控装饰（共 3 个，全部为极简体块、低对比，不抢教学焦点）——
-        private static readonly Color TrimColor = new Color(0.085f, 0.090f, 0.104f);   // 踢脚线
-        private static readonly Color FloorInsetColor = new Color(0.135f, 0.140f, 0.150f); // 地面中性色区域
-        private static readonly Color DistantBlockColor = new Color(0.075f, 0.080f, 0.092f); // 远处暗色体块
-
-        // —— 主光（保留既有方向 / 暖白 / 量级，仅按档位调阴影质量）——
-        private static readonly Color MainLightColor = new Color(1f, 0.96f, 0.90f);
-        private const float MainLightIntensity = 1.05f;   // 原基线 1.2；略降以抵消新增补光/轮廓光，使整体亮度基本持平
-        private static readonly Vector3 MainLightEuler = new Vector3(42f, -32f, 0f);
+        // —— 主光从较高的侧前方打在脸、双手和琴键上，缩短地面阴影 ——
+        private static readonly Color MainLightColor = new Color(1f, 0.90f, 0.78f);
+        private const float MainLightIntensity = 1.02f;
+        private static readonly Vector3 MainLightEuler = new Vector3(56f, -48f, 0f);
         private const float MainLightShadowBias = 0.02f;
         private const float MainLightShadowNormalBias = 0.03f;
 
         // —— 补光：从主光对侧抬起暗部，冷一点、约主光 1/3，无阴影（方案 5.4） ——
-        private static readonly Color FillColor = new Color(0.78f, 0.84f, 0.95f); // 低饱和冷色，不与冷蓝语义色争抢
-        private const float FillIntensity = 0.30f;
+        private static readonly Color FillColor = new Color(0.88f, 0.91f, 0.98f);
+        private const float FillIntensity = 0.39f;
         private static readonly Vector3 FillEuler = new Vector3(16f, 152f, 0f);
 
-        // —— 轮廓光：从左侧后方打过（正向计算所得来光方向 ≈ (-0.55, +0.55, -0.63)），
-        //    与主光 (+X,+Y,-Z)、补光 (-X,+Y,+Z) 构成三个互不重叠的来光方向；弱、无阴影 ——
-        //    强度由 0.15 提升到 0.28：0.15 勾不出手臂与肩线，人物像"贴"在背景上；
-        //    球体拼装的五官本身没有结构，只能靠边缘光把体积"描"出来。
-        //    上界受既有约束「轮廓光必须弱于补光（0.30）」限制，故取 0.28 而非更高。
-        private static readonly Color RimColor = new Color(0.86f, 0.89f, 0.99f);
-        private const float RimIntensity = 0.28f;
+        // —— 轮廓光弱于补光，分出演奏者和琴盖 ——
+        private static readonly Color RimColor = new Color(0.58f, 0.71f, 1f);
+        private const float RimIntensity = 0.38f;
         private static readonly Vector3 RimEuler = new Vector3(33f, 41f, 0f);
 
-        // —— 键盘上方点光：保留既有作用（提升琴键与手部可读性），位置 / 范围与基线一致 ——
-        //    强度由 1.1 降到 0.78：该灯位于人物头顶正上方，过强会把鼻梁、眼窝、下颌的阴影全部抹平，
-        //    脸变成一个没有起伏的亮块。降低后仍足以照亮琴键与手部。
-        //    写实化批次 5：URP 的点光是物理单位（1/d² 衰减 + 平滑收边），同等数值比内置管线亮得多，
-        //    实拍会把琴体上半板打成一块黄斑并连带地面过曝 → URP 下再乘 UrpPointLightScale。
+        // —— 键盘上方点光留作轻微提亮，URP 下按现有衰减系数折算 ——
         private static readonly Color KeyLightColor = new Color(1f, 0.97f, 0.92f);
-        private const float KeyLightIntensity = 0.78f;
+        private const float KeyLightIntensity = 0.62f;
         private const float UrpPointLightScale = 0.42f;
         private const float KeyLightRange = 2.4f;
         private static readonly Vector3 KeyLightLocalPosition = new Vector3(0f, 1.65f, 0.35f);
 
-        // —— 后处理参数（写实化批次 2；数值原则：轻微，不抢教学焦点，ACES 主导观感）——
-        //    写实化批次 5 实拍回调：阈值 1.1 / 强度 0.35 在琴漆高光上仍会糊成光斑，
-        //    收到 1.3 / 0.22 —— 只让最强的灯芯与黄铜踏板轻微呼吸。
-        private const float BloomThreshold = 1.3f;     // 高光阈值：只让琴漆高光 / 灯光呼吸，不过曝
-        private const float BloomIntensityHigh = 0.22f; // High 档强度（Standard 档归零）
+        // —— 高光泛光只影响最亮的星芒和反光 ——
+        private const float BloomThreshold = 1.3f;
+        private const float BloomIntensityHigh = 0.24f; // 高画质档增强舞台发光，标准档使用材质中的光晕
         private const float BloomScatter = 0.55f;
-        private const float VignetteIntensity = 0.18f; // 微暗角：聚焦键盘区，极轻
+        private const float VignetteIntensity = 0.10f;
         private const float VignetteSmoothness = 0.4f;
         private const float PostExposure = 0.1f;       // 轻微提亮补偿 Linear 迁移后的整体变暗
-        private const float ContrastBoost = 6f;
-        private const float SaturationBoost = 4f;
+        private const float ContrastBoost = 3f;
+        private const float SaturationBoost = -3f;
 
         // —— 接触阴影近似薄片（地面顶面 y = 0，薄片贴地 3 mm，透明度极低） ——
         private const float DecalY = 0.0030f;
@@ -146,8 +132,21 @@ namespace PianoTeacher3D.Piano
         private ColorAdjustments _colorAdjustments;
         private Renderer _floorRenderer;
         private Renderer _aoDecalRenderer;
+        private Material _stageSky;
+        private Material _stageWater;
+        private Material _nearRibbon;
+        private Material _farRibbon;
+        private UnderwaterStage _underwater;
+        private bool _hasStageCue;
         private PianoKeyMap _keyMap;
         private bool _built;
+        private readonly List<Object> _ownedVisuals = new();
+
+        private T Own<T>(T resource) where T : Object
+        {
+            if (resource != null) _ownedVisuals.Add(resource);
+            return resource;
+        }
 
         /// <summary>环境几何是否可见（调试对比用；灯光不受其影响）。</summary>
         private bool _environmentVisible = true;
@@ -239,6 +238,13 @@ namespace PianoTeacher3D.Piano
             _aoApproxEnabled = quality.EnableAmbientOcclusion;
             RefreshEnvironmentVisibility();
 
+            float effects = quality.Tier == QualityTier.High ? 1f : 0.48f;
+            if (_stageSky != null) _stageSky.SetFloat(StageEffects, effects);
+            if (_stageWater != null) _stageWater.SetFloat(StageEffects, effects);
+            if (_nearRibbon != null) _nearRibbon.SetFloat(StageEffects, effects);
+            if (_farRibbon != null) _farRibbon.SetFloat(StageEffects, effects);
+            _underwater?.SetQuality(quality.Tier == QualityTier.High);
+
             // 后处理按档分层（写实化批次 2）：URP 激活时 Bloom 只在高画质档呼吸发光，
             // Standard 档强度归零（等效关闭，不改 QualityProfile 结构）；ACES / 暗角 / 色彩两档共用。
             if (_bloom != null)
@@ -298,7 +304,7 @@ namespace PianoTeacher3D.Piano
             var go = new GameObject("SceneReflectionProbe");
             go.transform.SetParent(transform, false);
             // 探针中心略高于琴体中心、向琴体一侧（-Z）偏：把琴首与背景板都纳入反射
-            go.transform.localPosition = new Vector3(0f, 0.85f, -0.15f);
+            go.transform.localPosition = new Vector3(-0.06f, 0.86f, -0.6f);
 
             var probe = go.AddComponent<ReflectionProbe>();
             probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
@@ -308,7 +314,7 @@ namespace PianoTeacher3D.Piano
             probe.hdr = true;
             probe.importance = 1;
             probe.boxProjection = true;
-            probe.size = new Vector3(3.2f, 2.0f, 2.6f);
+            probe.size = new Vector3(4.0f, 2.6f, 3.7f);
             // 场景没有 skybox：用中性冷色清屏，避免探针采到纯黑导致琴漆发死
             probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.SolidColor;
             probe.backgroundColor = new Color(0.30f, 0.32f, 0.38f);
@@ -359,7 +365,9 @@ namespace PianoTeacher3D.Piano
         private void OnDestroy()
         {
             // profile 是运行时创建的 ScriptableObject，不随 GameObject 销毁，必须手动释放
-            if (_postProfile != null) Destroy(_postProfile);
+            if (_postProfile != null) DestroyNative(_postProfile);
+            foreach (var resource in _ownedVisuals) DestroyNative(resource);
+            _ownedVisuals.Clear();
             _postProfile = null;
             _postVolume = null;
             _bloom = null;
@@ -381,6 +389,36 @@ namespace PianoTeacher3D.Piano
             RefreshEnvironmentVisibility();
         }
 
+        /// <summary>更新演奏展示的环境布光。进入教学时恢复稳定的常规曝光与舞台循环。</summary>
+        public void ApplyStageCue(StageCue? cue)
+        {
+            if (!_built || (!cue.HasValue && !_hasStageCue)) return;
+            _hasStageCue = cue.HasValue;
+            var sample = cue.GetValueOrDefault();
+            _underwater?.ApplyStageCue(cue);
+            if (_stageSky != null)
+            {
+                var parameters = _hasStageCue
+                    ? new Vector4(sample.Seconds, sample.SunStrength, sample.FogDensity, 0f)
+                    : new Vector4(-1f, 1f, 1f, 0f);
+                _stageSky.SetVector(StageSequenceParameters, parameters);
+                _stageSky.SetVector(StageWaterTint, _hasStageCue ? (Vector4)sample.WaterTint : Vector4.one);
+            }
+            if (MainLight != null)
+            {
+                MainLight.color = _hasStageCue
+                    ? Color.Lerp(MainLightColor, new Color(0.78f, 0.91f, 1f), sample.ShoalApproach * 0.68f)
+                    : MainLightColor;
+                MainLight.intensity = MainLightIntensity * (_hasStageCue
+                    ? Mathf.Lerp(0.90f, 1.14f, Mathf.InverseLerp(0.45f, 1.5f, sample.SunStrength)) : 1f);
+            }
+            if (RimLight != null)
+                RimLight.intensity = _hasStageCue ? RimIntensity + sample.ShoalApproach * 0.17f : RimIntensity;
+            if (_colorAdjustments != null)
+                _colorAdjustments.postExposure.Override(PostExposure + (_hasStageCue
+                    ? (sample.SunStrength - 0.85f) * 0.22f : 0f));
+        }
+
         // ==================== 几何装配 ====================
 
         private void BuildGeometry()
@@ -392,14 +430,12 @@ namespace PianoTeacher3D.Piano
             }
 
             BuildFloor();
-            BuildBackdrop();
-            BuildDecorations();
+            BuildStarStage();
             BuildContactShadowDecals();
-            BuildRoom();
         }
 
         /// <summary>
-        /// 地面：接替既有 <c>Floor</c>（位置 (0,-0.03,0.2)、尺寸 (6,0.06,6)、深色基调 (0.105,0.115,0.135) 全部保持不变）。
+        /// 地板保留原接触高度，接收钢琴、琴凳和人物的阴影。
         /// <para>轻微粗糙度、<b>接收</b>阴影但<b>不投射</b>阴影（<c>ShadowCastingMode.Off</c> + <c>receiveShadows = true</c>）。</para>
         /// </summary>
         private void BuildFloor()
@@ -409,36 +445,6 @@ namespace PianoTeacher3D.Piano
                 castShadows: false, receiveShadows: true);
             _floorRenderer = floor != null ? floor.GetComponent<Renderer>() : null;
             Register(floor);
-        }
-
-        /// <summary>
-        /// 低干扰背景远景板：置于琴体后方、与地面远端对齐（<b>-Z</b>；相对全景机位即背景），
-        /// 素色、低饱和、不做花纹、对比极低，保证不与暖金 / 冷蓝 / 暖橙教学语义色争注意力（审查 1.3B / 1.3C）。
-        /// </summary>
-        private void BuildBackdrop()
-        {
-            var mat = CreateLitMaterial("EnvBackdrop", BackdropColor, BackdropSmoothness, 0f);
-            // z = -2.85：近面 -2.79，仅比地面远端 (-2.8) 内收 0.01 m，避免地平线处出现"漏底"的暗色缝隙
-            Register(CreateBox("Backdrop", new Vector3(0f, 1.5f, -2.85f), new Vector3(7f, 3f, 0.12f), mat,
-                castShadows: false, receiveShadows: true));
-        }
-
-        /// <summary>受控装饰：共 3 个极简体块（踢脚线 / 地面中性色区域 / 远处暗色体块），全部低对比。</summary>
-        private void BuildDecorations()
-        {
-            var trimMat = CreateLitMaterial("EnvTrim", TrimColor, 0.12f, 0f);
-            Register(CreateBox("Trim", new Vector3(0f, 0.06f, -2.78f), new Vector3(7f, 0.12f, 0.05f), trimMat,
-                castShadows: false, receiveShadows: true));
-
-            // 地面中性色区域（演奏区）：仅比地板略亮，作为安静的「舞台」暗示，不做花纹
-            var insetMat = CreateLitMaterial("EnvFloorInset", FloorInsetColor, 0.08f, 0f);
-            Register(CreateBox("FloorInset", new Vector3(0f, 0.0012f, 0.25f), new Vector3(2.6f, 0.002f, 1.6f), insetMat,
-                castShadows: false, receiveShadows: true));
-
-            // 远处暗色体块：给空间一点纵深参照，比背景板更暗，绝不形成高对比装饰
-            var blockMat = CreateLitMaterial("EnvDistantBlock", DistantBlockColor, 0.10f, 0f);
-            Register(CreateBox("DistantBlock", new Vector3(-3.1f, 0.35f, -2.6f), new Vector3(0.5f, 0.7f, 0.5f), blockMat,
-                castShadows: false, receiveShadows: true));
         }
 
         /// <summary>
@@ -461,9 +467,11 @@ namespace PianoTeacher3D.Piano
                 return;
             }
 
-            // 琴体 / 键盘前方 / 演奏者（琴凳与脚）三处足迹
-            Register(CreateBox("ContactShadow_Piano", new Vector3(0f, DecalY, -0.10f),
-                new Vector3(1.80f, DecalThickness, 0.85f), contactMat, castShadows: false, receiveShadows: false));
+            Own(tex);
+
+            // 三角琴与演奏者分别有接触阴影，保留键盘前部以突出脚和键的高度。
+            Register(CreateBox("ContactShadow_Piano", new Vector3(-0.12f, DecalY, -0.70f),
+                new Vector3(1.80f, DecalThickness, 1.90f), contactMat, castShadows: false, receiveShadows: false));
             Register(CreateBox("ContactShadow_KeyboardFront", new Vector3(0f, DecalY, 0.22f),
                 new Vector3(1.55f, DecalThickness, 0.55f), contactMat, castShadows: false, receiveShadows: false));
             Register(CreateBox("ContactShadow_Performer", new Vector3(0f, DecalY, 0.55f),
@@ -545,10 +553,10 @@ namespace PianoTeacher3D.Piano
                 }
             }
 
-            if (_floorRenderer != null)
+            if (!has && _floorRenderer != null)
             {
-                if (!has) { bounds = _floorRenderer.bounds; has = true; }
-                else bounds.Encapsulate(_floorRenderer.bounds);
+                bounds = _floorRenderer.bounds;
+                has = true;
             }
 
             if (!has)
@@ -592,66 +600,164 @@ namespace PianoTeacher3D.Piano
         private bool ShouldEnable(Renderer r) =>
             !(_aoDecalRenderer != null && ReferenceEquals(r, _aoDecalRenderer) && !_aoApproxEnabled);
 
-        // ==================== 琴房外壳（Task 4） ====================
-
-        private static readonly Color WallColor = new Color(0.255f, 0.240f, 0.225f);
-        private static readonly Color CeilingColor = new Color(0.175f, 0.172f, 0.165f);
-        private static readonly Color RugColor = new Color(0.330f, 0.245f, 0.200f);
-        private static readonly Color WindowGlow = new Color(1.35f, 1.45f, 1.70f);
-
-        /// <summary>
-        /// 琴房外壳：后墙 / 侧墙 / 顶棚 / 窗 / 地毯 / 墙板。
-        /// <para>
-        /// 全部<b>低对比、无碰撞、不投射阴影</b>（唯一投影灯仍是主光），也不改动地面高度与既有装饰；
-        /// 目的是把「黑色虚空 + 一块背景板」变成可读的室内空间（设计文档 P2）。
-        /// </para>
-        /// </summary>
-        private void BuildRoom()
+        private void BuildStarStage()
         {
-            var wallMat = CreateLitMaterial("EnvWall", WallColor, 0.08f, 0f);
-            var ceilingMat = CreateLitMaterial("EnvCeiling", CeilingColor, 0.06f, 0f);
-            var rugMat = CreateLitMaterial("EnvRug", RugColor, 0.04f, 0f);
+            CreatePlatformLayer("MoonlitPlatformBase", 3.56f, -0.113f, 0.156f,
+                new Color(0.072f, 0.125f, 0.20f), 0.35f);
+            CreatePlatformLayer("MoonlitPlatformInlay", 3.61f, -0.037f, 0.018f,
+                new Color(0.31f, 0.48f, 0.55f), 0.56f);
+            CreatePlatformLayer("MoonlitPlatform", 3.54f, -0.022f, 0.044f,
+                new Color(0.086f, 0.16f, 0.22f), 0.43f);
 
-            Register(CreateBox("RoomBackWall", new Vector3(0f, 1.5f, -2.90f),
-                new Vector3(7f, 3f, 0.10f), wallMat, castShadows: false, receiveShadows: true));
-            Register(CreateBox("RoomSideWall_L", new Vector3(-3.45f, 1.5f, 0.2f),
-                new Vector3(0.10f, 3f, 6.2f), wallMat, castShadows: false, receiveShadows: true));
-            Register(CreateBox("RoomSideWall_R", new Vector3(3.45f, 1.5f, 0.2f),
-                new Vector3(0.10f, 3f, 6.2f), wallMat, castShadows: false, receiveShadows: true));
-            Register(CreateBox("RoomCeiling", new Vector3(0f, 3.02f, 0.2f),
-                new Vector3(7f, 0.08f, 6.2f), ceilingMat, castShadows: false, receiveShadows: false));
+            if (!(GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset)) return;
+            var skyShader = Resources.Load<Shader>("StarStage/StarStageSky");
+            var waterShader = Resources.Load<Shader>("StarStage/StarStageWater");
+            if (skyShader == null || waterShader == null) return;
+            var sceneryShader = Resources.Load<Shader>("StarStage/UnderwaterScenery");
+            var sunShader = Resources.Load<Shader>("StarStage/UnderwaterSun");
 
-            Register(CreateBox("RoomWindowFrame", new Vector3(1.15f, 2.10f, -2.845f),
-                new Vector3(1.55f, 1.20f, 0.05f), wallMat, castShadows: false, receiveShadows: false));
-            var glow = CreateUnlitMaterial("EnvWindowGlow", WindowGlow);
-            Register(CreateBox("RoomWindow", new Vector3(1.15f, 2.10f, -2.815f),
-                new Vector3(1.38f, 1.04f, 0.01f), glow, castShadows: false, receiveShadows: false));
-            Register(CreateBox("RoomWindowBarV", new Vector3(1.15f, 2.10f, -2.805f),
-                new Vector3(0.03f, 1.04f, 0.02f), wallMat, castShadows: false, receiveShadows: false));
-            Register(CreateBox("RoomWindowBarH", new Vector3(1.15f, 2.10f, -2.805f),
-                new Vector3(1.38f, 0.03f, 0.02f), wallMat, castShadows: false, receiveShadows: false));
+            // 着色器可用时由水面和琴台承担可见地面。保留兜底地板的包围盒。
+            _floorRenderer.forceRenderingOff = true;
 
-            Register(CreateBox("RoomRug", new Vector3(0f, 0.004f, 0.25f),
-                new Vector3(2.70f, 0.006f, 1.90f), rugMat, castShadows: false, receiveShadows: true));
+            var sky = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sky.name = "StarSky";
+            sky.transform.SetParent(_root, false);
+            sky.transform.localScale = Vector3.one * 42f;
+            DestroyCollider(sky);
+            var dome = sky.GetComponent<Renderer>();
+            _stageSky = Own(new Material(skyShader));
+            dome.sharedMaterial = _stageSky;
+            dome.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            dome.receiveShadows = false;
+            Register(sky);
 
-            var panelMat = CreateLitMaterial("EnvWallPanel", new Color(0.135f, 0.125f, 0.118f), 0.10f, 0f);
-            Register(CreateBox("RoomPanel_L", new Vector3(-3.38f, 1.55f, -0.9f),
-                new Vector3(0.04f, 0.90f, 1.20f), panelMat, castShadows: false, receiveShadows: true));
-            Register(CreateBox("RoomPanel_R", new Vector3(3.38f, 1.55f, -0.9f),
-                new Vector3(0.04f, 0.90f, 1.20f), panelMat, castShadows: false, receiveShadows: true));
+            _stageWater = Own(new Material(waterShader) { renderQueue = 3010 });
+            _stageWater.SetColor("_BaseColor", new Color(0.010f, 0.056f, 0.10f, 0.88f));
+            var water = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            water.name = "StarWater";
+            water.transform.SetParent(_root, false);
+            water.transform.localPosition = Vector3.up * WaterY;
+            water.transform.localScale = new Vector3(8f, 1f, 8f);
+            DestroyCollider(water);
+            var surface = water.GetComponent<Renderer>();
+            surface.sharedMaterial = _stageWater;
+            surface.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            surface.receiveShadows = false;
+            Register(water);
+
+            BuildPlatformInlay();
+            if (sceneryShader != null && sunShader != null)
+            {
+                var habitat = new GameObject("UnderwaterHabitat");
+                habitat.transform.SetParent(_root, false);
+                _underwater = habitat.AddComponent<UnderwaterStage>();
+                var platform = _root.Find("MoonlitPlatform").GetComponent<Renderer>();
+                _underwater.Build(sceneryShader, sunShader, platform, mesh => Own(mesh), material => Own(material));
+                foreach (var habitatRenderer in habitat.GetComponentsInChildren<Renderer>(true))
+                    Register(habitatRenderer.gameObject);
+                var etching = _root.Find("MoonlitPlatformEtching");
+                if (etching != null) etching.GetComponent<Renderer>().forceRenderingOff = true;
+                surface.forceRenderingOff = true;
+                return;
+            }
+
+            BuildStageRibbons();
+
+            if (_keyMap == null) return;
+            var piano = _keyMap.transform.Find("PianoCase");
+            if (piano == null) return;
+            var reflection = Own(new Material(waterShader) { renderQueue = 3000 });
+            reflection.SetColor("_BaseColor", new Color(0.12f, 0.37f, 0.70f, 0.84f));
+            reflection.SetFloat("_Reflection", 1f);
+            reflection.SetFloat("_WaterY", water.transform.position.y);
+            // 镜像使用静态琴体的共用网格。水面覆盖远景，琴体仍遮挡其在前景的倒影。
+            foreach (var piece in piano.GetComponentsInChildren<MeshFilter>())
+            {
+                if (piece.sharedMesh == null || !(piece.name.StartsWith("Grand", System.StringComparison.Ordinal) ||
+                    piece.name.StartsWith("Leg_", System.StringComparison.Ordinal) || piece.name == "Lid")) continue;
+                var copy = new GameObject("WaterReflection_" + piece.name);
+                var source = piece.transform;
+                copy.transform.SetParent(_root, false);
+                copy.transform.SetPositionAndRotation(source.position, source.rotation);
+                copy.transform.localScale = source.lossyScale;
+                copy.AddComponent<MeshFilter>().sharedMesh = piece.sharedMesh;
+                var renderer = copy.AddComponent<MeshRenderer>();
+                renderer.localBounds = new Bounds(Vector3.zero, Vector3.one * 20f);
+                renderer.sharedMaterial = reflection;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                Register(copy);
+            }
         }
 
-        /// <summary>发光窗格材质：URP/Unlit 优先，找不到时退回 Sprites/Default。</summary>
-        private static Material CreateUnlitMaterial(string name, Color color)
+        private void BuildStageRibbons()
         {
-            Shader shader = GraphicsSettings.currentRenderPipeline != null
-                ? Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Sprites/Default")
-                : Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
-            if (shader == null) return null;
-            var m = new Material(shader) { name = name };
-            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", color);
-            if (m.HasProperty("_Color")) m.SetColor("_Color", color);
-            return m;
+            var shader = Resources.Load<Shader>("StarStage/StageRibbon");
+            if (shader == null) return;
+
+            var root = new GameObject("StageRibbons");
+            root.transform.SetParent(_root, false);
+            _nearRibbon = Own(new Material(shader));
+            _nearRibbon.SetColor("_Tone", new Color(0.08f, 0.56f, 0.68f));
+            _farRibbon = Own(new Material(shader));
+            _farRibbon.SetColor("_Tone", new Color(0.12f, 0.34f, 0.57f));
+            var near = CreateStageRibbon(root.transform, "RibbonNear", _nearRibbon, 5.5f, 0.80f, 0.45f, -158f, 88f);
+            var far = CreateStageRibbon(root.transform, "RibbonFar", _farRibbon, 8.2f, 1.55f, 0.58f, -178f, 96f);
+            root.AddComponent<StageRibbonMotion>().Bind(near, far);
+        }
+
+        private Transform CreateStageRibbon(Transform parent, string name, Material material,
+            float radius, float height, float width, float start, float sweep)
+        {
+            var ribbon = new GameObject(name);
+            ribbon.transform.SetParent(parent, false);
+            ribbon.AddComponent<MeshFilter>().sharedMesh = Own(StageRibbonMotion.CreateArc(radius, height, width, start, sweep));
+            var renderer = ribbon.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            Register(ribbon);
+            return ribbon.transform;
+        }
+
+        private void CreatePlatformLayer(string layerName, float diameter, float height, float thickness,
+            Color color, float smoothness)
+        {
+            const int segments = 96;
+            var outline = new Vector2[segments];
+            float radius = diameter * 0.5f;
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = i * (2f * Mathf.PI / segments);
+                outline[i] = radius * new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+            }
+            var layer = new GameObject(layerName);
+            layer.transform.SetParent(_root, false);
+            layer.transform.localPosition = PlatformCenter + Vector3.up * (height - thickness * 0.5f);
+            layer.AddComponent<MeshFilter>().sharedMesh = Own(PianoMeshFactory.CreateGrandPlate(outline, Vector2.zero, thickness, 1f));
+            var renderer = layer.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = CreateLitMaterial(layerName, color, smoothness, 0f);
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = true;
+            Register(layer);
+        }
+
+        private void BuildPlatformInlay()
+        {
+            var shader = Resources.Load<Shader>("StarStage/StarStageInlay");
+            if (shader == null) return;
+            var inlay = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            inlay.name = "MoonlitPlatformEtching";
+            inlay.transform.SetParent(_root, false);
+            inlay.transform.localPosition = PlatformCenter + Vector3.up * 0.001f;
+            inlay.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            inlay.transform.localScale = Vector3.one * 3.5f;
+            DestroyCollider(inlay);
+            var renderer = inlay.GetComponent<Renderer>();
+            renderer.sharedMaterial = Own(new Material(shader));
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            Register(inlay);
         }
 
         // ==================== 构建辅助 ====================
@@ -685,7 +791,7 @@ namespace PianoTeacher3D.Piano
         /// 创建受光材质（Standard / URP Lit 兜底）。
         /// <para>数值通过参数传入，便于各环境物体设置不同粗糙度 / 金属度（审查 1.3A「材质分层」）。</para>
         /// </summary>
-        private static Material CreateLitMaterial(string name, Color color, float smoothness, float metallic)
+        private Material CreateLitMaterial(string name, Color color, float smoothness, float metallic)
         {
             // 写实化批次 2：由当前管线状态决定顺序（SRP 下 Standard 渲染为洋红，见 PianoKeyMap 同注释）
             var shader = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
@@ -697,7 +803,7 @@ namespace PianoTeacher3D.Piano
                     ?? Shader.Find("Sprites/Default");
             if (shader == null) return null;
 
-            var mat = new Material(shader) { name = name, color = color };
+            var mat = Own(new Material(shader) { name = name, color = color });
             if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", smoothness); // Standard
             if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness); // URP Lit
             if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", metallic);
@@ -708,12 +814,12 @@ namespace PianoTeacher3D.Piano
         /// 创建接触阴影薄片材质：透明 unlit（<c>Sprites/Default</c>）+ 径向渐变贴图，靠 α 做极淡的柔和衰减。
         /// 找不到透明 shader 时返回 null，由调用方诚实降级（不制造不透明硬边矩形）。
         /// </summary>
-        private static Material CreateDecalMaterial(Color tint, Texture2D gradient)
+        private Material CreateDecalMaterial(Color tint, Texture2D gradient)
         {
             var shader = Shader.Find("Sprites/Default") ?? Shader.Find("UI/Default");
             if (shader == null) return null;
 
-            var mat = new Material(shader) { name = "ContactShadowDecal", color = tint };
+            var mat = Own(new Material(shader) { name = "ContactShadowDecal", color = tint });
             if (gradient != null) mat.mainTexture = gradient;
             return mat;
         }

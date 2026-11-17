@@ -62,7 +62,7 @@ namespace PianoTeacher3D.Tests.EditMode
         // ==================== 幂等与几何规模（方案 7.2） ====================
 
         [Test]
-        public void Build_CreatesRoomShell_AndKeepsEnvironmentToggleIdempotent()
+        public void Build_CreatesStarStage_AndKeepsEnvironmentToggleIdempotent()
         {
             var go = new GameObject("Env", typeof(PianoSceneEnvironment));
             try
@@ -73,12 +73,9 @@ namespace PianoTeacher3D.Tests.EditMode
                 var names = new System.Collections.Generic.HashSet<string>();
                 foreach (var tr in go.GetComponentsInChildren<Transform>(true)) names.Add(tr.name);
 
-                Assert.IsTrue(names.Contains("RoomBackWall"), "缺少后墙");
-                Assert.IsTrue(names.Contains("RoomSideWall_L"), "缺少左侧墙");
-                Assert.IsTrue(names.Contains("RoomSideWall_R"), "缺少右侧墙");
-                Assert.IsTrue(names.Contains("RoomRug"), "缺少地毯");
-                Assert.IsTrue(names.Contains("RoomWindow"), "缺少窗户");
-                Assert.IsTrue(names.Contains("RoomCeiling"), "缺少顶棚");
+                Assert.IsTrue(names.Contains("StarSky"), "缺少星空背景");
+                Assert.IsTrue(names.Contains("StarWater"), "缺少水镜");
+                Assert.IsTrue(names.Contains("Floor"), "缺少舞台地面");
 
                 env.SetEnvironmentVisible(false);
                 env.SetEnvironmentVisible(false);   // 幂等
@@ -89,6 +86,34 @@ namespace PianoTeacher3D.Tests.EditMode
             {
                 Object.DestroyImmediate(go);
             }
+        }
+
+        [Test]
+        public void ComicStage_KeepsPlatformVisibleOnBothTiers_AndScalesAnimatedEffects()
+        {
+            _env.Build(_keyMap, QualityProfile.For(QualityTier.Standard));
+            var root = _env.transform.Find("SceneEnvironment");
+            var platform = root.Find("MoonlitPlatform");
+            Assert.IsNotNull(platform, "钢琴和琴凳需要落在可见的圆台上");
+            Assert.AreEqual(0f, platform.GetComponent<Renderer>().bounds.max.y, 0.004f);
+            var sky = root.Find("StarSky").GetComponent<Renderer>();
+            var water = root.Find("StarWater").GetComponent<Renderer>();
+            Assert.IsTrue(root.Find("Floor").GetComponent<Renderer>().forceRenderingOff,
+                "有水面时兜底地板不应在倒影下露出矩形边缘");
+            Assert.IsTrue(sky.sharedMaterial.HasProperty("_Effects"));
+            Assert.IsTrue(water.sharedMaterial.HasProperty("_Effects"));
+            float standardStrength = sky.sharedMaterial.GetFloat("_Effects");
+            Assert.Greater(standardStrength, 0f);
+            Assert.AreEqual(standardStrength, water.sharedMaterial.GetFloat("_Effects"));
+
+            _env.Build(_keyMap, QualityProfile.For(QualityTier.High));
+            Assert.AreSame(platform, root.Find("MoonlitPlatform"));
+            Assert.Greater(sky.sharedMaterial.GetFloat("_Effects"), standardStrength);
+            Assert.AreEqual(sky.sharedMaterial.GetFloat("_Effects"), water.sharedMaterial.GetFloat("_Effects"));
+            _env.SetEnvironmentVisible(false);
+            Assert.IsFalse(platform.gameObject.activeInHierarchy);
+            _env.SetEnvironmentVisible(true);
+            Assert.IsTrue(platform.gameObject.activeInHierarchy);
         }
 
         [Test]
@@ -108,7 +133,7 @@ namespace PianoTeacher3D.Tests.EditMode
                 "重复 Build 不得重复创建灯光");
             Assert.AreEqual(4, lightCount, "应恰好为 主光 + 补光 + 轮廓光 + 键盘点光");
             Assert.Greater(rendererCount, 0);
-            Assert.Less(rendererCount, 40, "环境只应包含少量程序化几何（含琴房外壳约 12 个），远低于 88 键规模（方案 7.2）");
+            Assert.Less(rendererCount, 40, "环境只应包含少量程序化几何（包含舞台倒影），远低于 88 键规模（方案 7.2）");
         }
 
         // ==================== 三点光照 + 键盘点光（方案 5.4 / 审查 1.3B） ====================

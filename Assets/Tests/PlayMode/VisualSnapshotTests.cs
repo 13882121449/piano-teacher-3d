@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -421,7 +421,7 @@ public class VisualSnapshotTests
             yield return Capture(cam, Path.Combine(dir, "V27_more_panel.png"));
             records.Add(Snapshot("V27_more_panel.png", "方案 3.1 底栏单行",
                 "低频工具收进「更多」浮层，底栏只留 播放 / 时间 / 进度 / 手型 / 速度 / 循环",
-                "浮层贴底栏右上角，两行工具：视角·重播·高亮·节拍器 / 展示·分析·拍点·循环范围",
+                "浮层贴底栏右上角，两行工具：重播·高亮·节拍器·拍点 / 展示·分析；视角在演奏区右上",
                 session, cameraCtrl, avatar, timeline));
         }
 
@@ -568,15 +568,20 @@ public class VisualSnapshotTests
             "Rocketbox 默认真人角色，停止态",
             session, cameraCtrl, avatar, timeline));
 
-        // ---- V20 真人 · 延音踏板踩下：证明右脚随踏板事件动作 ----
-        // 与 V19 同角色、同机位，唯一差别是「播放中且落在踏板区间内」，
-        // 因此两张图里脚部的差异就是踏板动作本身。
+        // ---- V20 真人 · 延音踏板踩下 ----
+        string pedalSong = Path.Combine(Application.streamingAssetsPath, "Songs", "bench",
+            "articulation", "pedal_cc64.mid");
+        session.LoadSong(pedalSong);
+        yield return new WaitUntil(() => !session.IsLoading);
+        session.SetCameraMode(CameraMode.Pedal);
         session.Play();
-        yield return new WaitForSeconds(1.2f);
+        session.Pause();
+        session.Seek(0.45f);
+        yield return new WaitForSeconds(0.55f);
         yield return Capture(cam, Path.Combine(dir, "V20_rocketbox_pedal.png"));
         records.Add(Snapshot("V20_rocketbox_pedal.png", "v4 阶段 1 / 延音踏板",
-            "真人角色演奏中：延音踏板踩下时右脚脚尖抬起、脚跟着地",
-            "与 V19 同机位，播放中命中踏板区间",
+            "踏板特写：右鞋、踏面、后跟与木地板",
+            "踏板样本 0.45 秒，暂停于踩下状态",
             session, cameraCtrl, avatar, timeline));
         session.Stop();
         session.Seek(0f);
@@ -643,7 +648,7 @@ public class VisualSnapshotTests
             v10Record.CameraState = "不适用（主菜单场景无 CameraModeController）";
             records.Add(v10Record);
 
-            // ---- V24–V26 主菜单卡片式四入口的三个浮层（Task 7 Step 1）----
+            // ---- V24–V26 角色、设置与唯一曲库 ----
             yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
                 "V24_menu_characters.png", "EntryCard_角色", "主菜单 / 角色浮层",
                 "三张人像预览卡（写实女性 / 写实男性 / 儿童）+「进入课程后可切换」说明",
@@ -654,10 +659,16 @@ public class VisualSnapshotTests
                 "画质三档 chips（取自 QualitySettings.names）+ 全屏开关 + 快捷键说明",
                 "主菜单点「设置」入口卡后截图");
 
-            yield return CaptureMenuOverlay(dir, menuCam, records, skipped,
-                "V26_menu_songs.png", "EntryCard_选曲", "主菜单 / 选曲浮层",
-                "曲目清单（最多 8 行，含文件大小）+ 底部「导入 MIDI…」",
-                "主菜单点「选曲」入口卡后截图");
+            yield return Capture(menuCam, Path.Combine(dir, "V26_menu_songs.png"));
+            var libraryRecord = Snapshot("V26_menu_songs.png", "主菜单 / 曲库",
+                "曲库和导入入口同屏，曲目只列一次", "首页直接显示曲库，曲目超出可视区时可滚动",
+                null, null, null, null);
+            libraryRecord.Avatar = "不适用（主菜单场景）";
+            libraryRecord.AvatarIndex = -1;
+            libraryRecord.Song = "不适用（未进入课程）";
+            libraryRecord.Time = -1f;
+            libraryRecord.CameraState = "不适用（主菜单场景无 CameraModeController）";
+            records.Add(libraryRecord);
         }
 
         // ==================================================================
@@ -708,14 +719,97 @@ public class VisualSnapshotTests
     // ==================================================================
 
     /// <summary>同步渲染当前相机视图（含 Overlay UI）到 PNG。</summary>
-    private static IEnumerator Capture(Camera cam, string path)
+    [UnityTest, Explicit("用实际图形设备检查星空舞台和第一课")]
+    public IEnumerator CaptureStarStageAndClassroom()
+    {
+        Assert.AreNotEqual(UnityEngine.Rendering.GraphicsDeviceType.Null, SystemInfo.graphicsDeviceType);
+        string directory = Environment.GetEnvironmentVariable("PT3D_STAR_CAPTURE_DIR");
+        Assert.IsNotEmpty(directory);
+        Directory.CreateDirectory(directory);
+        SceneManager.LoadScene("PianoLesson");
+        yield return null;
+        var session = UnityEngine.Object.FindFirstObjectByType<LessonSessionController>();
+        session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+        session.SetDisplayMode(DisplayMode.Showcase);
+        session.SetCameraMode(CameraMode.Full);
+        for (int i = 0; i < 60; i++) yield return null;
+        Assert.IsNotNull(GameObject.Find("StarSky"));
+        Assert.IsNotNull(GameObject.Find("StarWater"));
+        Assert.IsNotNull(GameObject.Find("MoonlitPlatform"));
+        var stage = GameObject.Find("SceneEnvironment");
+        var habitat = stage.transform.Find("UnderwaterHabitat");
+        Assert.IsNotNull(habitat);
+        Assert.IsTrue(habitat.Find("SunlightVolume").GetComponent<Renderer>().sharedMaterial.shader.isSupported);
+        var environment = session.GetComponent<PianoSceneEnvironment>();
+        var sky = GameObject.Find("StarSky").GetComponent<Renderer>();
+        var water = GameObject.Find("StarWater").GetComponent<Renderer>();
+        var etching = GameObject.Find("MoonlitPlatformEtching").GetComponent<Renderer>();
+        var whale = habitat.Find("HumpbackWhale").GetComponent<Renderer>();
+        var shell = GameObject.Find("TideShell").GetComponent<Renderer>();
+        Assert.IsTrue(sky.sharedMaterial.shader.isSupported);
+        Assert.IsTrue(water.sharedMaterial.shader.isSupported);
+        Assert.IsTrue(etching.sharedMaterial.shader.isSupported);
+        Assert.IsTrue(whale.sharedMaterial.shader.isSupported);
+        Assert.AreEqual("Universal Render Pipeline/Lit", shell.sharedMaterial.shader.name);
+        Assert.IsTrue(shell.sharedMaterial.shader.isSupported);
+        Assert.Less(shell.sharedMaterial.GetColor("_BaseColor").r, 0.20f, "演奏展示使用深蓝漆面");
+        Assert.Greater(shell.sharedMaterial.GetFloat("_Smoothness"), 0.75f, "琴漆近景应有光滑高光");
+        Assert.IsNotNull(shell.transform.parent.Find("TideInlay"), "舞台琴需要青蓝侧沿");
+        environment.ApplyQuality(QualityProfile.For(QualityTier.Standard));
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "standard.png"));
+        environment.ApplyQuality(QualityProfile.For(QualityTier.High));
+        for (int i = 0; i < 30; i++) yield return null;
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "stage.png"));
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "art.png"), includeInterface: false);
+        var frames = Path.Combine(directory, "frames");
+        Directory.CreateDirectory(frames);
+        for (int i = 0; i < 42; i++)
+        {
+            yield return new WaitForSecondsRealtime(0.09f);
+            yield return Capture(UnityEngine.Camera.main, Path.Combine(frames, $"{i:D2}.png"), includeInterface: false);
+        }
+
+        var camera = UnityEngine.Camera.main;
+        var controller = camera.GetComponent<CameraModeController>();
+        var previousPose = new Pose(camera.transform.position, camera.transform.rotation);
+        if (controller != null) controller.enabled = false;
+        Vector3 focus = new Vector3(-0.04f, 0.86f, -0.53f);
+        camera.transform.position = new Vector3(2.16f, 1.64f, 1.11f);
+        camera.transform.LookAt(focus);
+        yield return Capture(camera, Path.Combine(directory, "piano.png"), includeInterface: false);
+        camera.transform.position = new Vector3(1.1f, 1.42f, 3.7f);
+        camera.transform.LookAt(new Vector3(0f, 1.08f, -0.55f));
+        yield return Capture(camera, Path.Combine(directory, "rear.png"), includeInterface: false);
+        camera.transform.SetPositionAndRotation(previousPose.position, previousPose.rotation);
+        if (controller != null) controller.enabled = true;
+        foreach (var id in new[] { CharacterRegistry.RocketboxMaleId, CharacterRegistry.RocketboxChildId })
+        {
+            session.RestoreCharacter(id);
+            for (int i = 0; i < 40; i++) yield return null;
+            yield return Capture(camera, Path.Combine(directory, id + ".png"), includeInterface: false);
+        }
+
+        SceneManager.LoadScene("MainMenu");
+        yield return null;
+        yield return null;
+        GameObject.Find("PracticePrimary").GetComponent<Button>().onClick.Invoke();
+        yield return null;
+        yield return null;
+        GameObject.Find("GuidedStartWait").GetComponent<Button>().onClick.Invoke();
+        for (int i = 0; i < 60; i++) yield return null;
+        yield return Capture(UnityEngine.Camera.main, Path.Combine(directory, "classroom.png"));
+    }
+
+    private static IEnumerator Capture(Camera cam, string path, bool includeInterface = true)
     {
         // Overlay Canvas 临时转为 Screen Space Camera，使其纳入相机渲染
-        var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+        var canvases = includeInterface
+            ? UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None)
+            : Array.Empty<Canvas>();
         var saved = new List<(Canvas c, RenderMode mode, Camera wcam, float pd)>();
         foreach (var c in canvases)
         {
-            if (c.renderMode == RenderMode.ScreenSpaceOverlay)
+            if (c.isRootCanvas && c.renderMode == RenderMode.ScreenSpaceOverlay)
             {
                 saved.Add((c, c.renderMode, c.worldCamera, c.planeDistance));
                 c.renderMode = RenderMode.ScreenSpaceCamera;
