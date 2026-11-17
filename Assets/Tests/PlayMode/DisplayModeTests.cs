@@ -11,7 +11,7 @@ namespace PianoTeacher3D.Tests.PlayMode
 {
     /// <summary>
     /// 显示模式（展示 / 教学）回归测试：
-    /// ① 教学模式隐藏手部，且只高亮「被按下的琴键」（左右手分色）；
+    /// ① 教学模式隐藏手部，且默认只高亮「被按下的琴键」（左右手分色）；
     /// ② 展示模式保持完整手部动画；
     /// ③ 两种模式可自由切换，切换后立即生效且<b>不残留状态</b>（手部可见性、高亮模式、按键高亮集合、时间轴）。
     /// </summary>
@@ -62,7 +62,7 @@ namespace PianoTeacher3D.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator Teaching_HidesHandsAndForcesPressedKeyHighlight()
+        public IEnumerator Teaching_HidesHandsAndDefaultsToPressedKeyHighlight()
         {
             _session.SetHighlightMode(HighlightMode.Off);
             yield return null;
@@ -73,7 +73,7 @@ namespace PianoTeacher3D.Tests.PlayMode
             Assert.IsTrue(_session.IsTeachingMode);
             Assert.IsFalse(_avatar.HandsAndArmsVisible, "教学模式必须隐藏手部 / 手臂网格");
             Assert.AreEqual(HighlightMode.Active, _session.EffectiveHighlightMode,
-                "教学模式应固定为「仅高亮被按下的琴键」（Active）");
+                "教学模式默认「仅高亮被按下的琴键」（Active）");
 
             yield return new WaitForSeconds(0.2f);
         }
@@ -109,7 +109,7 @@ namespace PianoTeacher3D.Tests.PlayMode
         [UnityTest]
         public IEnumerator SwitchRoundTrip_LeavesNoResidue()
         {
-            // 用户在展示模式下把高亮设为「全部」，教学模式冻结后再切回，必须恢复为「全部」
+            // 用户在展示模式下把高亮设为「全部」，进入教学模式再切回，必须恢复为「全部」
             _session.SetHighlightMode(HighlightMode.Both);
             yield return null;
 
@@ -130,7 +130,7 @@ namespace PianoTeacher3D.Tests.PlayMode
 
             // ① 手部恢复可见
             Assert.IsTrue(_avatar.HandsAndArmsVisible, "切回展示模式后手部必须恢复可见");
-            // ② 高亮模式恢复为用户偏好（而不是停在教学模式的强制值）
+            // ② 高亮模式恢复为用户偏好（而不是停在教学模式的设置）
             Assert.AreEqual(HighlightMode.Both, _session.EffectiveHighlightMode,
                 "切回展示模式后应恢复用户原来选择的高亮模式");
             // ③ 时间轴不受影响（切换只改表现层）

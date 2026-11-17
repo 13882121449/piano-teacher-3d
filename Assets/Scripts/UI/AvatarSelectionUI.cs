@@ -1,7 +1,10 @@
 using System.Collections.Generic;
 using PianoTeacher3D.Avatar;
 using PianoTeacher3D.Characters;
+using PianoTeacher3D.Core;
+using PianoTeacher3D.Customization;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace PianoTeacher3D.UI
@@ -14,7 +17,7 @@ namespace PianoTeacher3D.UI
     ///    每张卡片有<b>缩略图 / 名称 / 风格 · 质量标签 / 是否支持照片外观 / 许可</b>；
     /// ② 选中态 = 强调色底 + 边框 + 「✓」+ 粗体（不只靠颜色区分，审查 2.2）；
     /// ③ 切换只换表现层：内置角色走 <c>LessonSessionController.SwitchAvatar</c>，
-    ///    外部角色走 <c>AvatarManager.TryActivate</c>，两者都不触碰时间轴 / 速度 / 循环 / 音频；
+    ///    外部角色走 <c>LessonSessionController.ActivateCharacter</c>，两者都不触碰时间轴 / 速度 / 循环 / 音频；
     /// ④ 底部一行显示当前卡片来源与许可，保证「资产可追溯」（方案 18）。
     /// </para>
     /// </summary>
@@ -26,6 +29,16 @@ namespace PianoTeacher3D.UI
         /// <summary>当前场景中的角色面板实例（供顶栏 / 工具栏按钮唤起）。</summary>
         public static AvatarSelectionUI Instance { get; private set; }
 
+        public static string GetCurrentAvatarName(LessonSessionController session)
+        {
+            var active = session?.CurrentCharacterView;
+            var registry = session?.CharacterRegistry;
+            if (active != null && registry != null && registry.TryGet(active.CharacterId, out var profile))
+                return profile.DisplayName;
+
+            return GetAvatarName(session?.CurrentAvatarIndex ?? 0);
+        }
+
         /// <summary>按索引取角色显示名（越界返回「未知角色」，不抛异常）。</summary>
         public static string GetAvatarName(int index)
             => index >= 0 && index < AvatarNames.Length ? AvatarNames[index] : "未知角色";
@@ -36,12 +49,13 @@ namespace PianoTeacher3D.UI
         // 面板尺寸：4 张卡片一行（4 × 108 + 3 × 8 = 456），加左右各 16 的内边距
         // 3 张竖版人像卡：132×184（图 132×140 + 名称 18 + 标签 16 + 内边距）
         private const float PanelWidth = 460f;
-        private const float PanelHeight = 372f;   // 多出 24：允许「切换失败原因」换行显示两行
+        private const float PanelHeight = 406f;
         private const float CardWidth = 132f;
         private const float CardHeight = 184f;
         private const float CardGap = 12f;
         private const float CardTop = 92f;
         private const float ThumbHeight = 132f;
+        private const int CardsPerPage = 3;
 
         private Core.LessonSessionController _session;
         private AvatarManager _avatarManager;
@@ -52,17 +66,20 @@ namespace PianoTeacher3D.UI
         private readonly List<Button> _cards = new List<Button>();
         private readonly List<Text> _cardLabels = new List<Text>();
         private readonly List<Text> _cardTags = new List<Text>();
-        private readonly List<Image> _cardThumbs = new List<Image>();
         private readonly List<CharacterProfile> _profiles = new List<CharacterProfile>();
-        private readonly List<Sprite> _sprites = new List<Sprite>();
 
         private RectTransform _panel;
         private Text _currentText;
         private Text _licenseText;
         private Button _photoButton;
         private PhotoCustomizationPanel _photoPanel;
-        private Sprite _whiteSprite;
-        private Texture2D _whiteTexture;
+        private PhotoAvatarPanel _createPhotoPanel;
+        private Button _pageButton;
+        private Button _archivePhotoButton;
+        private string _confirmArchiveId;
+        private int _page;
+        private Button _closeButton;
+        private GameObject _panelTrigger;
 
         /// <summary>面板是否处于展开状态。</summary>
         public bool IsPanelOpen => _panel != null && _panel.gameObject.activeSelf;
@@ -103,18 +120,6 @@ namespace PianoTeacher3D.UI
             if (_session != null) _session.OnAvatarChanged -= OnAvatarChanged;
             if (_avatarManager != null) _avatarManager.OnCharacterViewChanged -= OnViewChanged;
 
-            for (int i = 0; i < _sprites.Count; i++)
-            {
-                if (_sprites[i] != null) Destroy(_sprites[i]);
-            }
-            _sprites.Clear();
-            if (_whiteTexture != null)
-            {
-                Destroy(_whiteTexture);
-                _whiteTexture = null;
-            }
-            _whiteSprite = null;
-
             if (_ownsRegistry) _registry?.Dispose();
             _registry = null;
             _ownsRegistry = false;
@@ -126,6 +131,7 @@ namespace PianoTeacher3D.UI
         {
             // Esc：有浮层时不抢按键（由状态栏 / 主控制层优先处理）
             if (!IsPanelOpen) return;
+            if (_createPhotoPanel != null && _createPhotoPanel.IsOpen) return;
             if (UITheme.ConsumeEscape()) ShowPanel(false);
         }
 
@@ -135,10 +141,20 @@ namespace PianoTeacher3D.UI
         /// <summary>显示 / 隐藏面板。</summary>
         public void ShowPanel(bool show)
         {
-            if (_panel == null) return;
-            if (show) UITooltip.Hide();
+            if (_panel == null || show == IsPanelOpen) return;
+            var events = EventSystem.current;
+            if (show)
+            {
+                UITooltip.Hide();
+                _panelTrigger = events != null ? events.currentSelectedGameObject : null;
+                GoToCurrentPage();
+            }
+
             _panel.gameObject.SetActive(show);
             if (show) Highlight(CurrentCharacterId());
+            if (events != null)
+                events.SetSelectedGameObject(show ? _closeButton.gameObject : _panelTrigger);
+            if (!show) _panelTrigger = null;
         }
 
         private void OnAvatarChanged(int index) => Highlight(CurrentCharacterId());
@@ -173,9 +189,10 @@ namespace PianoTeacher3D.UI
                 UITheme.FontSmall, UITheme.TextPrimary, TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.PlaceTopLeft(title.rectTransform, 16f, 12f, 150f, 24f);
 
-            var closeBtn = UITheme.CreateButton(_panel, "收起", Vector2.zero, new Vector2(64f, 24f),
-                () => ShowPanel(false), UITheme.FontStatusLabel, ButtonStyle.Ghost, "收起角色面板");
-            UITheme.PlaceTopRight(closeBtn.GetComponent<RectTransform>(), 16f, 12f, 64f, 24f);
+            _closeButton = UIKit.TextButton(_panel, "收起", 64f, UITheme.HeightSmall,
+                () => ShowPanel(false), UITheme.FontBodySmall, "收起角色面板");
+            UITheme.PlaceTopRight(_closeButton.GetComponent<RectTransform>(), UITheme.Space16, UITheme.Space8,
+                64f, UITheme.HeightSmall);
 
             // 当前角色名单独一行（不与标题挤在同一条基线上）
             _currentText = UITheme.CreateText(_panel, "当前：—", Vector2.zero, new Vector2(320f, 20f),
@@ -203,6 +220,24 @@ namespace PianoTeacher3D.UI
                 16f, CardTop + CardHeight + 8f, PanelWidth - 32f, 32f);
             _photoButton.interactable = hasCustomization;
 
+            var addPhoto = UITheme.CreateButton(_panel, "从照片创建…", Vector2.zero,
+                new Vector2(220f, 32f), OpenPhotoAvatarPanel, UITheme.FontSmall, ButtonStyle.Primary,
+                "在本地用正脸照片创建一位新的演奏角色");
+            UITheme.PlaceTopLeft(addPhoto.GetComponent<RectTransform>(), 16f, CardTop + CardHeight + 46f, 220f, 32f);
+            addPhoto.interactable = _session != null;
+
+            _archivePhotoButton = UITheme.CreateButton(_panel, "移出角色库", Vector2.zero,
+                new Vector2(112f, 32f), ArchiveCurrentPhoto, UITheme.FontCaption, ButtonStyle.Ghost,
+                "将当前照片角色移到本地回收目录");
+            UITheme.PlaceTopRight(_archivePhotoButton.GetComponent<RectTransform>(), 16f,
+                CardTop + CardHeight + 46f, 112f, 32f);
+            _archivePhotoButton.gameObject.SetActive(false);
+
+            _pageButton = UITheme.CreateButton(_panel, "下一页", Vector2.zero,
+                new Vector2(88f, 26f), NextPage, UITheme.FontCaption, ButtonStyle.Ghost);
+            UITheme.PlaceTopRight(_pageButton.GetComponent<RectTransform>(), 16f, 57f, 88f, 26f);
+            RefreshPageButton();
+
             // 许可 / 失败原因：允许换行两行，避免长原因（例如资产缺贴图）溢出面板造成视觉错位
             _licenseText = UITheme.CreateText(_panel, string.Empty, Vector2.zero,
                 new Vector2(PanelWidth - 32f, 36f), UITheme.FontStatusLabel, UITheme.TextSecondary,
@@ -218,16 +253,22 @@ namespace PianoTeacher3D.UI
 
         private void BuildCards()
         {
+            foreach (var old in _cards)
+            {
+                if (old == null) continue;
+                old.gameObject.SetActive(false);
+                Destroy(old.gameObject);
+            }
             _cards.Clear();
             _cardLabels.Clear();
             _cardTags.Clear();
-            _cardThumbs.Clear();
             _profiles.Clear();
 
             var all = _registry != null ? _registry.All : null;
             if (all == null) return;
 
-            for (int i = 0; i < all.Count; i++)
+            int start = _page * CardsPerPage;
+            for (int i = start; i < Mathf.Min(start + CardsPerPage, all.Count); i++)
             {
                 var profile = all[i];
                 if (profile == null) continue;
@@ -243,16 +284,17 @@ namespace PianoTeacher3D.UI
                 _cards.Add(card);
                 _profiles.Add(profile);
 
-                // 缩略图（没有纹理时用风格色块占位，避免空白卡片）
-                var thumb = CreateThumbnail(card.transform, profile);
-                _cardThumbs.Add(thumb);
+                var thumb = UIKit.Panel(card.transform, "Thumb", UITheme.PanelBgDeep, UITheme.RadiusSmall);
+                UITheme.Place(thumb, UITheme.Space4, CardHeight - ThumbHeight - UITheme.Space8,
+                    CardWidth - UITheme.Space8, ThumbHeight);
+                UIKit.PlaceCharacterPreview(thumb, profile.CharacterId, profile.Thumbnail);
 
                 // 名称放在缩略图下方（按钮自带的 label 直接复用，避免多一层文本）
                 var label = UITheme.GetLabel(card);
                 if (label != null)
                 {
                     label.alignment = TextAnchor.MiddleCenter;
-                    label.fontSize = UITheme.FontCaption;
+                    label.fontSize = UITheme.FontBodySmall;
                     UITheme.Place(label.rectTransform, 4f, 26f, CardWidth - 8f, 18f);
                 }
                 _cardLabels.Add(label);   // 保持与 _cards 索引一一对应（可能为 null）
@@ -264,8 +306,87 @@ namespace PianoTeacher3D.UI
                 UITheme.Place(tag.rectTransform, 4f, 8f, CardWidth - 8f, 16f);
                 _cardTags.Add(tag);
             }
+            RefreshPageButton();
 
-            if (_cards.Count > 0) UITheme.ChainHorizontal(_cards.ToArray());
+        }
+
+        private int PageCount => Mathf.Max(1, ((_registry?.Count ?? 0) + CardsPerPage - 1) / CardsPerPage);
+
+        private void RefreshPageButton()
+        {
+            if (_pageButton == null) return;
+            _pageButton.gameObject.SetActive(PageCount > 1);
+            var label = UITheme.GetLabel(_pageButton);
+            if (label != null) label.text = $"下一页 {_page + 1}/{PageCount}";
+        }
+
+        private void NextPage()
+        {
+            _page = (_page + 1) % PageCount;
+            BuildCards();
+            Highlight(CurrentCharacterId());
+        }
+
+        private void GoToCurrentPage()
+        {
+            if (_registry == null) return;
+            string id = CurrentCharacterId();
+            for (int i = 0; i < _registry.Count; i++)
+            {
+                if (_registry.All[i].CharacterId != id || _page == i / CardsPerPage) continue;
+                _page = i / CardsPerPage;
+                BuildCards();
+                break;
+            }
+        }
+
+        private void OpenPhotoAvatarPanel()
+        {
+            if (_session == null) return;
+            if (_createPhotoPanel == null)
+            {
+                var go = new GameObject("PhotoAvatarCreator");
+                go.transform.SetParent(transform, false);
+                _createPhotoPanel = go.AddComponent<PhotoAvatarPanel>();
+                _createPhotoPanel.Initialize(SavePhotoAvatar);
+            }
+            _createPhotoPanel.Show();
+        }
+
+        private string SavePhotoAvatar(PhotoAvatarData data)
+        {
+            if (_registry == null || _session == null) return "角色库还未准备好。";
+            if (!_registry.SavePhotoAvatar(data, out var profile, out string error)) return error;
+            var result = _session.ActivateCharacter(profile);
+            if (!result.Succeeded)
+            {
+                if (!_registry.ArchivePhotoAvatar(profile, out string archiveError))
+                    return result.Error + " " + archiveError;
+                return result.Error;
+            }
+            GoToCurrentPage();
+            BuildCards();
+            Highlight(CurrentCharacterId());
+            return null;
+        }
+
+        private void ArchiveCurrentPhoto()
+        {
+            if (_session == null || !_registry.TryGet(CurrentCharacterId(), out var profile) ||
+                profile.PhotoAvatar == null) return;
+            if (_confirmArchiveId != profile.CharacterId)
+            {
+                _confirmArchiveId = profile.CharacterId;
+                UITheme.GetLabel(_archivePhotoButton).text = "确认移出";
+                return;
+            }
+
+            if (!_registry.TryGet(CharacterRegistry.RocketboxFemaleId, out var fallback)) return;
+            var result = _session.ActivateCharacter(fallback);
+            if (!result.Succeeded || !_registry.ArchivePhotoAvatar(profile, out _)) return;
+            _page = 0;
+            BuildCards();
+            Highlight(CurrentCharacterId());
         }
 
         /// <summary>面板里只放前 <paramref name="max"/> 个字符，完整原因进日志，避免文本溢出。</summary>
@@ -324,77 +445,9 @@ namespace PianoTeacher3D.UI
             return AppearanceSlot.Thumbnail;
         }
 
-        private Image CreateThumbnail(Transform parent, CharacterProfile profile)        {
-            var go = new GameObject("Thumb");
-            go.transform.SetParent(parent, false);
-            var rt = go.AddComponent<RectTransform>();
-            UITheme.Place(rt, 4f, CardHeight - ThumbHeight - 8f, CardWidth - 8f, ThumbHeight);
-
-            var image = go.AddComponent<Image>();
-            image.preserveAspect = true;
-            image.raycastTarget = false;
-
-            var portrait = LoadPortrait(profile);
-            if (portrait != null)
-            {
-                image.sprite = portrait;
-                image.color = Color.white;
-            }
-            else if (profile.Thumbnail != null)
-            {
-                var sprite = Sprite.Create(profile.Thumbnail,
-                    new Rect(0f, 0f, profile.Thumbnail.width, profile.Thumbnail.height),
-                    new Vector2(0.5f, 0.5f), 100f);
-                _sprites.Add(sprite);
-                image.sprite = sprite;
-                image.color = Color.white;
-            }
-            else
-            {
-                image.sprite = EnsureWhiteSprite();
-                image.color = PlaceholderColor(profile.Style);
-            }
-            return image;
-        }
-
-        /// <summary>
-        /// 取角色的人像缩略图：优先用 <c>Resources</c> 里同名的 <c>*_portrait</c> 贴图
-        /// （真人角色的脸部来自模型自身的头部贴图，不是另画的美术图）。
-        /// 用静态字典缓存，重复开关面板不会重复创建 Sprite。
-        /// </summary>
-        private static readonly Dictionary<string, Sprite> PortraitCache = new Dictionary<string, Sprite>();
-
-        private Sprite LoadPortrait(CharacterProfile profile)
-        {
-            if (profile == null) return null;
-            var path = CharacterRegistry.PortraitResourcesPath(profile.CharacterId);
-            if (string.IsNullOrEmpty(path)) return null;
-            if (PortraitCache.TryGetValue(path, out var cached)) return cached;
-
-            var tex = Resources.Load<Texture2D>(path);
-            if (tex == null) return null;
-
-            var sprite = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height),
-                new Vector2(0.5f, 0.5f), 100f);
-            _sprites.Add(sprite);
-            PortraitCache[path] = sprite;
-            return sprite;
-        }
-
-        /// <summary>缩略图占位色：按风格区分，让「有没有真实预览图」一眼可辨。</summary>
-        private static Color PlaceholderColor(CharacterStyle style)
-        {
-            switch (style)
-            {
-                case CharacterStyle.Cartoon: return new Color(0.24f, 0.62f, 0.45f, 0.55f);
-                case CharacterStyle.Anime: return new Color(0.55f, 0.38f, 0.78f, 0.55f);
-                case CharacterStyle.Custom: return new Color(0.85f, 0.55f, 0.25f, 0.55f);
-                default: return new Color(0.38f, 0.48f, 0.62f, 0.55f);
-            }
-        }
-
         private static string BuildTag(CharacterProfile profile)
         {
+            if (profile.PhotoAvatar != null) return "照片拟合 · 本地";
             string style = profile.Style switch
             {
                 CharacterStyle.Realistic => "写实",
@@ -431,8 +484,8 @@ namespace PianoTeacher3D.UI
             // 外部角色：走切换事务（含校验与回滚），失败时旧角色保持可驱动。
             // 失败原因必须显示出来：资产不全（例如缺贴图）时如果只是静默不切换，
             // 用户只会觉得「点了没反应」，反而更困惑。
-            if (_avatarManager == null) return;
-            var result = _avatarManager.TryActivate(profile);
+            if (_session == null) return;
+            var result = _session.ActivateCharacter(profile);
 
             if (result.Succeeded)
             {
@@ -450,6 +503,17 @@ namespace PianoTeacher3D.UI
 
         private void Highlight(string activeCharacterId)
         {
+            if (_archivePhotoButton != null)
+            {
+                bool photo = _registry != null && _registry.TryGet(activeCharacterId, out var current) &&
+                    current.PhotoAvatar != null;
+                _archivePhotoButton.gameObject.SetActive(photo);
+                if (activeCharacterId != _confirmArchiveId)
+                {
+                    _confirmArchiveId = null;
+                    UITheme.GetLabel(_archivePhotoButton).text = "移出角色库";
+                }
+            }
             for (int i = 0; i < _cards.Count; i++)
             {
                 var profile = _profiles[i];
@@ -465,11 +529,6 @@ namespace PianoTeacher3D.UI
                     label.text = on ? "✓ " + profile.DisplayName : profile.DisplayName;
                     label.fontStyle = on ? FontStyle.Bold : FontStyle.Normal;
                 }
-
-                // 只有「真的没有图」时才铺占位色；人像缩略图是有 sprite 的，
-                // 若仍按 profile.Thumbnail 判断会把真人像整张染成风格色（选中态尤其明显）。
-                if (_cardThumbs[i] != null && _cardThumbs[i].sprite == null)
-                    _cardThumbs[i].color = PlaceholderColor(profile.Style) * (on ? 1f : 0.7f);
 
                 // 选中卡的底是强调色，标签必须换成深色，否则浅灰文字在金色上几乎看不见。
                 if (_cardTags.Count > i && _cardTags[i] != null)
@@ -487,39 +546,9 @@ namespace PianoTeacher3D.UI
 
             if (_currentText != null)
             {
-                string name = GetAvatarName(_session != null ? _session.CurrentAvatarIndex : 0);
-                for (int i = 0; i < _profiles.Count; i++)
-                {
-                    if (_profiles[i] != null && _profiles[i].CharacterId == activeCharacterId)
-                    {
-                        name = _profiles[i].DisplayName;
-                        break;
-                    }
-                }
-                _currentText.text = "当前：" + name;
+                _currentText.text = "当前：" + GetCurrentAvatarName(_session);
             }
         }
 
-        /// <summary>1×1 纯白 sprite（占位色块用）。由本组件持有并在销毁时释放。</summary>
-        private Sprite EnsureWhiteSprite()
-        {
-            if (_whiteSprite != null) return _whiteSprite;
-
-            var tex = new Texture2D(4, 4, TextureFormat.RGBA32, false)
-            {
-                name = "AvatarSelectionUI_White",
-                wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Point
-            };
-            var pixels = new Color32[16];
-            for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color32(255, 255, 255, 255);
-            tex.SetPixels32(pixels);
-            tex.Apply();
-            _whiteTexture = tex;
-
-            _whiteSprite = Sprite.Create(tex, new Rect(0f, 0f, 4f, 4f), new Vector2(0.5f, 0.5f), 100f);
-            _sprites.Add(_whiteSprite);
-            return _whiteSprite;
-        }
     }
 }

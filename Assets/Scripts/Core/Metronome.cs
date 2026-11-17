@@ -120,6 +120,9 @@ namespace PianoTeacher3D.Core
             return beats;
         }
 
+        // 第一课的拍点使用练习时钟，沿用相同的击拍音色。
+        internal void PlayPracticeBeat(int beatInBar) => TriggerBeat(beatInBar);
+
         // ==================== 内部 ====================
 
         private void TriggerBeat(int index)

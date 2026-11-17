@@ -69,7 +69,7 @@ namespace PianoTeacher3D.Core
             {
                 var n = sorted[i];
 
-                if (PianoNoteFilter.IsLeftHand(n.Pitch)) analysis.LeftHandCount++;
+                if (PianoNoteFilter.IsLeftHand(n)) analysis.LeftHandCount++;
                 else analysis.RightHandCount++;
 
                 if (PianoNoteFilter.IsBlackKey(n.Pitch)) analysis.BlackKeyCount++;

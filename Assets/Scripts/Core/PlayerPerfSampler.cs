@@ -4,7 +4,11 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Profiling;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using PianoTeacher3D.CameraControl;
+using PianoTeacher3D.Characters;
+using PianoTeacher3D.Piano;
 
 namespace PianoTeacher3D.Core
 {
@@ -85,6 +89,7 @@ namespace PianoTeacher3D.Core
             public string processor;
             public int processorCount;
             public int systemMemoryMb;
+            public int graphicsMemoryMb;
             public int screenWidth;
             public int screenHeight;
             public int vSyncCount;
@@ -129,6 +134,9 @@ namespace PianoTeacher3D.Core
             private int _switchCount;
             private LessonSessionController _session;
 
+            private bool IsCinematic => _scenario == "cinema" || _scenario == "cinema-reference";
+            private bool IsGuidedLesson => _scenario == "first-lesson";
+
             public void Begin(float seconds, string scenario, string output)
             {
                 _seconds = seconds;
@@ -140,15 +148,34 @@ namespace PianoTeacher3D.Core
             private System.Collections.IEnumerator Run()
             {
                 // 场景装配可能恢复全屏偏好。仅在性能采样时重新指定窗口，不保存设置。
-                Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
+                if (IsGuidedLesson && SceneManager.GetActiveScene().name == "MainMenu")
+                {
+                    yield return null;
+                    GameObject.Find("PracticePrimary")?.GetComponent<Button>()?.onClick.Invoke();
+                    yield return null;
+                    yield return null;
+                    GameObject.Find("GuidedStartWait")?.GetComponent<Button>()?.onClick.Invoke();
+                }
+                bool comparison = IsCinematic || IsGuidedLesson;
+                Screen.SetResolution(comparison ? 1920 : 1280, comparison ? 1080 : 720, FullScreenMode.Windowed);
                 // ---- 预热：等场景装配、首帧着色器与音频初始化稳定 ----
                 yield return new WaitForSecondsRealtime(WarmupSeconds);
 
                 _session = FindFirstObjectByType<LessonSessionController>();
                 if (_session != null)
                 {
-                    if (_session.HasSong) _session.Play();
-                    _session.SetCameraMode(CameraMode.Full);
+                    if (comparison) _session.SetQualityTier(QualityTier.Standard);
+                    if (IsCinematic) PrepareCinematicComparison();
+                    else if (!IsGuidedLesson)
+                    {
+                        if (_session.HasSong) _session.Play();
+                        _session.SetCameraMode(CameraMode.Full);
+                    }
+                }
+                if (comparison)
+                {
+                    yield return new WaitForSecondsRealtime(WarmupSeconds);
+                    if (IsCinematic) _session?.Seek(0f);
                 }
 
                 _gcStart = GC.GetTotalMemory(false);
@@ -177,6 +204,23 @@ namespace PianoTeacher3D.Core
                 _sampling = false;
                 Write();
                 Application.Quit();
+            }
+
+            private void PrepareCinematicComparison()
+            {
+                bool legacy = _scenario == "cinema-reference";
+                string song = Path.Combine(Application.streamingAssetsPath, "Songs", "cinematic", "cinematic_tide.mid");
+                _session.LoadSong(song);
+                _session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+                _session.SetDisplayMode(DisplayMode.Showcase);
+                _session.SetCameraMode(CameraMode.Full);
+                _session.SetAutomaticStageCamera(true);
+                _session.SetStageDirectionEnabled(!legacy);
+                _session.SetMetronomeEnabled(false);
+                _session.SetSpeed(1f);
+                _session.SetLoop(0f, _session.TotalDuration);
+                FindFirstObjectByType<PianoKeyMap>()?.SetUnderwaterAppearance(true, legacy);
+                _session.Play();
             }
 
             private void Write()
@@ -210,6 +254,7 @@ namespace PianoTeacher3D.Core
                     processor = SystemInfo.processorType,
                     processorCount = SystemInfo.processorCount,
                     systemMemoryMb = SystemInfo.systemMemorySize,
+                    graphicsMemoryMb = SystemInfo.graphicsMemorySize,
                     screenWidth = Screen.width,
                     screenHeight = Screen.height,
                     vSyncCount = QualitySettings.vSyncCount,
@@ -220,7 +265,7 @@ namespace PianoTeacher3D.Core
                     sampleSeconds = _seconds,
                     frameCount = _frames.Count,
                     switchCount = _switchCount,
-                    note = "Development Build + 真实图形设备；Editor 批处理数据不可与之混用。"
+                    note = Debug.isDebugBuild ? "开发版、真实图形设备" : "使用版、真实图形设备"
                 };
 
                 // 采样停止后才复制，逐帧采集阶段不增加数组分配。

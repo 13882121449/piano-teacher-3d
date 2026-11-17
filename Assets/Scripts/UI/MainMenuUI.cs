@@ -1,20 +1,17 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using PianoTeacher3D.Characters;
+using PianoTeacher3D.Core;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace PianoTeacher3D.UI
 {
     /// <summary>
-    /// 主菜单 / 曲库页（深色专业工作台风格）。
-    /// <para>
-    /// 结构：28 hero 标题 + 12 副标题 → 曲目卡片网格（240×96，悬停升起 2px）→ 最近播放
-    /// → 底部快捷键说明。空态与错误态都用**居中卡片**（图标 + 说明 + 行动按钮）表达，
-    /// 不退化成一行红色报错文字。
-    /// </para>
+    /// 钢琴练习室首页。上方提供继续练习和示范入口，下方用一个滚动列表展示曲库与已导入的最近曲目。
     /// <para>
     /// 选中曲目通过静态字段 <see cref="SelectedSongPath"/> 传给课程场景（原有跨场景通道，保持不变）。
     /// </para>
@@ -24,27 +21,33 @@ namespace PianoTeacher3D.UI
         /// <summary>由主菜单选中的曲目路径（课程场景读取，保持原有契约）。</summary>
         public static string SelectedSongPath = "";
 
-        private const int MaxLibraryCards = 8;
-        private const int MaxRecentRows = 2;
-        private const float RecentRowHeight = 48f;
-        private const float RecentRowGap = 8f;
+        /// <summary>课程只在用户点击「继续练习」时恢复历史位置。</summary>
+        public static bool ResumeSongRequested { get; set; }
+
         private const float RemoveConfirmSeconds = 4f;
-
-        // ---- 卡片式四入口（方案 7.1：继续练习 / 选曲 / 角色 / 设置）----
-        private const float HeroHeight = 88f;
-        private const float EntryCardWidth = 216f;
-        private const float EntryCardHeight = 96f;
-        private const float EntryGap = 16f;
-        /// <summary>入口行占用的纵向高度（含与下一个区块的间距）；0 表示窄屏没有这一行。</summary>
-        private const float EntriesBlock = EntryCardHeight + UITheme.Space24;
-
-        // ---- 纵向游标（参考分辨率下的顶部偏移，全部为 4 的倍数）----
-        private const float ContentTop = 108f;
-        private const float ContentBottom = 56f;
-        private const float SectionHeaderHeight = 40f;
-        private const float GridTopGap = 48f;
+        private const float HeaderHeight = 60f;
+        private const float LibraryTop = 447f;
+        private const string PrefReduceMotion = "piano.reduceMotion";
+        private const float SongRowHeight = 48f;
+        private const float SongRowGap = UITheme.Space8;
 
         private static bool _pendingImport;
+        private static bool _pendingFirstLesson;
+
+        internal static bool ConsumeFirstLesson()
+        {
+            bool requested = _pendingFirstLesson;
+            _pendingFirstLesson = false;
+            return requested;
+        }
+
+        private static void OpenFirstLesson()
+        {
+            SelectedSongPath = "";
+            ResumeSongRequested = false;
+            _pendingFirstLesson = true;
+            SceneManager.LoadScene("PianoLesson");
+        }
         private static readonly List<string> RecentPaths = new List<string>();
 
         /// <summary>本次运行中从主菜单进入过的曲目（只保留安全元数据：路径）。</summary>
@@ -69,19 +72,26 @@ namespace PianoTeacher3D.UI
 
         private Canvas _canvas;
         private RectTransform _content;
+        private GameObject _ribbon;
+        private Button _motionToggle;
+        private readonly Dictionary<string, string> _songTitles = new Dictionary<string, string>(
+            StringComparer.OrdinalIgnoreCase);
+        private SongLibraryService _library;
+        private UserPreferences _preferences;
         private Button _pendingRemoveBtn;
         private float _removeConfirmUntil;
-        private bool _showRecent;
-        /// <summary>入口行实际占用的高度（0 = 本分辨率下不显示入口行）。</summary>
-        private float _entriesOffset;
-        /// <summary>上一次排版的可用宽度（0 = 还没拿到 CanvasScaler 定下来的真实宽度）。</summary>
+        private CanvasGroup _headerGroup;
+        private CanvasGroup _contentGroup;
         private float _layoutWidth;
-        /// <summary>当前打开的浮层（选曲 / 角色 / 设置），一次只允许一个。</summary>
         private GameObject _overlay;
+        private GameObject _overlayTrigger;
 
         private void Start()
         {
             ApplySavedSettings();
+            _library = new SongLibraryService();
+            _preferences = new UserPreferences();
+            _preferences.Load();
             BuildUI();
         }
 
@@ -97,16 +107,11 @@ namespace PianoTeacher3D.UI
 
             if (_overlay != null && Input.GetKeyDown(KeyCode.Escape)) CloseOverlay();
 
-            // 画布尺寸在 Start 之后才由 CanvasScaler 定下来（Start 时读到的还是窗口像素），
-            // 所以这里等真实宽度稳定后再按实际可用宽度决定入口行显示 / 隐藏，窗口缩放时同步重排。
+            // CanvasScaler 在首帧设置参考宽度。宽度变化时只重排曲库和练习入口。
             if (_content != null)
             {
                 float width = Width(_content);
-                if (Mathf.Abs(width - _layoutWidth) > 1f)
-                {
-                    _layoutWidth = width;
-                    RebuildContent();
-                }
+                if (Mathf.Abs(width - _layoutWidth) > 1f) RebuildContent();
             }
         }
 
@@ -115,116 +120,130 @@ namespace PianoTeacher3D.UI
             UITheme.EnsureEventSystem();
             _canvas = UITheme.CreateCanvas(transform, "MainMenuCanvas");
 
-            // 主菜单没有 3D 场景，铺一层暖木底色，避免露出场景相机的冷色天空盒
-            var backdrop = UITheme.CreateRect(_canvas.transform, "Backdrop", Vector2.zero, Vector2.zero,
-                UITheme.SceneBg);
-            UITheme.StretchAll(backdrop, 0f, 0f, 0f, 0f);
-            backdrop.SetAsFirstSibling();
+            BuildStage();
 
-            BuildHeroBand();
+            var header = UITheme.CreateRect(_canvas.transform, "MenuHeader", Vector2.zero, Vector2.zero,
+                MenuStagePalette.Ink);
+            UITheme.StretchTop(header, 0f, 0f, 0f, HeaderHeight);
+            _headerGroup = header.gameObject.AddComponent<CanvasGroup>();
+
+            var title = UIKit.Label(header, "钢琴 3D 教学", UITheme.FontSubtitle, MenuStagePalette.Text,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "PageTitle");
+            UITheme.PlaceTopLeft(title.rectTransform, UITheme.Space32, 14f, 144f, UITheme.HeightSmall);
+
+            var characters = UIKit.TextButton(header, "角色", 72f, UITheme.HeightSmall, OpenCharacterPreview);
+            characters.gameObject.name = "EntryCard_角色";
+            UITheme.PlaceTopRight(characters.GetComponent<RectTransform>(), 116f, UITheme.Space16, 72f,
+                UITheme.HeightSmall);
+            var settings = UIKit.TextButton(header, "设置", 72f, UITheme.HeightSmall, OpenSettings);
+            settings.gameObject.name = "EntryCard_设置";
+            UITheme.PlaceTopRight(settings.GetComponent<RectTransform>(), UITheme.Space32, UITheme.Space16, 72f,
+                UITheme.HeightSmall);
+
+            _motionToggle = UIKit.TextButton(header, "减少动效", 118f, UITheme.HeightSmall, ToggleMotion);
+            _motionToggle.gameObject.name = "MenuMotionToggle";
+            UITheme.PlaceTopRight(_motionToggle.GetComponent<RectTransform>(), 200f, UITheme.Space16, 118f,
+                UITheme.HeightSmall);
+            UpdateMotion();
 
             _content = UITheme.CreateRect(_canvas.transform, "Content", Vector2.zero, Vector2.zero,
                 UITheme.Transparent);
-            UITheme.StretchAll(_content, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                ContentBottom, ContentTop);
-
-            BuildEntryCards();
-            BuildLibrarySection();
-            BuildRecentSection();
-            BuildFooter();
+            _contentGroup = _content.gameObject.AddComponent<CanvasGroup>();
+            UITheme.StretchAll(_content, UITheme.Space32, UITheme.Space32, UITheme.Space24,
+                HeaderHeight);
+            RebuildContent();
         }
 
-        // ---------- 顶部 hero 带：标题 + 副标题 + 右侧曲库计数 ----------
-
-        private void BuildHeroBand()
+        private void BuildStage()
         {
-            var band = UITheme.CreatePanel(_canvas.transform, "HeroBand", Vector2.zero,
-                new Vector2(UITheme.Layout.ReferenceResolution.x, HeroHeight), UITheme.PanelBgDeep, 0);
-            var bandBg = band.GetComponent<Image>();
-            if (bandBg != null) bandBg.raycastTarget = false;
-            UITheme.StretchTop(band, 0f, 0f, 0f, HeroHeight);
+            var backdrop = UITheme.CreateRect(_canvas.transform, "Backdrop", Vector2.zero, Vector2.zero,
+                MenuStagePalette.Ink);
+            UITheme.StretchAll(backdrop, 0f, 0f, 0f, 0f);
 
-            var edge = UITheme.CreateDivider(band, "HeroRule", Vector2.zero,
-                new Vector2(UITheme.Layout.ReferenceResolution.x, 1f));
-            UITheme.StretchX(edge, 0f, 0f, HeroHeight - 1f, 1f);
+            var art = new GameObject("MenuStageArt", typeof(RectTransform), typeof(RawImage));
+            art.transform.SetParent(backdrop, false);
+            var artRect = (RectTransform)art.transform;
+            UITheme.StretchTop(artRect, 0f, 0f, 0f, HeaderHeight + LibraryTop + 32f);
+            var image = art.GetComponent<RawImage>();
+            image.raycastTarget = false;
+            image.texture = Resources.Load<Texture2D>("Menu/ConcertGrand");
+            image.enabled = image.texture != null;
+            if (image.texture != null)
+            {
+                var crop = art.AddComponent<MenuStageCrop>();
+                crop.SourceAspect = image.texture.width / (float)image.texture.height;
+                crop.Image = image;
+            }
 
-            var title = UIKit.Label(band, "钢琴 3D 教学", UITheme.FontPageTitle, UITheme.TextPrimary,
-                TextAnchor.MiddleLeft, FontStyle.Bold, "PageTitle");
-            title.horizontalOverflow = HorizontalWrapMode.Overflow;
-            UITheme.PlaceTopLeft(title.rectTransform, UITheme.Layout.ScreenMargin, 16f, 560f, 34f);
+            _ribbon = new GameObject("MenuKeyRibbon", typeof(RectTransform), typeof(MenuKeyRibbon));
+            _ribbon.transform.SetParent(art.transform, false);
+            UITheme.StretchAll((RectTransform)_ribbon.transform, 0f, 0f, 0f, 0f);
+            _ribbon.GetComponent<MenuKeyRibbon>().raycastTarget = false;
 
-            var subtitle = UIKit.Label(band, "三个真人角色 · 双手分离练习 · 逐帧对齐的键盘高亮",
-                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal,
-                "PageSubtitle");
-            subtitle.horizontalOverflow = HorizontalWrapMode.Overflow;
-            UITheme.PlaceTopLeft(subtitle.rectTransform, UITheme.Layout.ScreenMargin, 52f, 720f, 18f);
-
-            int songs = SongsCount();
-            string metaText = RecentPaths.Count > 0
-                ? $"曲库 {songs} 首　·　最近 {RecentPaths.Count} 首"
-                : $"曲库 {songs} 首";
-            var meta = UIKit.Label(band, metaText, UITheme.FontBodySmall, UITheme.TextSecondary,
-                TextAnchor.MiddleRight, FontStyle.Normal, "HeroMeta");
-            meta.horizontalOverflow = HorizontalWrapMode.Overflow;
-            UITheme.PlaceTopRight(meta.rectTransform, UITheme.Layout.ScreenMargin, 20f, 420f, 18f);
+            var shade = new GameObject("MenuStageScrim", typeof(RectTransform), typeof(MenuStageScrim));
+            shade.transform.SetParent(art.transform, false);
+            UITheme.StretchAll((RectTransform)shade.transform, 0f, 0f, 0f, 0f);
+            shade.GetComponent<MenuStageScrim>().raycastTarget = false;
+            _ribbon.transform.SetAsLastSibling();
         }
 
-        // ---------- 卡片式四入口 ----------
-
-        private void BuildEntryCards()
+        private void ToggleMotion()
         {
-            // 窄屏（<1080）放不下四张卡，退化成「曲库直接铺开」的老结构
-            float avail = Width(_content);
-            float needed = 4f * EntryCardWidth + 3f * EntryGap;
-            _entriesOffset = avail >= needed ? EntriesBlock : 0f;
-            if (_entriesOffset <= 0f) return;
-
-            string recentPath = RecentPaths.Count > 0 ? RecentPaths[0] : "";
-            bool hasRecent = !string.IsNullOrEmpty(recentPath) && SafeFileExists(recentPath);
-            string recentName = hasRecent ? Path.GetFileNameWithoutExtension(recentPath) : "";
-
-            var resume = UIKit.Card(_content, "继续练习",
-                hasRecent ? $"《{recentName}》" : "还没有练习记录，先从曲库选一首",
-                new Vector2(EntryCardWidth, EntryCardHeight),
-                hasRecent
-                    ? (UnityEngine.Events.UnityAction)(() => LoadLesson(recentPath))
-                    : (UnityEngine.Events.UnityAction)null,
-                hasRecent ? $"回到《{recentName}》继续练习" : "本次运行还没有打开过曲目",
-                "EntryCard_");
-            resume.interactable = hasRecent;
-            PlaceEntry(resume.GetComponent<RectTransform>(), 0);
-
-            var pick = UIKit.Card(_content, "选曲",
-                $"曲库 {SongsCount()} 首 · 导入 MIDI",
-                new Vector2(EntryCardWidth, EntryCardHeight), OpenSongPicker,
-                "打开曲目清单：选一首开始，或导入本机 .mid 文件",
-                "EntryCard_");
-            PlaceEntry(pick.GetComponent<RectTransform>(), 1);
-
-            var cast = UIKit.Card(_content, "角色",
-                "写实女性 · 写实男性 · 儿童",
-                new Vector2(EntryCardWidth, EntryCardHeight), OpenCharacterPreview,
-                "三个内置真人角色的人像预览（进入课程后可切换）",
-                "EntryCard_");
-            PlaceEntry(cast.GetComponent<RectTransform>(), 2);
-
-            var settings = UIKit.Card(_content, "设置",
-                "画质 · 全屏 · 快捷键",
-                new Vector2(EntryCardWidth, EntryCardHeight), OpenSettings,
-                "画质档位、全屏开关与快捷键说明",
-                "EntryCard_");
-            PlaceEntry(settings.GetComponent<RectTransform>(), 3);
+            bool active = PlayerPrefs.GetInt(PrefReduceMotion, 0) == 1;
+            PlayerPrefs.SetInt(PrefReduceMotion, active ? 0 : 1);
+            PlayerPrefs.Save();
+            UpdateMotion();
         }
 
-        private void PlaceEntry(RectTransform rt, int index)
+        private void UpdateMotion()
         {
-            if (rt == null) return;
-            UITheme.PlaceTopLeft(rt, index * (EntryCardWidth + EntryGap), 0f, EntryCardWidth, EntryCardHeight);
-            var img = rt.GetComponent<Image>();
-            if (img != null) UITheme.SetOutline(img, true, UITheme.Divider, 1f);
+            bool reduced = PlayerPrefs.GetInt(PrefReduceMotion, 0) == 1;
+            var ribbon = _ribbon.GetComponent<MenuKeyRibbon>();
+            ribbon.SetReducedMotion(reduced);
+            UITheme.SetButtonLabel(_motionToggle, reduced ? "减少动效：开" : "减少动效：关");
         }
 
-        // ---------- 浮层：选曲 / 角色 / 设置（一次只开一个，Esc 或点遮罩关闭）----------
+        private void BuildPracticeHero(string practicePath, bool isResume)
+        {
+            var hero = UITheme.CreateRect(_content, "PracticeHero", Vector2.zero, Vector2.zero, UITheme.Transparent);
+            UITheme.StretchTop(hero, 0f, 0f, 0f, LibraryTop);
+
+            float inset = _layoutWidth >= 920f ? 48f : 12f;
+            float width = Mathf.Min(520f, _layoutWidth - inset - UITheme.Space24);
+            int titleFont = _layoutWidth >= 880f ? 80 : 60;
+            var title = UIKit.Label(hero, "钢琴练习室", titleFont, MenuStagePalette.Text,
+                TextAnchor.MiddleLeft, FontStyle.Bold, "PracticeTitle");
+            UITheme.PlaceTopLeft(title.rectTransform, inset, 98f, width, 124f);
+
+            bool started = PlayerPrefs.GetInt(GuidedPracticeUI.ProgressKey, 0) > 0;
+            var current = UIKit.Label(hero, "第一课 · 右手五指与四拍", UITheme.FontSubtitle,
+                MenuStagePalette.Secondary, TextAnchor.MiddleLeft, FontStyle.Normal, "PracticeSong");
+            UITheme.PlaceTopLeft(current.rectTransform, inset + 2f, 232f, width, 28f);
+
+            var play = UIKit.PrimaryButton(hero, started ? "继续练习" : "开始第一课",
+                new Vector2(152f, UITheme.HeightPrimary), OpenFirstLesson, "右手五指，两小节");
+            play.gameObject.name = "PracticePrimary";
+            play.targetGraphic.color = MenuStagePalette.Action;
+            UITheme.GetLabel(play).color = MenuStagePalette.Ink;
+            UITheme.PlaceTopLeft(play.GetComponent<RectTransform>(), inset, 282f, 152f, UITheme.HeightPrimary);
+
+            string cinematicPath = Path.Combine(SongsDirectory, "cinematic", "cinematic_tide.mid");
+            if (SafeFileExists(cinematicPath))
+            {
+                var cinematic = UIKit.SecondaryButton(hero, "观看《潮光》",
+                    new Vector2(128f, UITheme.HeightPrimary),
+                    () => CinematicShowcaseLaunch.Open(cinematicPath), "海底琴房 · 自动运镜");
+                cinematic.gameObject.name = "CinematicShowcasePrimary";
+                UITheme.PlaceTopLeft(cinematic.GetComponent<RectTransform>(), inset + 316f, 282f,
+                    128f, UITheme.HeightPrimary);
+            }
+
+            if (practicePath == null) return;
+            var showcase = UIKit.SecondaryButton(hero, isResume ? "继续上次演奏" : "演奏展示",
+                new Vector2(140f, UITheme.HeightPrimary), () => LoadLesson(practicePath, isResume), SongTitle(practicePath));
+            showcase.gameObject.name = "ShowcasePrimary";
+            UITheme.PlaceTopLeft(showcase.GetComponent<RectTransform>(), inset + 164f, 282f, 140f, UITheme.HeightPrimary);
+        }
 
         private const string PrefQuality = "piano.quality";
         private const string PrefFullscreen = "piano.fullscreen";
@@ -232,7 +251,14 @@ namespace PianoTeacher3D.UI
         /// <summary>全屏遮罩（点击关闭）+ 居中面板 + 标题 + 右上关闭；返回可承载内容的面板。</summary>
         private RectTransform CreateOverlay(string name, float width, float height, string title, out float bodyTop)
         {
-            CloseOverlay();
+            if (_overlay == null && EventSystem.current != null)
+                _overlayTrigger = EventSystem.current.currentSelectedGameObject;
+            if (_overlay != null)
+            {
+                _overlay.SetActive(false);
+                Destroy(_overlay);
+            }
+            SetBackgroundInteraction(false);
 
             var layerGo = new GameObject(name, typeof(RectTransform), typeof(Image));
             layerGo.transform.SetParent(_canvas.transform, false);
@@ -240,11 +266,12 @@ namespace PianoTeacher3D.UI
             UITheme.StretchAll(layer, 0f, 0f, 0f, 0f);
 
             var dim = layerGo.GetComponent<Image>();
-            dim.color = new Color(0f, 0f, 0f, 0.55f);
+            dim.color = UITheme.ModalShade;
             dim.raycastTarget = true;
             var dimBtn = layerGo.AddComponent<Button>();
             dimBtn.transition = Selectable.Transition.None;
             dimBtn.targetGraphic = dim;
+            dimBtn.navigation = new Navigation { mode = Navigation.Mode.None };
             dimBtn.onClick.AddListener(CloseOverlay);
 
             var panel = UITheme.CreatePanel(layer, "OverlayPanel", Vector2.zero, new Vector2(width, height),
@@ -258,6 +285,7 @@ namespace PianoTeacher3D.UI
                 var blocker = panel.gameObject.AddComponent<Button>();
                 blocker.transition = Selectable.Transition.None;
                 blocker.targetGraphic = panelImg;
+                blocker.navigation = new Navigation { mode = Navigation.Mode.None };
             }
 
             var titleText = UIKit.Label(panel, title, UITheme.FontTitle, UITheme.TextPrimary,
@@ -274,75 +302,28 @@ namespace PianoTeacher3D.UI
             UITheme.PlaceTopLeft(rule, UITheme.Space24, 56f, width - UITheme.Space24 * 2f, 1f);
 
             _overlay = layerGo;
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(close.gameObject);
             bodyTop = 72f;
             return panel;
         }
 
         private void CloseOverlay()
         {
-            if (_overlay != null) Destroy(_overlay);
+            if (_overlay == null) return;
+            _overlay.SetActive(false);
+            Destroy(_overlay);
             _overlay = null;
+            SetBackgroundInteraction(true);
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(_overlayTrigger);
+            _overlayTrigger = null;
         }
 
-        private void OpenSongPicker()
+        private void SetBackgroundInteraction(bool enabled)
         {
-            const float width = 640f;
-            const float rowW = 592f;
-            const float rowH = 48f;
-            const float rowGap = 4f;
-            const int rowsShown = 8;
-
-            var songs = ListSongs(SongsDirectory);
-            int shown = Mathf.Min(songs.Count, rowsShown);
-            // 面板高度跟着行数走：空曲库时只有一行提示 + 导入按钮，不留大片空白
-            float height = Mathf.Max(230f, 72f + shown * (rowH + rowGap) + 76f);
-            var panel = CreateOverlay("OverlaySongPicker", width, height, "选曲", out float bodyTop);
-            if (songs.Count == 0)
-            {
-                var hint = UIKit.Label(panel,
-                    "曲库还是空的。点下面的按钮从本机导入 .mid / .midi 文件，导入后直接进入课程。",
-                    UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.UpperLeft, FontStyle.Normal,
-                    "PickerEmpty");
-                hint.horizontalOverflow = HorizontalWrapMode.Wrap;
-                hint.verticalOverflow = VerticalWrapMode.Truncate;
-                UITheme.PlaceTopLeft(hint.rectTransform, UITheme.Space24, bodyTop, rowW, 44f);
-            }
-            else
-            {
-                for (int i = 0; i < shown; i++)
-                {
-                    // for 的循环变量在闭包里共享，必须先复制到局部变量（见 BuildLibrarySection 的历史崩溃）
-                    string songPath = songs[i];
-                    string songName = Path.GetFileNameWithoutExtension(songPath);
-                    var row = UITheme.CreateButton(panel, songName, Vector2.zero, new Vector2(rowW, rowH),
-                        () => { CloseOverlay(); LoadLesson(songPath); },
-                        UITheme.FontBody, ButtonStyle.Secondary, $"开始学习《{songName}》");
-                    UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), UITheme.Space24,
-                        bodyTop + i * (rowH + rowGap), rowW, rowH);
-
-                    var rowLabel = UITheme.GetLabel(row);
-                    if (rowLabel != null) rowLabel.alignment = TextAnchor.MiddleLeft;
-
-                    var meta = UIKit.Label(row.transform, DescribeSongMeta(songPath), UITheme.FontBodySmall,
-                        UITheme.TextSecondary, TextAnchor.MiddleRight, FontStyle.Normal, "SongMeta");
-                    UITheme.StretchAll(meta.rectTransform, UITheme.Space16, UITheme.Space16, 0f, 0f);
-                }
-
-                if (songs.Count > shown)
-                {
-                    var more = UIKit.Label(panel, $"还有 {songs.Count - shown} 首未显示（StreamingAssets/Songs）",
-                        UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft,
-                        FontStyle.Normal, "MoreHint");
-                    UITheme.PlaceTopLeft(more.rectTransform, UITheme.Space24,
-                        bodyTop + rowsShown * (rowH + rowGap), 420f, 18f);
-                }
-            }
-
-            var import = UIKit.PrimaryButton(panel, "导入 MIDI…", new Vector2(148f, 40f),
-                () => { CloseOverlay(); RequestImport(); },
-                "选择本机 .mid / .midi 文件导入后直接进入课程");
-            UITheme.PlaceTopRight(import.GetComponent<RectTransform>(), UITheme.Space24,
-                height - 56f, 148f, 40f);
+            _headerGroup.interactable = enabled;
+            _headerGroup.blocksRaycasts = enabled;
+            _contentGroup.interactable = enabled;
+            _contentGroup.blocksRaycasts = enabled;
         }
 
         private void OpenCharacterPreview()
@@ -369,34 +350,17 @@ namespace PianoTeacher3D.UI
                 var cardImg = card.GetComponent<Image>();
                 if (cardImg != null) UITheme.SetOutline(cardImg, true, UITheme.Divider, 1f);
 
-                var thumb = UITheme.CreatePanel(card, "Portrait", Vector2.zero,
-                    new Vector2(cardW - 12f, 124f), UITheme.Control, UITheme.RadiusSmall);
+                var thumb = UIKit.Panel(card, "Portrait", UITheme.PanelBgDeep, UITheme.RadiusSmall);
                 UITheme.PlaceTopLeft(thumb, 6f, 6f, cardW - 12f, 124f);
-                var thumbImg = thumb.GetComponent<Image>();
-                if (thumbImg != null)
-                {
-                    thumbImg.raycastTarget = false;
-                    thumbImg.preserveAspect = true;
-                    var tex = Resources.Load<Texture2D>(CharacterRegistry.PortraitResourcesPath(id));
-                    if (tex != null)
-                    {
-                        thumbImg.sprite = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height),
-                            new Vector2(0.5f, 0.5f));
-                        // Image.color 会与贴图相乘：有照片时必须回白，否则人像被面板底色染成暗棕
-                        thumbImg.color = Color.white;
-                    }
-                }
+                UIKit.PlaceCharacterPreview(thumb, id);
 
                 var nameLabel = UIKit.Label(card, displayName, UITheme.FontBody, UITheme.TextPrimary,
                     TextAnchor.MiddleCenter, FontStyle.Bold, "Name");
                 UITheme.PlaceTopLeft(nameLabel.rectTransform, 6f, 134f, cardW - 12f, 22f);
 
-                var tag = UIKit.Label(card, i == 2 ? "儿童 · 照片✓" : "成人 · 照片✓", UITheme.FontBodySmall,
-                    UITheme.TextSecondary, TextAnchor.MiddleCenter, FontStyle.Normal, "Tag");
-                UITheme.PlaceTopLeft(tag.rectTransform, 6f, 156f, cardW - 12f, 20f);
             }
 
-            var note = UIKit.Label(panel, "进入课程后可随时从顶栏切换角色，不会影响播放进度、速度与循环设置。",
+            var note = UIKit.Label(panel, "进入课程后，可在右上角切换老师。",
                 UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "Note");
             note.horizontalOverflow = HorizontalWrapMode.Overflow;
             UITheme.PlaceTopLeft(note.rectTransform, UITheme.Space24, bodyTop + cardH + 20f, 472f, 20f);
@@ -470,7 +434,6 @@ namespace PianoTeacher3D.UI
             PlayerPrefs.SetInt(PrefQuality, level);
             PlayerPrefs.Save();
             // 重建浮层以刷新选中态（chip 的底色与边框在构建时定）
-            CloseOverlay();
             OpenSettings();
         }
 
@@ -479,7 +442,6 @@ namespace PianoTeacher3D.UI
             Screen.fullScreen = !Screen.fullScreen;
             PlayerPrefs.SetInt(PrefFullscreen, Screen.fullScreen ? 1 : 0);
             PlayerPrefs.Save();
-            CloseOverlay();
             OpenSettings();
         }
 
@@ -496,254 +458,124 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        // ---------- 曲库：统一卡片网格 + 导入入口 + 空 / 错误状态 ----------
+        // ---------- 单一曲库：内置、最近导入与失效文件 ----------
 
-        private void BuildLibrarySection()
+        private void BuildLibrarySection(List<string> songs, List<string> missing)
         {
+            var shelf = UITheme.CreateRect(_content, "LibraryShelf", Vector2.zero, Vector2.zero,
+                MenuStagePalette.Library);
+            UITheme.StretchAll(shelf, -UITheme.Space32, -UITheme.Space32, -UITheme.Space24, LibraryTop - 12f);
+            shelf.GetComponent<Image>().raycastTarget = false;
+            var rule = UITheme.CreateRect(shelf, "LibraryRule", Vector2.zero, Vector2.zero, MenuStagePalette.Rule);
+            UITheme.StretchTop(rule, 0f, 0f, 0f, 1f);
+            rule.GetComponent<Image>().raycastTarget = false;
+
             var header = UIKit.SectionHeader(_content, "曲库");
-            UITheme.PlaceTopLeft(header.rectTransform, 0f, 10f + _entriesOffset, 300f, 20f);
+            header.fontSize = UITheme.FontTitle;
+            UITheme.PlaceTopLeft(header.rectTransform, 0f, LibraryTop, 200f, UITheme.HeightButton);
 
-            var importBtn = UIKit.PrimaryButton(_content, "导入 MIDI…", new Vector2(148f, 40f),
-                RequestImport, "选择本机 .mid / .midi 文件导入后直接进入课程（不必手动复制到工程目录）");
-            UITheme.PlaceTopRight(importBtn.GetComponent<RectTransform>(), 0f, _entriesOffset, 148f, 40f);
+            bool hasSongs = songs.Count > 0;
+            var import = hasSongs
+                ? UIKit.SecondaryButton(_content, "导入 MIDI…", new Vector2(132f, UITheme.HeightButton),
+                    RequestImport, "从本机选择 .mid 或 .midi 文件")
+                : UIKit.PrimaryButton(_content, "导入 MIDI…", new Vector2(132f, UITheme.HeightButton),
+                    RequestImport, "从本机选择 .mid 或 .midi 文件");
+            UITheme.PlaceTopRight(import.GetComponent<RectTransform>(), 0f, LibraryTop, 132f,
+                UITheme.HeightButton);
 
-            string dir = SongsDirectory;
-            bool dirMissing = !SafeDirectoryExists(dir);
-            var songs = ListSongs(dir);
-
-            if (dirMissing)
+            const float rowsTop = LibraryTop + UITheme.HeightButton + UITheme.Space12;
+            if (!hasSongs)
             {
-                _showRecent = false;
-                BuildStateCard("!", "曲库不可用",
-                    "没有找到示例曲目录 StreamingAssets/Songs。\n" +
-                    "这不影响导入自己的文件：点下方按钮选择本机的 .mid / .midi 即可开始练习。",
-                    UITheme.TextError, true);
-                return;
-            }
-            if (songs.Count == 0)
-            {
-                _showRecent = false;
-                BuildStateCard("♪", "曲库为空",
-                    "还没有可练习的曲目。\n" +
-                    "点下方按钮从本机选择 .mid / .midi 文件，或把示例文件放进 StreamingAssets/Songs。",
-                    UITheme.Accent, false);
-                return;
+                bool directoryExists = SafeDirectoryExists(SongsDirectory);
+                var hint = UIKit.Label(_content, directoryExists ? "曲库为空" : "找不到内置曲库",
+                    UITheme.FontSubtitle, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal,
+                    directoryExists ? "LibraryEmpty" : "LibraryError");
+                UITheme.StretchTop(hint.rectTransform, 0f, 0f, rowsTop, 28f);
+                if (missing.Count == 0) return;
             }
 
-            _showRecent = true;
-            header.text = $"曲库（{songs.Count} 首）";
+            var viewport = UITheme.CreateRect(_content, "LibraryViewport", Vector2.zero, Vector2.zero,
+                UITheme.Transparent);
+            UITheme.StretchAll(viewport, 0f, 0f, 0f, rowsTop + (hasSongs ? 0f : 36f));
+            viewport.GetComponent<Image>().raycastTarget = true;
+            viewport.gameObject.AddComponent<RectMask2D>();
 
-            float avail = Width(_content);
-            float cardW = UITheme.Layout.SongCardWidth;
-            float cardH = UITheme.Layout.SongCardHeight;
-            float gap = UITheme.Layout.SongCardGap;
-            int columns = Mathf.Max(UITheme.Layout.SongCardMinColumns,
-                Mathf.FloorToInt((avail + gap) / (cardW + gap)));
-            columns = Mathf.Min(columns, Mathf.Max(1, songs.Count));
+            int columns = _layoutWidth >= 840f ? 2 : 1;
+            int songRows = Mathf.CeilToInt(songs.Count / (float)columns);
+            float rowsHeight = (songRows + missing.Count) * (SongRowHeight + SongRowGap);
+            var list = UITheme.CreateRect(viewport, "LibrarySongs", Vector2.zero, Vector2.zero, UITheme.Transparent);
+            list.pivot = new Vector2(0f, 1f);
+            UITheme.StretchTop(list, 0f, 0f, 0f, rowsHeight);
+            var scroll = viewport.gameObject.AddComponent<ScrollRect>();
+            scroll.viewport = viewport;
+            scroll.content = list;
+            scroll.horizontal = false;
+            scroll.inertia = false;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = SongRowHeight + SongRowGap;
+            scroll.verticalNormalizedPosition = 1f;
 
-            int shown = Mathf.Min(songs.Count, MaxLibraryCards);
-            // 网格与标题、区块标题共享左基线（不居中），右侧余量留给「导入 MIDI…」
-            const float leftOffset = 0f;
-
-            for (int i = 0; i < shown; i++)
+            float cardWidth = (_layoutWidth - (columns - 1) * UITheme.Space12) / columns;
+            for (int i = 0; i < songs.Count; i++)
             {
-                int col = i % columns;
-                int row = i / columns;
-
-                // 逐次迭代复制到局部变量再进闭包：for 的循环变量是**共享**的，
-                // 直接写 () => LoadLesson(songs[i]) 会让所有卡片共用同一个 i，
-                // 点击时 i 已等于 shown → ArgumentOutOfRangeException（实测崩溃栈见 BuildLibrarySection）。
-                // foreach 的迭代变量才有逐次捕获语义，for 必须自己复制。
                 string songPath = songs[i];
-                string songName = Path.GetFileNameWithoutExtension(songPath);
-
-                var card = UIKit.Card(_content, songName,
-                    DescribeSongMeta(songPath), new Vector2(cardW, cardH),
-                    () => LoadLesson(songPath), $"开始学习《{songName}》");
-                UITheme.PlaceTopLeft(card.GetComponent<RectTransform>(),
-                    leftOffset + col * (cardW + gap), GridTopGap + _entriesOffset + row * (cardH + gap), cardW, cardH);
-            }
-
-            int rows = Mathf.CeilToInt(shown / (float)columns);
-            float gridBottom = GridTopGap + _entriesOffset + rows * cardH + Mathf.Max(0, rows - 1) * gap;
-
-            if (songs.Count > shown)
-            {
-                var more = UIKit.Label(_content, $"还有 {songs.Count - shown} 首未显示（可滚动查看：StreamingAssets/Songs）",
-                    UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "MoreHint");
-                UITheme.PlaceTopLeft(more.rectTransform, 0f, gridBottom + UITheme.Space8, 600f, 16f);
-            }
-        }
-
-        /// <summary>曲目元信息（只读文件大小与文件名，不解析文件内容，避免菜单卡顿）。</summary>
-        private static string DescribeSongMeta(string path)
-        {
-            try
-            {
-                var info = new FileInfo(path);
-                long bytes = info.Exists ? info.Length : 0;
-                string size = bytes >= 1024 * 1024
-                    ? $"{bytes / 1024f / 1024f:0.0} MB"
-                    : $"{Mathf.Max(0f, bytes / 1024f):0.0} KB";
-                return $"{size}　·　点击开始学习";
-            }
-            catch (Exception)
-            {
-                return "点击开始学习";
-            }
-        }
-
-        /// <summary>空态 / 错误态统一用居中卡片：图标 + 说明（15）+ 行动按钮（40 高）。</summary>
-        private void BuildStateCard(string glyph, string title, string body, Color glyphColor, bool isError)
-        {
-            const float w = 520f;
-            const float h = 232f;
-
-            var panel = UIKit.Panel(_content, isError ? "LibraryError" : "LibraryEmpty",
-                isError ? UITheme.ErrorBannerColor(Core.ErrorSeverity.Recoverable) : UITheme.PanelBgRaised,
-                UITheme.RadiusLarge);
-            panel.anchorMin = new Vector2(0.5f, 0.5f);
-            panel.anchorMax = new Vector2(0.5f, 0.5f);
-            panel.pivot = new Vector2(0.5f, 0.5f);
-            panel.sizeDelta = new Vector2(w, h);
-            panel.anchoredPosition = new Vector2(0f, -8f);
-
-            var icon = UITheme.CreatePanel(panel, "Icon", Vector2.zero, new Vector2(48f, 48f),
-                isError ? UITheme.DangerBg : UITheme.PanelBgDeep, 24);
-            UITheme.PlaceTopLeft(icon, (w - 48f) * 0.5f, UITheme.Space24, 48f, 48f);
-            var iconImg = icon.GetComponent<Image>();
-            if (iconImg != null) iconImg.raycastTarget = false;
-            var glyphText = UIKit.Label(icon, glyph, UITheme.FontTitle, glyphColor, TextAnchor.MiddleCenter,
-                FontStyle.Bold, "Glyph");
-            UITheme.StretchAll(glyphText.rectTransform, 0f, 0f, 0f, 0f);
-
-            var titleText = UIKit.Label(panel, title, UITheme.FontSubtitle,
-                isError ? UITheme.TextError : UITheme.TextPrimary, TextAnchor.MiddleCenter, FontStyle.Bold,
-                "StateTitle");
-            UITheme.PlaceTopLeft(titleText.rectTransform, UITheme.Space24, UITheme.Space24 + 48f + UITheme.Space8,
-                w - UITheme.Space24 * 2f, 20f);
-
-            var bodyText = UIKit.Label(panel, body, UITheme.FontBodySmall,
-                isError ? UITheme.TextPrimary : UITheme.TextSecondary, TextAnchor.UpperCenter,
-                FontStyle.Normal, "StateBody");
-            bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
-            bodyText.verticalOverflow = VerticalWrapMode.Truncate;
-            UITheme.PlaceTopLeft(bodyText.rectTransform, UITheme.Space32, 112f, w - UITheme.Space32 * 2f, 44f);
-
-            var importBtn = UIKit.PrimaryButton(panel, "导入 MIDI…", new Vector2(148f, 40f), RequestImport,
-                "选择本机 MIDI 文件导入");
-            UITheme.Place(importBtn.GetComponent<RectTransform>(), (w - 148f) * 0.5f, UITheme.Space16, 148f, 40f);
-
-            if (isError)
-                Debug.LogWarning("[PianoTeacher3D][UI] 曲库目录缺失，已显示错误态卡片。");
-        }
-
-        // ---------- 最近播放（含失效提示） ----------
-
-        private void BuildRecentSection()
-        {
-            if (!_showRecent) return;   // 空态 / 错误态卡片居中显示，不再叠一个空的「最近播放」
-            float avail = Width(_content);
-            float top = RecentSectionTop();
-
-            var divider = UITheme.CreateDivider(_content, "Divider", Vector2.zero, new Vector2(avail, 1f));
-            UITheme.PlaceTopLeft(divider, 0f, top, avail, 1f);
-
-            var header = UIKit.SectionHeader(_content, "最近播放（本次运行）");
-            UITheme.PlaceTopLeft(header.rectTransform, 0f, top + UITheme.Space16, 400f, 20f);
-
-            int shown = 0;
-            for (int i = 0; i < RecentPaths.Count && shown < MaxRecentRows; i++)
-            {
-                string path = RecentPaths[i];
-                bool missing = !SafeFileExists(path);
-                BuildRecentRow(path, missing, shown, top + UITheme.Space16 + 28f, avail);
-                shown++;
-            }
-
-            if (shown == 0)
-            {
-                var empty = UIKit.Label(_content, "本次运行还没有从本菜单进入过曲目。从上方曲库选择一首，或导入自己的 MIDI 文件。",
-                    UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal,
-                    "RecentEmpty");
-                UITheme.PlaceTopLeft(empty.rectTransform, 0f, top + UITheme.Space16 + 28f, avail, 20f);
-            }
-        }
-
-        /// <summary>最近播放区起点：曲库网格最多两行卡片之后。</summary>
-        private float RecentSectionTop()
-        {
-            float avail = Width(_content);
-            float gap = UITheme.Layout.SongCardGap;
-            int columns = Mathf.Max(UITheme.Layout.SongCardMinColumns,
-                Mathf.FloorToInt((avail + gap) / (UITheme.Layout.SongCardWidth + gap)));
-            int shown = Mathf.Min(SongsCount(), MaxLibraryCards);
-            if (shown <= 0) columns = UITheme.Layout.SongCardMinColumns;
-            int rows = Mathf.Max(1, Mathf.CeilToInt(shown / (float)Mathf.Max(1, columns)));
-            return GridTopGap + _entriesOffset + rows * UITheme.Layout.SongCardHeight
-                + (rows - 1) * gap + UITheme.Space24;
-        }
-
-        private static int SongsCount()
-        {
-            string dir = SongsDirectory;
-            return SafeDirectoryExists(dir) ? Mathf.Min(ListSongs(dir).Count, MaxLibraryCards) : 0;
-        }
-
-        private void BuildRecentRow(string path, bool missing, int index, float top, float width)
-        {
-            string name = Path.GetFileNameWithoutExtension(path);
-            float y = top + index * (RecentRowHeight + RecentRowGap);
-
-            if (!missing)
-            {
-                var row = UITheme.CreateButton(_content, name, Vector2.zero, new Vector2(width, RecentRowHeight),
-                    () => LoadLesson(path), UITheme.FontBody, ButtonStyle.Secondary,
-                    $"再次打开《{name}》");
-                UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), 0f, y, width, RecentRowHeight);
-                var rowImg = row.targetGraphic as Image;
-                if (rowImg != null)
-                {
-                    var sprite = UITheme.GetRoundedSprite(UITheme.RadiusMedium);
-                    if (sprite != null) { rowImg.sprite = sprite; rowImg.type = Image.Type.Sliced; }
-                    UITheme.SetOutline(rowImg, true, UITheme.Divider, 1f);
-                }
+                string songName = SongTitle(songPath);
+                float x = i % columns * (cardWidth + UITheme.Space12);
+                float y = i / columns * (SongRowHeight + SongRowGap);
+                var row = UIKit.SecondaryButton(list,
+                    UITheme.Truncate(songName, Mathf.FloorToInt((cardWidth - 64f) / UITheme.FontBody)),
+                    new Vector2(cardWidth, SongRowHeight), () => LoadLesson(songPath), songName,
+                    fontSize: UITheme.FontBody);
+                row.gameObject.name = "Card_" + songName;
+                row.targetGraphic.color = MenuStagePalette.Row;
+                UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), x, y, cardWidth, SongRowHeight);
                 var label = UITheme.GetLabel(row);
-                if (label != null)
-                {
-                    label.alignment = TextAnchor.MiddleLeft;
-                    UITheme.StretchAll(label.rectTransform, UITheme.Space16, 160f, 0f, 0f);
-                }
-                var meta = UIKit.Label(row.transform, "可直接打开", UITheme.FontBodySmall,
-                    UITheme.TextSecondary, TextAnchor.MiddleRight, FontStyle.Normal, "Meta");
-                UITheme.StretchAll(meta.rectTransform, width - 140f, UITheme.Space16, 0f, 0f);
-                return;
+                label.alignment = TextAnchor.MiddleLeft;
+                UITheme.StretchAll(label.rectTransform, UITheme.Space16, 48f, 0f, 0f);
+                var arrow = UIKit.Label(row.transform, "›", UITheme.FontTitle, UITheme.TextSecondary,
+                    TextAnchor.MiddleRight, FontStyle.Normal, "OpenArrow");
+                UITheme.PlaceTopRight(arrow.rectTransform, UITheme.Space16, 0f, 28f, SongRowHeight);
+                KeepSelectionVisible(row, scroll, y);
             }
 
-            // 文件被移动 / 删除：给出失效提示 + 重新导入入口，并允许移除该条记录（危险色 + 二次确认）
-            var panel = UITheme.CreatePanel(_content, "RecentMissing", Vector2.zero,
-                new Vector2(width, RecentRowHeight), UITheme.PanelBgRaised, UITheme.RadiusLarge);
-            var panelBg = panel.GetComponent<Image>();
-            if (panelBg != null) UITheme.SetOutline(panelBg, true, UITheme.Divider, 1f);
-            UITheme.PlaceTopLeft(panel, 0f, y, width, RecentRowHeight);
+            for (int i = 0; i < missing.Count; i++)
+                BuildMissingRow(list, scroll, missing[i], (songRows + i) * (SongRowHeight + SongRowGap));
+        }
 
-            var title = UIKit.Label(panel, "! " + name, UITheme.FontBody, UITheme.TextWarning,
+        private static void KeepSelectionVisible(Selectable control, ScrollRect scroll, float top)
+        {
+            var focus = control.gameObject.AddComponent<LibraryRowFocus>();
+            focus.Scroll = scroll;
+            focus.RowTop = top;
+            focus.RowHeight = SongRowHeight;
+        }
+
+        private void BuildMissingRow(RectTransform list, ScrollRect scroll, string path, float top)
+        {
+            var row = UITheme.CreatePanel(list, "RecentMissing", Vector2.zero, Vector2.zero,
+                UITheme.PanelBgRaised, UITheme.RadiusLarge);
+            UITheme.StretchTop(row, 0f, 0f, top, SongRowHeight);
+
+            float titleWidth = _layoutWidth - 208f;
+            string name = UITheme.Truncate(SongTitle(path),
+                Mathf.FloorToInt(titleWidth / UITheme.FontBody));
+            var title = UIKit.Label(row, name, UITheme.FontBody, UITheme.TextWarning,
                 TextAnchor.MiddleLeft, FontStyle.Normal, "MissingTitle");
-            UITheme.PlaceTopLeft(title.rectTransform, UITheme.Space16, 8f, 320f, 20f);
+            UITheme.PlaceTopLeft(title.rectTransform, UITheme.Space16, 4f, titleWidth, 22f);
+            var hint = UIKit.Label(row, "文件已移动或删除", UITheme.FontBodySmall, UITheme.TextSecondary,
+                TextAnchor.MiddleLeft, FontStyle.Normal, "MissingHint");
+            UITheme.PlaceTopLeft(hint.rectTransform, UITheme.Space16, 26f, titleWidth, 18f);
 
-            var hint = UIKit.Label(panel, "文件已移动或删除：请点「重新导入」重新选择文件",
-                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "MissingHint");
-            UITheme.PlaceTopLeft(hint.rectTransform, UITheme.Space16, 28f, 420f, 16f);
-
-            var reimportBtn = UITheme.CreateButton(panel, "重新导入", Vector2.zero, new Vector2(88f, 28f),
-                RequestImport, UITheme.FontBodySmall, ButtonStyle.Ghost, "重新选择本机 MIDI 文件");
-            UITheme.PlaceRight(reimportBtn.GetComponent<RectTransform>(), 104f, 10f, 88f, 28f);
-
-            var removeBtn = UITheme.CreateButton(panel, "移除", Vector2.zero, new Vector2(88f, 28f),
-                null, UITheme.FontBodySmall, ButtonStyle.Danger,
-                "从最近列表移除这条记录（需再次点击确认）");
-            UITheme.PlaceRight(removeBtn.GetComponent<RectTransform>(), 8f, 10f, 88f, 28f);
-            removeBtn.onClick.AddListener(() => RequestRemoveRecent(removeBtn, path));
+            var reimport = UIKit.TextButton(row, "重新导入", 88f, UITheme.HeightSmall, RequestImport);
+            UITheme.PlaceTopRight(reimport.GetComponent<RectTransform>(), 104f, UITheme.Space8, 88f,
+                UITheme.HeightSmall);
+            var remove = UITheme.CreateButton(row, "移除", Vector2.zero, new Vector2(88f, UITheme.HeightSmall),
+                null, UITheme.FontBodySmall, ButtonStyle.Danger, "再次确认后移除最近记录");
+            UITheme.PlaceTopRight(remove.GetComponent<RectTransform>(), UITheme.Space8, UITheme.Space8, 88f,
+                UITheme.HeightSmall);
+            remove.onClick.AddListener(() => RequestRemoveRecent(remove, path));
+            KeepSelectionVisible(reimport, scroll, top);
+            KeepSelectionVisible(remove, scroll, top);
         }
 
         /// <summary>破坏性操作二次确认：第一次点击改为「确认移除？」，4 秒内再次点击才真正移除。</summary>
@@ -755,6 +587,7 @@ namespace PianoTeacher3D.UI
                 !string.IsNullOrEmpty(path))
             {
                 RecentPaths.Remove(path);
+                _library.DismissRecent(path);
                 _pendingRemoveBtn = null;
                 UITooltip.Hide();
                 RebuildContent();
@@ -770,24 +603,58 @@ namespace PianoTeacher3D.UI
         /// <summary>只重建内容区（不重建画布，避免重复画布与事件系统残留）。</summary>
         private void RebuildContent()
         {
-            if (_content == null) return;
+            _layoutWidth = Width(_content);
             for (int i = _content.childCount - 1; i >= 0; i--)
-                Destroy(_content.GetChild(i).gameObject);
-            BuildEntryCards();
-            BuildLibrarySection();
-            BuildRecentSection();
+            {
+                var child = _content.GetChild(i).gameObject;
+                child.SetActive(false);
+                Destroy(child);
+            }
+
+            var songs = new List<string>(_library.ListBuiltInSongs());
+            var seen = new HashSet<string>(songs, StringComparer.OrdinalIgnoreCase);
+            var missing = new List<string>();
+            _songTitles.Clear();
+            foreach (SongMetadata song in _library.RecentSongs)
+            {
+                if (song == null || string.IsNullOrEmpty(song.SourcePath)) continue;
+                _songTitles[song.SourcePath] = song.Title;
+                if (!seen.Add(song.SourcePath)) continue;
+                if (SafeFileExists(song.SourcePath)) songs.Add(song.SourcePath);
+                else missing.Add(song.SourcePath);
+            }
+            foreach (string path in RecentPaths)
+            {
+                if (!seen.Add(path)) continue;
+                if (SafeFileExists(path)) songs.Add(path);
+                else missing.Add(path);
+            }
+
+            string resume = ResolveResume(songs);
+            string demo = songs.Find(path =>
+                string.Equals(Path.GetFileNameWithoutExtension(path), "demo", StringComparison.OrdinalIgnoreCase));
+            BuildPracticeHero(resume ?? demo ?? (songs.Count > 0 ? songs[0] : null), resume != null);
+            BuildLibrarySection(songs, missing);
         }
 
-        // ---------- 底部说明 ----------
-
-        private void BuildFooter()
+        private string SongTitle(string path)
         {
-            var footer = UIKit.Label(_canvas.transform,
-                "进入课程后：空格 播放/暂停　·　[ 重播　·　R 重置视角　·　H 高亮　·　M 节拍器　·　Tab 分析　·　F1 帮助",
-                UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleCenter, FontStyle.Normal, "Footer");
-            footer.horizontalOverflow = HorizontalWrapMode.Overflow;
-            UITheme.StretchX(footer.rectTransform, UITheme.Layout.ScreenMargin, UITheme.Layout.ScreenMargin,
-                UITheme.Layout.ScreenMargin, 20f);
+            return _songTitles.TryGetValue(path, out string title) && !string.IsNullOrWhiteSpace(title)
+                ? title : Path.GetFileNameWithoutExtension(path);
+        }
+
+        private string ResolveResume(List<string> songs)
+        {
+            string id = _preferences.LastSongId;
+            if (!string.IsNullOrEmpty(id))
+            {
+                if (_library.TryResolveRecent(id, out _, out string path, out _)) return path;
+                foreach (string entry in songs)
+                    if (string.Equals(id, SongLibraryService.StableId(entry), StringComparison.OrdinalIgnoreCase))
+                        return entry;
+                return null;
+            }
+            return RecentPaths.Find(SafeFileExists);
         }
 
         private static float Width(RectTransform rt)
@@ -826,36 +693,39 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        private static List<string> ListSongs(string dir)
-        {
-            var result = new List<string>();
-            try
-            {
-                if (!Directory.Exists(dir)) return result;
-                var files = Directory.GetFiles(dir, "*.mid");
-                if (files != null) result.AddRange(files);
-                result.Sort();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[PianoTeacher3D][UI] 列举曲库失败：{ex.GetType().Name}");
-            }
-            return result;
-        }
-
         /// <summary>请求导入：进入课程场景后由控制层调用会话层的 <c>ImportMidi()</c>（应用内文件选择器）。</summary>
         private void RequestImport()
         {
             SelectedSongPath = "";
+            ResumeSongRequested = false;
             _pendingImport = true;
             SceneManager.LoadScene("PianoLesson");
         }
 
-        private static void LoadLesson(string songPath)
+        private static void LoadLesson(string songPath, bool resume = false)
         {
             SelectedSongPath = songPath;
+            ResumeSongRequested = resume;
             NotifySongOpened(songPath);
             SceneManager.LoadScene("PianoLesson");
+        }
+    }
+
+    /// <summary>键盘选中列表项时将该项滚进可视区域，鼠标滚轮仍交给父级列表。</summary>
+    internal sealed class LibraryRowFocus : MonoBehaviour, ISelectHandler
+    {
+        public ScrollRect Scroll;
+        public float RowTop;
+        public float RowHeight;
+
+        public void OnSelect(BaseEventData eventData)
+        {
+            float visibleHeight = Scroll.viewport.rect.height;
+            float hiddenHeight = Scroll.content.rect.height - visibleHeight;
+            if (hiddenHeight <= 0f || visibleHeight < RowHeight) return;
+            float offset = (1f - Scroll.verticalNormalizedPosition) * hiddenHeight;
+            float nextOffset = Mathf.Clamp(offset, RowTop + RowHeight - visibleHeight, RowTop);
+            Scroll.verticalNormalizedPosition = 1f - Mathf.Clamp01(nextOffset / hiddenHeight);
         }
     }
 }

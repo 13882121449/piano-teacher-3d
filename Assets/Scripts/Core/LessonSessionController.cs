@@ -31,6 +31,7 @@ namespace PianoTeacher3D.Core
     /// 清理旧状态 → 更新 UI」，任一步失败回滚到明确状态，不留「标题是新曲、音符仍是旧曲」的混合状态。
     /// </para>
     /// </summary>
+    [DefaultExecutionOrder(1)]
     public class LessonSessionController : MonoBehaviour
     {
         // ==================== 表现层模块 ====================
@@ -56,6 +57,8 @@ namespace PianoTeacher3D.Core
         private CameraModeController _camera;
         private PianoSceneEnvironment _environment;
         private ErrorReporter _reporter;
+        private bool _guidedPractice;
+        private readonly MidiNoteEvent[] _guidedCue = new MidiNoteEvent[1];
 
         // ==================== 服务（方案 9.1 / 9.2） ====================
         private readonly SongLibraryService _library = new SongLibraryService();
@@ -80,6 +83,19 @@ namespace PianoTeacher3D.Core
         private MidiParseResult _currentSong;
         private string _songId = "";
         private string _songSourcePath = "";
+        private float _resumePosition;
+        public bool AutoSustainDemo => _prefs.AutoSustainDemo;
+        public bool ShowFingerNumbers => _prefs.ShowFingerNumbers;
+
+        public bool TryGetFingerKeyLabel(bool left, int finger, out Vector3 world)
+        {
+            world = default;
+            if (_fingerAssignment == null || _handIK == null) return false;
+            int pitch = _fingerAssignment.GetPitch(left, finger);
+            if (pitch < 0 || !_handIK.TryGetKeyPressPoint(pitch, out world)) return false;
+            world += new Vector3(left ? -0.004f : 0.004f, 0.010f, 0.028f);
+            return true;
+        }
         private PracticeHand _practiceHand = PracticeHand.Both;
         private float _lastTime; // 用于检测 Loop/Seek 导致的时间回退
 
@@ -92,6 +108,7 @@ namespace PianoTeacher3D.Core
         private SongAnalysis _analysis = new SongAnalysis();
         private readonly List<MidiNoteEvent> _upcomingBuffer = new();
         private readonly List<MidiNoteEvent> _handLeadBuffer = new();
+        private bool _primeOpeningThumb;
         private float _highlightLookAhead = 0.6f;
 
         /// <summary>
@@ -112,11 +129,16 @@ namespace PianoTeacher3D.Core
 
         // ---- 显示模式（展示 / 教学）----
         private DisplayMode _displayMode = DisplayMode.Showcase;
-        private bool _hasHighlightToRestore;
-        private HighlightMode _highlightToRestore = HighlightMode.Off;
+        private HighlightMode _showcaseHighlight = HighlightMode.Off;
+        private HighlightMode _teachingHighlight = HighlightMode.Active;
+        private StageSequenceProfile _stageSequenceProfile = StageSequenceProfile.ForSong(null);
+        private bool _stageDirectionEnabled = true;
+        private bool _automaticStageCamera;
+        private float _lastStageTime = -1f;
 
         // 当前按下的音高集合（教学模式给相机提供取景范围；也供"手指↔琴键"一致性验证）
         private readonly HashSet<int> _pressedPitches = new HashSet<int>();
+        private readonly ActiveNoteHands _pressedHands = new();
         private bool _pressedSpanValid;
         private int _pressedMinPitch;
         private int _pressedMaxPitch;
@@ -151,6 +173,10 @@ namespace PianoTeacher3D.Core
 
         public PlaybackState PlaybackState => _timeline != null ? _timeline.State : PlaybackState.Stopped;
 
+        /// <summary>当前段含没有可用指法的音符，音频和键盘仍按原谱运行。</summary>
+        public bool HasUnplayableFingering => _fingerAssignment != null
+            && (_fingerAssignment.HasUnplayableNotes(true) || _fingerAssignment.HasUnplayableNotes(false));
+
         /// <summary>当前播放时间（秒），唯一来源是 <see cref="LessonTimeline"/>。</summary>
         public float CurrentTime => _timeline != null ? _timeline.CurrentTime : 0f;
 
@@ -159,6 +185,16 @@ namespace PianoTeacher3D.Core
 
         public float PlaybackSpeed => _timeline != null ? _timeline.PlaybackSpeed : 1f;
         public CameraMode CameraMode => _camera != null ? _camera.Mode : CameraMode.Full;
+        public bool AutomaticStageCamera => _automaticStageCamera;
+        public StageSection CurrentStageSection { get; private set; }
+        public string StageSectionLabel => !_stageDirectionEnabled || IsTeachingMode || _guidedPractice || !HasSong
+            ? "" : CurrentStageSection switch
+            {
+                StageSection.Reef => "群鱼入场",
+                StageSection.Whale => "鲸影过光",
+                StageSection.Ending => "沉静尾声",
+                _ => "海底序奏"
+            };
         public PracticeHand PracticeHand => _practiceHand;
         public bool IsLooping => _timeline != null && _timeline.IsLooping;
         public int CurrentAvatarIndex => _avatar != null ? _avatar.CurrentIndex : 0;
@@ -258,6 +294,7 @@ namespace PianoTeacher3D.Core
 
         private void Awake()
         {
+            _guidedPractice = PianoTeacher3D.UI.MainMenuUI.ConsumeFirstLesson();
             _prefs.Load();
             BuildScene();
             PreflightSubsystems();
@@ -265,6 +302,17 @@ namespace PianoTeacher3D.Core
 
         private void Start()
         {
+            if (_guidedPractice)
+            {
+                _avatar.SetHandsAndArmsVisible(false);
+                _camera.SetMode(CameraMode.Closeup);
+                _camera.SetFramingKeySpan(60, 67);
+                _highlighter.Mode = HighlightMode.Both;
+                var practice = gameObject.AddComponent<PianoTeacher3D.UI.GuidedPracticeUI>();
+                practice.Initialize(this);
+                return;
+            }
+
             // 主菜单点过「导入 MIDI」→ 进入课程场景后自动打开文件选择器（方案 6.4）
             if (PianoTeacher3D.UI.MainMenuUI.ConsumePendingImport())
             {
@@ -289,26 +337,44 @@ namespace PianoTeacher3D.Core
             // 照片外观任务：读图与生成都在主线程推进，取消与超时按注入时钟判定
             _customization?.Tick(Time.unscaledTime);
 
+            if (_guidedPractice)
+            {
+                var character = _avatar.CurrentView?.RootTransform ?? _avatar.GetAvatarRoot(_avatar.CurrentIndex);
+                if (character != null && character.gameObject.activeSelf) character.gameObject.SetActive(false);
+                _camera.SetFramingKeySpan(60, 67);
+                return;
+            }
             if (_timeline == null || _scheduler == null) return;
 
             float current = _timeline.CurrentTime;
+            UpdateStageDirection(current);
+            if (_timeline.LeadInRemaining > 0f)
+            {
+                // 曲目时间停在首拍，手部沿既有腕位轨迹移动，发声从预备结束后开始。
+                UpdateHandLeadTargets(current, openingPose: true);
+                _handIK?.Tick(current - _timeline.LeadInRemaining);
+                return;
+            }
             bool timeJumped = current < _lastTime - 0.001f;
-            if (timeJumped)
+            if (timeJumped && _timeline.State != PlaybackState.Stopped)
             {
                 // Loop 跳转 / Seek 回退：清空后按新时间点重建按键与手部状态（方案 6.3）
                 ResetPlaybackState();
-                _scheduler.SeekTo(current);
+                RestoreScheduledNotes(current);
                 _camera?.InvalidateFraming();
             }
-            else
+            else if (_timeline.State == PlaybackState.Playing)
             {
                 _scheduler.Tick(current);
+                _audio?.SetSustain(IsPedalDown(current));
             }
             _lastTime = current;
 
             UpdateHighlightUpcoming(current);
-            UpdateHandLeadTargets(current);
-            _metronome?.Tick(current);
+            bool primeRightThumb = _primeOpeningThumb && _timeline.State == PlaybackState.Stopped &&
+                current <= 0.0005f && _avatar?.RightHand is IThumbContactRig { HasThumbPad: true };
+            UpdateHandLeadTargets(current, openingPose: primeRightThumb, primeRightThumb: primeRightThumb);
+            if (_timeline.State == PlaybackState.Playing) _metronome?.Tick(current);
             _handIK?.Tick(current);
             UpdatePedalFoot(current);
 
@@ -322,9 +388,41 @@ namespace PianoTeacher3D.Core
                 OnProgressChanged?.Invoke(current, _timeline.TotalDuration);
             }
 
+            if (_timeline.State == PlaybackState.Playing) RememberPosition(current, 5f);
             if (_preferencesWrite != null && _preferencesWrite.IsCompleted) CompletePreferenceWrite();
             if (_prefsDirty && Time.unscaledTime >= _prefsNextSaveAt) SavePreferences();
         }
+
+        internal void PlayGuidedKey(int pitch, int velocity)
+        {
+            var note = new MidiNoteEvent(pitch, 0f, 0.25f, velocity, 0, 0) { Hand = NoteHand.Right };
+            _audio.OnNoteOn(note);
+            _keyAnimator.OnNoteOn(note);
+            _highlighter.OnNoteOn(note);
+        }
+
+        internal void ReleaseGuidedKey(int pitch)
+        {
+            var note = new MidiNoteEvent(pitch, 0f, 0.25f, 0, 0, 0) { Hand = NoteHand.Right };
+            _audio.OnNoteOff(note);
+            _keyAnimator.OnNoteOff(note);
+            _highlighter.OnNoteOff(note);
+        }
+
+        internal void SetGuidedTarget(int pitch)
+        {
+            _guidedCue[0] = new MidiNoteEvent(pitch, 0f, 0f, 0, 0, 0);
+            _highlighter.RefreshUpcoming(pitch < 0 ? null : _guidedCue);
+        }
+
+        internal void StopGuidedKeys()
+        {
+            _audio.ReleaseAll();
+            _keyAnimator.ReleaseAll();
+            _highlighter.ClearAll();
+        }
+
+        internal void PlayGuidedBeat(int beat) => _metronome.PlayPracticeBeat(beat);
 
         private void OnApplicationQuit()
         {
@@ -368,13 +466,13 @@ namespace PianoTeacher3D.Core
                 bool wantLeft = _practiceHand == PracticeHand.LeftOnly;
                 for (int i = _upcomingBuffer.Count - 1; i >= 0; i--)
                 {
-                    if (PianoNoteFilter.IsLeftHand(_upcomingBuffer[i].Pitch) != wantLeft)
+                    if (PianoNoteFilter.IsLeftHand(_upcomingBuffer[i]) != wantLeft)
                         _upcomingBuffer.RemoveAt(i);
                 }
             }
 
             _highlighter.RefreshUpcoming(_upcomingBuffer);
-            ForwardUpcomingKeySpan();
+            if (!IsTeachingMode) ForwardUpcomingKeySpan();
         }
 
         /// <summary>把预提示窗口的音高范围交给相机（内部有保持时间，不喂入即自动失效）。</summary>
@@ -406,17 +504,10 @@ namespace PianoTeacher3D.Core
         {
             if (_pedalFoot == null) return;
 
-            if (!_pedalFoot.HasPedal) _pedalFoot.BindPedal();
-
-            if (!_pedalFoot.IsBound)
-            {
-                var animator = _avatar != null && _avatar.CurrentView != null ? _avatar.CurrentView.Animator : null;
-                // 程序化角色没有 Humanoid：脚动不了，但踏板本体仍要跟着踩
-                if (animator != null) _pedalFoot.Bind(animator);
-            }
-
-            bool playing = _timeline != null && _timeline.State == PlaybackState.Playing;
-            _pedalFoot.Tick(playing && IsPedalDown(current), Time.deltaTime);
+            _pedalFoot.BindPedal(_keyMap.RightPedalHinge, _keyMap.RightPedalContact, _keyMap.RightHeelAnchor);
+            _pedalFoot.Bind(_avatar?.CurrentView?.Animator);
+            bool down = (_timeline.State != PlaybackState.Stopped || current > 0f) && IsPedalDown(current);
+            _pedalFoot.Tick(down, _timeline.State == PlaybackState.Paused ? 0f : Time.deltaTime);
         }
 
         /// <summary>查询给定时刻踏板是否按下（区间有序，命中即返回）。</summary>
@@ -433,11 +524,11 @@ namespace PianoTeacher3D.Core
             return false;
         }
 
-        private void UpdateHandLeadTargets(float current)
+        private void UpdateHandLeadTargets(float current, bool openingPose = false, bool primeRightThumb = false)
         {
             if (_handIK == null || _scheduler == null) return;
 
-            if (_timeline == null || _timeline.State == PlaybackState.Stopped || _currentSong == null)
+            if (_timeline == null || (_timeline.State == PlaybackState.Stopped && !openingPose) || _currentSong == null)
             {
                 _handIK.SetUpcomingPitches(-1, -1);   // 停止态不预置，避免手继续移向旧音符
                 return;
@@ -445,13 +536,15 @@ namespace PianoTeacher3D.Core
 
             _scheduler.CollectNotesInRange(current, current + Mathf.Max(0f, HandLeadSeconds), _handLeadBuffer);
 
-            int left = -1, right = -1;
+            int left = -1, right = -1, leftVelocity = 0, rightVelocity = 0;
+            float leftStart = float.PositiveInfinity, rightStart = float.PositiveInfinity;
             for (int i = 0; i < _handLeadBuffer.Count; i++)
             {
                 var n = _handLeadBuffer[i];
-                if (n.StartTime <= current + 0.0005f) continue;   // 已经开始的不算「即将到来」
+                if (!openingPose && n.StartTime <= current + 0.0005f) continue;
 
-                bool isLeft = PianoNoteFilter.IsLeftHand(n.Pitch);
+                bool isLeft = PianoNoteFilter.IsLeftHand(n);
+                if (primeRightThumb && isLeft) continue;
                 if (_practiceHand != PracticeHand.Both)
                 {
                     bool wantLeft = _practiceHand == PracticeHand.LeftOnly;
@@ -460,15 +553,27 @@ namespace PianoTeacher3D.Core
 
                 if (isLeft)
                 {
-                    if (left < 0 || n.Pitch < left) left = n.Pitch;
+                    if (n.StartTime < leftStart || (n.StartTime == leftStart && n.Pitch < left))
+                    {
+                        left = n.Pitch;
+                        leftStart = n.StartTime;
+                        leftVelocity = n.Velocity;
+                    }
                 }
-                else if (n.Pitch > right)
+                else if (n.StartTime < rightStart || (n.StartTime == rightStart && n.Pitch > right))
                 {
                     right = n.Pitch;
+                    rightStart = n.StartTime;
+                    rightVelocity = n.Velocity;
                 }
             }
 
-            _handIK.SetUpcomingPitches(left, right);
+            // 首曲载入后已知右拇指的起始键。静止时先放好手型，播放命令仍立即启动。
+            if (primeRightThumb && (right < 0 || _handIK.Assignment.PreviewFinger(false, right, rightStart) != 0))
+                right = -1;
+            _handIK.SetUpcomingPitches(left, right, leftStart, rightStart, leftVelocity, rightVelocity, primeRightThumb);
+            if (_handIK.UseAnatomicalContact)
+                _handIK.SetUpcomingChords(_handLeadBuffer);
         }
 
         // ==================== 场景装配（方案 9.3：保留程序化装配） ====================
@@ -530,17 +635,26 @@ namespace PianoTeacher3D.Core
 
             // 8. 手部 IK + 手指姿态：两者共用同一份「手指 ↔ 音高」分配（方案 5.3 第二阶段），
             //    保证「弯下去的手指 == 指尖伸向该键的手指 == 真正按下该键的手指」三者严格一致。
-            _fingerAssignment = new FingerAssignmentService();
-            _fingerAssignment.Provider = _fingering;
+            // 触键原型须先通过短样本验收。单独的启动参数可在真实课堂试用同一套解算。
+            bool handPrototype = Array.IndexOf(Environment.GetCommandLineArgs(), "-piano-hand-preview") >= 0;
+            _fingerAssignment = new FingerAssignmentService
+            {
+                Provider = _fingering,
+                UsePreparedPhrases = handPrototype
+            };
 
             _handIK = gameObject.AddComponent<HandIKController>();
-            _handIK.Initialize(_avatar, _keyMap);
+            _handIK.Initialize(_avatar, _keyMap, _keyAnimator);
             _handIK.ArmSolver = _avatar.ArmSolver;
             _handIK.Assignment = _fingerAssignment;
+            _handIK.UseAnatomicalContact = handPrototype;
 
             _fingerPose = gameObject.AddComponent<FingerPoseController>();
             _fingerPose.Assignment = _fingerAssignment;
+            _fingerPose.UseAnatomicalContact = handPrototype;
             _fingerPose.TargetSource = _handIK;          // 手指朝"它该按的那个键"对准
+            _fingerPose.JointAxes = (_avatar.CurrentView as ICharacterJointAxesProvider)?.JointAxes
+                ?? DefaultFingerJointAxes.Instance;
             _fingerPose.Initialize(_avatar.LeftHand, _avatar.RightHand);
             _handIK.PoseIssueSource = _fingerPose;       // 关节限位次数进入动作指标（附录 A.6.3）
 
@@ -568,25 +682,39 @@ namespace PianoTeacher3D.Core
             // 后处理：全局 Volume（Bloom / Vignette / 色彩微调）+ 相机 renderPostProcessing。
             // 放在相机参数就绪之后、相机控制之前——控制器只负责摆机位，不该关心后期。
             PianoTeacher3D.Core.ScenePostProcessing.Ensure(cam, transform);
+            var renderData = cam.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            if (renderData != null) renderData.requiresDepthTexture = true;
+            _keyMap.SetUnderwaterAppearance(!_guidedPractice && !IsTeachingMode);
 
             _camera = gameObject.AddComponent<CameraModeController>();
             _camera.Initialize(cam, _avatar, _keyMap);
             _camera.SetPracticeHand(_practiceHand);
 
             // 10. UI（控制栏 + 角色选择；状态栏由控制栏内部装配）
-            var controlsUI = gameObject.AddComponent<PianoTeacher3D.UI.LessonControlsUI>();
-            controlsUI.Initialize(this);
-            var avatarUI = gameObject.AddComponent<PianoTeacher3D.UI.AvatarSelectionUI>();
-            avatarUI.Initialize(this);
+            if (!_guidedPractice)
+            {
+                var controlsUI = gameObject.AddComponent<PianoTeacher3D.UI.LessonControlsUI>();
+                controlsUI.Initialize(this);
+                var avatarUI = gameObject.AddComponent<PianoTeacher3D.UI.AvatarSelectionUI>();
+                avatarUI.Initialize(this);
+            }
 
             // 11. 事件连线（琴键 / 音频 / 高亮 / 手部订阅音符事件）
             _scheduler.OnNoteOn += _keyAnimator.OnNoteOn;
-            _scheduler.OnNoteOn += _audio.OnNoteOn;
+            _scheduler.OnNoteOn += note =>
+            {
+                if (_timeline.State == PlaybackState.Playing) _audio.OnNoteOn(note);
+            };
             _scheduler.OnNoteOn += _handIK.OnNoteOn;
             _scheduler.OnNoteOn += _fingerPose.OnNoteOn;
             _scheduler.OnNoteOn += _highlighter.OnNoteOn;
             _scheduler.OnNoteOff += _keyAnimator.OnNoteOff;
-            _scheduler.OnNoteOff += _audio.OnNoteOff;      // 方案 7.3：长音必须在 Note Off 时释放
+            _scheduler.OnNoteOff += note =>
+            {
+                if (_timeline.State != PlaybackState.Playing) return;
+                _audio.SetSustain(IsPedalDown(note.EndTime));
+                _audio.OnNoteOff(note);
+            };
             _scheduler.OnNoteOff += _handIK.OnNoteOff;
             _scheduler.OnNoteOff += _fingerPose.OnNoteOff;
             _scheduler.OnNoteOff += _highlighter.OnNoteOff;
@@ -627,8 +755,11 @@ namespace PianoTeacher3D.Core
         {
             // 主菜单传入的选中曲目优先
             string selected = PianoTeacher3D.UI.MainMenuUI.SelectedSongPath;
+            bool resume = PianoTeacher3D.UI.MainMenuUI.ResumeSongRequested;
+            PianoTeacher3D.UI.MainMenuUI.ResumeSongRequested = false;
             if (!string.IsNullOrEmpty(selected) && SafeFileExists(selected))
             {
+                if (resume) _resumePosition = _prefs.LastSongPosition;
                 LoadSong(selected);
                 return;
             }
@@ -892,6 +1023,7 @@ namespace PianoTeacher3D.Core
                 // ---- 一次性提交 ----
                 _currentSong = result;
                 _songSourcePath = path ?? "";
+                _stageSequenceProfile = StageSequenceProfile.ForSong(_songSourcePath);
                 _songId = meta != null && !string.IsNullOrEmpty(meta.Id)
                     ? meta.Id
                     : SongLibraryService.StableId(_songSourcePath);
@@ -905,13 +1037,10 @@ namespace PianoTeacher3D.Core
 
                 // 按当前练习模式装载音符（分手练习由过滤层完成，方案 6.3）
                 _scheduler.Load(PianoNoteFilter.FilterByHand(result.Notes, _practiceHand));
+                _handIK?.Assignment.PrepareSong(result.Notes);
                 _audio?.PrepareSong(result.Notes);
 
-                // 踏板：优先使用文件里录下的 CC64；没有就按 legato 生成自动延音，
-                // 这样内置 demo（不含踏板事件）也能看到右脚动作，而不是硬编一段假动画。
-                _sustainSpans = result.SustainSpans != null && result.SustainSpans.Count > 0
-                    ? result.SustainSpans
-                    : PedalFootAnimator.BuildAutoSustainSpans(result.Notes);
+                RefreshSustainSpans();
 
                 _metronome?.Load(result.TempoChanges, result.TotalDurationSeconds);
                 // 后台已分析过就复用，避免在主线程再算一遍（优化方案 §7-8「重活不留在主线程」）
@@ -920,15 +1049,29 @@ namespace PianoTeacher3D.Core
                 _handIK?.ResetMetrics();        // 换曲后重新开始动作质量测量
 
                 ResetPlayback();
+                _primeOpeningThumb = true;
                 _camera?.ClearFramingKeySpan();
                 _camera?.InvalidateFraming();
 
                 // ---- 更新 UI / 最近曲目 / 偏好 ----
                 _library.RecordPlayed(meta);
+                float resumeAt = string.Equals(_prefs.LastSongId, _songId, System.StringComparison.Ordinal)
+                    ? _resumePosition : 0f;
                 _prefs.LastSongId = _songId;
+                _resumePosition = 0f;
+                _prefs.LastSongPosition = 0f;
+                if (resumeAt > 0f && resumeAt < _timeline.TotalDuration)
+                {
+                    _timeline.RestorePaused(resumeAt);
+                    _lastTime = resumeAt;
+                    _prefs.LastSongPosition = resumeAt;
+                    RestoreScheduledNotes(resumeAt);
+                    _pedalFoot?.SetImmediate(IsPedalDown(resumeAt));
+                }
                 PianoTeacher3D.UI.MainMenuUI.NotifySongOpened(_songSourcePath);
 
-                SetState(LessonState.Ready);
+                RestoreIdleState();
+                UpdateStageDirection(CurrentTime, true);
                 OnSongLoaded?.Invoke();
                 OnPracticeHandChanged?.Invoke(_practiceHand);
                 OnAnalysisReady?.Invoke(_analysis);
@@ -945,6 +1088,7 @@ namespace PianoTeacher3D.Core
         /// <summary>加载失败：上报错误并回滚到明确状态（有旧曲 → 保持旧曲；无旧曲 → Error）。</summary>
         private void FailLoad(AppError error)
         {
+            _resumePosition = 0f;
             Report(error);
             if (HasSong) RestoreIdleState();   // 回滚：保留上一份可用曲目与播放状态，不产生混合状态
             else SetState(LessonState.Error);
@@ -1041,15 +1185,27 @@ namespace PianoTeacher3D.Core
         public void Play()
         {
             if (!RequireSong("播放")) return;
+            if (_primeOpeningThumb && _timeline?.State == PlaybackState.Stopped && _timeline.CurrentTime <= 0.0005f &&
+                _handIK?.UseAnatomicalContact == false && _avatar?.RightHand is IThumbContactRig { HasThumbPad: true })
+            {
+                // 首次播放可能紧跟载入。同步初始化右手首音姿态，播放时钟照常开始。
+                _handIK.Tick(0f);
+                UpdateHandLeadTargets(0f, openingPose: true, primeRightThumb: true);
+                if (_handIK.AlignOpeningRightThumb()) _fingerPose?.AlignOpeningRightThumb();
+            }
+            _primeOpeningThumb = false;
 
             bool resuming = _timeline != null && _timeline.State == PlaybackState.Paused;
+            bool prepare = _timeline != null && _timeline.State != PlaybackState.Playing
+                && _timeline.CurrentTime <= 0.0005f && _handIK?.UseAnatomicalContact == true;
             _timeline?.Play();
 
-            if (resuming)
+            if (prepare) PrepareOpeningHandPose();
+            else if (resuming)
             {
                 // 从暂停恢复：按当前时间重建按键 / 手部状态，避免长音恢复后静默或状态残留（方案 7.3）
                 ResetPlaybackState();
-                _scheduler?.SeekTo(_timeline.CurrentTime);
+                RestoreScheduledNotes(_timeline.CurrentTime);
                 _camera?.InvalidateFraming();
             }
         }
@@ -1057,24 +1213,48 @@ namespace PianoTeacher3D.Core
         public void Pause()
         {
             _timeline?.Pause();
+            RememberPosition(CurrentTime);
             _audio?.ReleaseAll();   // 方案 7.3：暂停时释放所有正在发声的音符
         }
 
         public void Stop()
         {
+            _primeOpeningThumb = false;
             _timeline?.Stop();
             ResetPlaybackState();
+            _scheduler?.Rewind();
+            _lastTime = 0f;
+            RememberPosition(0f);
+            _pedalFoot?.SetImmediate(false);
             _camera?.ClearFramingKeySpan();
             _camera?.InvalidateFraming();
+            UpdateStageDirection(CurrentTime, true);
         }
 
         public void Restart()
         {
             if (!RequireSong("重播")) return;
+            _primeOpeningThumb = false;
             _timeline?.Restart();
-            _scheduler?.SeekTo(0f);
-            ResetPlaybackState();
+            if (_handIK?.UseAnatomicalContact == true) PrepareOpeningHandPose();
+            else
+            {
+                ResetPlaybackState();
+                RestoreScheduledNotes(0f);
+            }
+            _pedalFoot?.SetImmediate(IsPedalDown(0f));
+            _lastTime = 0f;
             _camera?.InvalidateFraming();
+            UpdateStageDirection(CurrentTime, true);
+        }
+
+        private void PrepareOpeningHandPose()
+        {
+            const float LeadInSeconds = 0.45f;
+            ResetPlaybackState();
+            _scheduler?.Rewind();
+            _lastTime = _timeline.CurrentTime;
+            _timeline.BeginLeadIn(LeadInSeconds);
         }
 
         public void Seek(float seconds)
@@ -1082,8 +1262,13 @@ namespace PianoTeacher3D.Core
             if (_timeline == null || _scheduler == null) return;
             _timeline.Seek(seconds);
             ResetPlaybackState();
-            _scheduler.SeekTo(seconds);
+            _lastTime = _timeline.CurrentTime;
+            if (_lastTime > 0.0005f || _timeline.State == PlaybackState.Playing || _handIK?.UseAnatomicalContact != true)
+                RestoreScheduledNotes(_lastTime);
+            _pedalFoot?.SetImmediate(IsPedalDown(_lastTime));
+            RememberPosition(_lastTime);
             _camera?.InvalidateFraming();
+            UpdateStageDirection(_lastTime, true);
         }
 
         public void SeekNormalized(float t01)
@@ -1132,6 +1317,7 @@ namespace PianoTeacher3D.Core
         {
             _camera?.SetPracticeHand(_practiceHand);
             _camera?.InvalidateFraming();
+            UpdateStageDirection(CurrentTime, true);
             OnCameraModeChanged?.Invoke(_camera.Mode);
             if (!_suppressPrefsWrite) { _prefs.LastCameraMode = (int)_camera.Mode; MarkPrefsDirty(); }
         }
@@ -1140,17 +1326,12 @@ namespace PianoTeacher3D.Core
         {
             if (_avatar == null) return;
             _avatar.SwitchNext();
-            _fingerPose?.Initialize(_avatar.LeftHand, _avatar.RightHand);
-            AfterAvatarChanged();
         }
 
         public void SwitchAvatar(int index)
         {
             if (_avatar == null) return;
             _avatar.SwitchAvatar(index);
-            _fingerPose?.Initialize(_avatar.LeftHand, _avatar.RightHand);
-            _fingerPose?.ReleaseAll();
-            AfterAvatarChanged();
         }
 
         private void AfterAvatarChanged()
@@ -1163,7 +1344,7 @@ namespace PianoTeacher3D.Core
             _handIK?.ResetMetrics();
 
             OnAvatarChanged?.Invoke(_avatar.CurrentIndex);
-            if (!_suppressPrefsWrite) { _prefs.AvatarIndex = _avatar.CurrentIndex; MarkPrefsDirty(); }
+            if (!_suppressPrefsWrite && _prefs != null) { _prefs.AvatarIndex = _avatar.CurrentIndex; MarkPrefsDirty(); }
         }
 
         // ==================== 角色档案切换与照片外观（方案 7.3 / 9.2） ====================
@@ -1194,14 +1375,6 @@ namespace PianoTeacher3D.Core
                     "角色系统尚未初始化。", string.Empty, string.Empty);
 
             CharacterSwitchResult result = _avatar.TryActivate(profile);
-            if (result.Succeeded)
-            {
-                // 外部角色的骨骼引用换了：必须重新绑定手指姿态控制器，否则手指不跟谱
-                _fingerPose?.Initialize(_avatar.LeftHand, _avatar.RightHand);
-                _fingerPose?.ReleaseAll();
-                AfterAvatarChanged();
-            }
-
             return result;
         }
 
@@ -1232,7 +1405,12 @@ namespace PianoTeacher3D.Core
             }
 
             // 手臂解算方式随角色切换：蒙皮角色只允许旋转（见 IArmChainSolver 注释）
-            if (_handIK != null && _avatar != null) _handIK.ArmSolver = _avatar.ArmSolver;
+            if (view == null || _avatar == null) return;
+            if (_handIK != null)
+            {
+                _handIK.ArmSolver = _avatar.ArmSolver;
+                _handIK.ResetRigMotion();
+            }
 
             // 手指关节轴随角色切换：程序化角色用默认「局部 X 轴」，导入骨架用推导出的铰链轴。
             // 不切换的话，Biped 手指会被拧成麻花而不是弯曲（见 IFingerJointAxes 注释）。
@@ -1241,7 +1419,10 @@ namespace PianoTeacher3D.Core
                 _fingerPose.JointAxes = view is ICharacterJointAxesProvider provider
                     ? provider.JointAxes
                     : DefaultFingerJointAxes.Instance;
+                _fingerPose.Initialize(_avatar.LeftHand, _avatar.RightHand);
             }
+
+            AfterAvatarChanged();
         }
 
         /// <summary>装配照片外观管线。只创建内存对象，不联网、不写用户数据。</summary>
@@ -1306,15 +1487,45 @@ namespace PianoTeacher3D.Core
         /// <summary>场景环境可见性（调试 / 视觉对比用）。</summary>
         public void SetEnvironmentVisible(bool visible) => _environment?.SetEnvironmentVisible(visible);
 
+        /// <summary>控制「全景」中的自动机位。教学与手部、踏板、自由观察机位由原控制器负责。</summary>
+        public void SetAutomaticStageCamera(bool enabled)
+        {
+            if (_automaticStageCamera == enabled) return;
+            _automaticStageCamera = enabled;
+            UpdateStageDirection(CurrentTime, true);
+        }
+
+        /// <summary>切换随曲布景，供显示选项与画面对照使用。</summary>
+        public void SetStageDirectionEnabled(bool enabled)
+        {
+            if (_stageDirectionEnabled == enabled) return;
+            _stageDirectionEnabled = enabled;
+            UpdateStageDirection(CurrentTime, true);
+        }
+
+        private void UpdateStageDirection(float seconds, bool refresh = false)
+        {
+            if (!refresh && seconds == _lastStageTime) return;
+            _lastStageTime = seconds;
+
+            if (_guidedPractice || IsTeachingMode || !HasSong)
+            {
+                CurrentStageSection = StageSection.Opening;
+                _environment?.ApplyStageCue(null);
+                _camera?.SetStageTrack(false, 0f);
+                return;
+            }
+
+            StageCue cue = StageSequence.Evaluate(seconds, TotalDuration, _stageSequenceProfile);
+            CurrentStageSection = cue.Section;
+            _environment?.ApplyStageCue(_stageDirectionEnabled ? cue : null);
+            _camera?.SetStageTrack(_automaticStageCamera, cue.Progress);
+        }
+
         // ==================== 显示模式（展示 / 教学） ====================
 
         /// <summary>
-        /// 切换显示模式：<see cref="DisplayMode.Showcase"/> 保持完整手部动画；
-        /// <see cref="DisplayMode.Teaching"/> 隐藏手部，只高亮被按下的琴键（左手冷蓝 / 右手暖橙）。
-        /// <para>
-        /// 切换会立即按当前时间轴重建按键 / 手部 / 高亮状态，因此不会出现"上一模式的残留"
-        /// （例如教学模式里残留的手部姿态，或展示模式里残留的强制高亮）。
-        /// </para>
+        /// 切换角色手部的可见性，并恢复该显示模式上次使用的高亮设置。
         /// </summary>
         public void SetDisplayMode(DisplayMode mode)
         {
@@ -1335,38 +1546,11 @@ namespace PianoTeacher3D.Core
 
             // ① 手部 / 手臂网格可见性（不动骨骼与 IK，因此切回时零残留）
             _avatar?.SetHandsAndArmsVisible(!teaching);
+            _keyMap?.SetUnderwaterAppearance(!_guidedPractice && !teaching);
 
-            // ② 教学模式强制「仅高亮被按下的琴键」；进入时记住用户偏好，退出时还原
-            if (_highlighter != null)
-            {
-                if (teaching)
-                {
-                    if (_highlighter.Mode != HighlightMode.Active)
-                    {
-                        if (!_hasHighlightToRestore)
-                        {
-                            _highlightToRestore = _highlighter.Mode;
-                            _hasHighlightToRestore = true;
-                        }
-                        _highlighter.Mode = HighlightMode.Active;
-                        OnHighlightModeChanged?.Invoke(HighlightMode.Active);
-                    }
-                }
-                else if (_hasHighlightToRestore)
-                {
-                    _hasHighlightToRestore = false;
-                    _highlighter.Mode = _highlightToRestore;
-                    OnHighlightModeChanged?.Invoke(_highlightToRestore);
-                }
-            }
-
-            // ③ 立即生效且无残留：按当前时间轴重建按键 / 手部 / 高亮状态
-            if (_scheduler != null && _timeline != null)
-            {
-                ResetPlaybackState();
-                _scheduler.SeekTo(_timeline.CurrentTime);
-            }
+            ApplyHighlightMode(teaching ? _teachingHighlight : _showcaseHighlight);
             _camera?.InvalidateFraming();
+            UpdateStageDirection(CurrentTime, true);
 
             // ④ 教学模式下手部不可见，取景范围改由「当前按下的琴键」提供
             if (teaching) ApplyTeachingKeySpan();
@@ -1388,11 +1572,13 @@ namespace PianoTeacher3D.Core
         private void TrackPressedNote(MidiNoteEvent e)
         {
             if (!PianoKeyMap.IsInRange(e.Pitch)) return;
+            _pressedHands.Press(e);
             if (_pressedPitches.Add(e.Pitch)) UpdatePressedPitchSpan();
         }
 
         private void UntrackPressedNote(MidiNoteEvent e)
         {
+            if (!PianoKeyMap.IsInRange(e.Pitch) || !_pressedHands.Release(e)) return;
             if (_pressedPitches.Remove(e.Pitch)) UpdatePressedPitchSpan();
         }
 
@@ -1464,7 +1650,7 @@ namespace PianoTeacher3D.Core
             var filtered = PianoNoteFilter.FilterByHand(_currentSong.Notes, _practiceHand);
             _scheduler.Load(filtered);
             ResetPlaybackState();
-            _scheduler.SeekTo(current);
+            if (_timeline.State != PlaybackState.Stopped) RestoreScheduledNotes(current);
             _camera?.InvalidateFraming();
 
             if (filtered.Count == 0 && _practiceHand != PracticeHand.Both)
@@ -1550,9 +1736,10 @@ namespace PianoTeacher3D.Core
                 HighlightLookAhead = _prefs.HighlightLookAhead;
                 SetMetronomeEnabled(_prefs.MetronomeEnabled);
 
-                SetCameraMode((CameraMode)Mathf.Clamp(_prefs.LastCameraMode, 0, 2));
+                SetCameraMode((CameraMode)Mathf.Clamp(_prefs.LastCameraMode, 0, UserPreferences.Defaults.CameraModeMax));
                 RestoreCharacter();
                 SetPracticeHand(NormalizeHand(_prefs.PracticeHand));
+                _teachingHighlight = NormalizeHighlight(_prefs.TeachingHighlightMode);
                 SetHighlightMode(NormalizeHighlight(_prefs.HighlightMode));
                 SetDisplayMode(_prefs.DisplayMode == (int)DisplayMode.Teaching ? DisplayMode.Teaching : DisplayMode.Showcase);
             }
@@ -1629,8 +1816,41 @@ namespace PianoTeacher3D.Core
             finally { _preferencesWrite = null; }
         }
 
+        private void RememberPosition(float seconds, float minimumChange = 0.001f)
+        {
+            if (Application.isBatchMode || !HasSong || Mathf.Abs(_prefs.LastSongPosition - seconds) < minimumChange) return;
+            _prefs.LastSongPosition = seconds;
+            MarkPrefsDirty();
+        }
+
+        public void SetAutoSustainDemo(bool enabled)
+        {
+            _prefs.AutoSustainDemo = enabled;
+            RefreshSustainSpans();
+            bool down = IsPedalDown(CurrentTime);
+            _pedalFoot?.SetImmediate(down && PlaybackState != PlaybackState.Stopped);
+            _audio?.SetSustain(down && PlaybackState == PlaybackState.Playing);
+            MarkPrefsDirty();
+        }
+
+        public void SetShowFingerNumbers(bool enabled)
+        {
+            _prefs.ShowFingerNumbers = enabled;
+            MarkPrefsDirty();
+        }
+
+        private void RefreshSustainSpans()
+        {
+            _sustainSpans = _currentSong != null && _currentSong.HasRecordedSustain
+                ? _currentSong.SustainSpans
+                : _currentSong != null && AutoSustainDemo
+                    ? PedalFootAnimator.BuildAutoSustainSpans(_currentSong.Notes)
+                    : null;
+        }
+
         private void FlushPreferences()
         {
+            RememberPosition(CurrentTime);
             // 退出或卸载时先收尾旧快照，再保存最新设置，避免两次写入争用同一个临时文件。
             if (_preferencesWrite != null) CompletePreferenceWrite();
             if (!_prefsDirty) return;
@@ -1661,6 +1881,7 @@ namespace PianoTeacher3D.Core
                     SetState(LessonState.Playing);
                     break;
                 case PlaybackState.Paused:
+                    if (_timeline.CurrentTime >= _timeline.TotalDuration) ResetPlaybackState();
                     SetState(LessonState.Paused);
                     break;
                 default:
@@ -1698,6 +1919,13 @@ namespace PianoTeacher3D.Core
             ResetPlaybackState();
         }
 
+        /// <summary>按目标时刻重建按键和踏板状态。</summary>
+        private void RestoreScheduledNotes(float time)
+        {
+            _audio?.SetSustain(PlaybackState == PlaybackState.Playing && IsPedalDown(time));
+            _scheduler?.SeekTo(time);
+        }
+
         /// <summary>释放全部瞬时状态：琴键按下、手部、指法、高亮、节拍游标、音频声部。</summary>
         private void ResetPlaybackState()
         {
@@ -1708,6 +1936,7 @@ namespace PianoTeacher3D.Core
             _audio?.ReleaseAll();       // 方案 7.3：切曲 / Stop / Seek 时释放所有发声
             _metronome?.Reset(_timeline != null ? _timeline.CurrentTime : 0f);
             _pressedPitches.Clear();
+            _pressedHands.Clear();
             _pressedSpanValid = false;
         }
 
@@ -1732,26 +1961,27 @@ namespace PianoTeacher3D.Core
         {
             if (_highlighter == null) return;
 
-            // 教学模式固定为「仅高亮被按下的琴键」（就是该模式的定义）；
-            // 用户此刻的选择记下来，作为切回展示模式后要恢复的偏好。
-            if (_displayMode == DisplayMode.Teaching && mode != HighlightMode.Active)
-            {
-                _highlightToRestore = mode;
-                _hasHighlightToRestore = true;
-            }
-            else
-            {
-                _highlighter.Mode = mode;
-            }
+            if (IsTeachingMode) _teachingHighlight = mode;
+            else _showcaseHighlight = mode;
+            ApplyHighlightMode(mode);
 
-            if (mode == HighlightMode.Off)
+            if (!_suppressPrefsWrite)
             {
-                _highlighter.ClearAll();
-                _upcomingBuffer.Clear();
-                _camera?.ClearFramingKeySpan();
+                if (IsTeachingMode) _prefs.TeachingHighlightMode = (int)mode;
+                else _prefs.HighlightMode = (int)mode;
+                MarkPrefsDirty();
             }
-            OnHighlightModeChanged?.Invoke(_highlighter.Mode);
-            if (!_suppressPrefsWrite) { _prefs.HighlightMode = (int)mode; MarkPrefsDirty(); }
+        }
+
+        private void ApplyHighlightMode(HighlightMode mode)
+        {
+            if (_highlighter == null) return;
+            _highlighter.Mode = mode;
+            _upcomingBuffer.Clear();
+            if (IsTeachingMode) ApplyTeachingKeySpan();
+            else _camera?.ClearFramingKeySpan();
+            if (_timeline != null && _scheduler != null) UpdateHighlightUpcoming(_timeline.CurrentTime);
+            OnHighlightModeChanged?.Invoke(mode);
         }
 
         /// <summary>节拍器开关（未加载曲目时给出提示）。</summary>

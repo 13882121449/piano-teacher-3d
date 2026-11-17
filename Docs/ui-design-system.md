@@ -9,21 +9,32 @@
 
 ---
 
+## 页面结构
+
+- 首页上方是练习入口和按两组、三组黑键绘制的键盘。存在有效的最近曲目时显示「继续练习」，否则进入「开始示范」。角色和设置收进顶栏。
+- 首页只有一个曲库，合并内置曲目与本次运行导入的最近曲目。同一路径只列一次。失效的曲目提供重新导入与移除，长列表可以用鼠标滚轮或方向键浏览。
+- 课程把双手和键盘留在中间，右上固定切换特写、全景和自由观察。全景将时间轴置于播放器独立一行，特写将时间轴并入控制行。「更多」集中显示琴键高亮、节拍器、显示模式等练习工具。打开循环后，底栏上方直接出现「设 A」「设 B」「清除」。
+- 角色卡优先加载模型渲染图，沿用原资源命名再加 `_render`，缺图时显示人物剪影。角色名、选中勾号和名称粗细一起传达状态。
+- 从首页打开角色或设置时，键盘焦点先落在关闭按钮，退出后回到原入口。课程的「更多」面板与角色面板也会恢复焦点。
+
 ## 1. 设计令牌
 
 ### 1.1 颜色
 
 | 令牌 | 值（近似） | 用途 |
 |---|---|---|
-| `SceneBg` | `#131519`（0.075, 0.082, 0.098） | 场景 / 相机背景（最深） |
-| `PanelBg` | `#1E2228`（0.96 透明） | 面板底色（浮于场景之上） |
+| `SceneBg` | `#111215` | 场景与首页底色 |
+| `PanelBg` | `#242325`（98% 不透明） | 面板底色 |
 | `PanelBgRaised` | 抬升一级 | 次级功能卡片、状态标签、分段控件轨道 |
-| `PanelBgDeep` | 更深 | 顶栏 / 底栏（压住 3D 画面又不抢眼） |
+| `PanelBgDeep` | `#1A1A1D`（98% 不透明） | 顶栏、底栏与键盘边框 |
+| `Walnut` | `#4D352C` | 首页练习入口底色 |
+| `PianoIvory` / `PianoIvoryShadow` | 象牙白 / 暖灰 | 白键面与键前缘 |
+| `PianoFelt` | `#712F30` | 键盘后缘的毡条 |
 | `Control` | 控件常态底 | 按钮默认 |
 | `ControlHover` | 控件悬停 | 悬停 |
 | `ControlPressed` | 控件按下 | 按下 |
-| `Accent` | `#D9A441` 暖金 | 强调色（主操作、进度填充） |
-| `AccentBright` | `#F0C674` | 强调亮色（主操作选中、加载态文字） |
+| `Accent` | `#E0BC82` 黄铜 | 主操作、进度填充 |
+| `AccentBright` | `#F5D7A6` | 主操作选中、加载态文字 |
 | `AccentDim` | 暗金 | — |
 | `TextPrimary` / `TextSecondary` / `TextOnAccent` | 主 / 次 / 强调底上文字 | — |
 | `Divider` | 半透明分割线 | 分组（不承担信息表达） |
@@ -37,7 +48,7 @@
 | `Transparent` | 完全透明 | 纯布局容器（不参与渲染与射线） |
 | `LeftHandColor` | 冷蓝（0.396, 0.663, 0.933） | 左手发声提示（**语义色**） |
 | `RightHandColor` | 暖橙（0.949, 0.612, 0.318） | 右手发声提示（**语义色**） |
-| `UpcomingColor` | 暖金（与 Accent 同源） | 预提示（**语义色**） |
+| `UpcomingColor` | 暖金（原值 `#D9A441`） | 预提示（**语义色**） |
 
 > **教学语义色不可挪用**：暖金 = 预提示、冷蓝 = 左手发声、暖橙 = 右手发声（审查 2.3「颜色语义不变」）；
 > 场景其它元素保持克制，避免与提示色争抢注意力（由 `TeachingSemanticColors_KeepDocumentedMeaning` 守护）。
@@ -46,7 +57,8 @@
 
 | 令牌 | 值 | 用途 |
 |---|---|---|
-| `FontPageTitle` | 28 | 页面标题（主菜单 / 空状态） |
+| `FontPracticeTitle` | 44 | 首页练习入口标题 |
+| `FontPageTitle` | 28 | 空状态等页面级标题 |
 | `FontTitle` | 20 | 区块标题 |
 | `FontSongTitle` | 20 | 面板内曲目标题 |
 | `FontSubtitle` | 15 | 副标题 / 卡片主文本 |
@@ -97,7 +109,7 @@
 | `Layout.ReferenceResolution` | 1280 × 720 | 与 `CanvasScaler.referenceResolution` 一致；`matchWidthOrHeight = 1`（匹配高度，窄窗优先折叠而非压缩按钮） |
 | `Layout.ScreenMargin` | 16 | 屏幕四周统一外边距 |
 | `Layout.StatusBarHeight` | 56 | 顶栏高度（单行：返回 / 曲目 / 状态 / 帮助 / 角色） |
-| `Layout.MainBarHeightNormal` | 132 | 播放器面板高度（进度行 44 + 行距 16 + 控制行 40 + 上下内边距 32） |
+| `Layout.MainBarHeightNormal` | 104 | 全景播放器高度（进度行 32 + 控制行 40 + 上下内边距 32） |
 | `Layout.MainBarHeightCompact` | 72 | 手部特写时的高度（隐藏进度行） |
 | `Layout.ProgressBarHeight` | 6 | 进度条轨道高度（圆角 3） |
 | `Layout.ChipHeight` | 32 | 底栏 chip / 分段控件高度 |
@@ -210,7 +222,7 @@
 - 控件通过 `UITheme.ChainHorizontal(...)` 串联成横向链；分段选择器内部 `RefreshFocusChain` 自动串起各分段项。
 - 显式导航通过 `UITheme.SetExplicitNavigation(self, up, down, left, right)` 设置（`Navigation.Mode.Explicit`）。
 - 顶栏按钮链：返回曲库 → 曲库 → 帮助 → 当前人物。
-- 主播放栏链：视角分段（特写 / 全景 / 自由）→ 重播 → 播放。
+- 底栏、视角和循环标记按屏幕位置使用方向键导航。「更多」打开后焦点移到琴键高亮，退出回到「更多」。
 
 ---
 
@@ -221,16 +233,13 @@
 
 | 断点 / 阈值 | 值 | 行为 |
 |---|---|---|
-| `Layout.NarrowWidthThreshold` | **1100**（参考分辨率宽度） | `< 1100` 视为窄窗口：**自动折叠练习工具栏**（保留「练习设置」标题行入口，不缩小主按钮） |
-| `Layout.WideWidthThreshold` | **1180** | `≥ 1180` 时顶栏显示「保存状态」等次要状态位（其余情况下隐藏，把宽度让给曲名与状态标签） |
-| 手部特写（`CameraMode.Closeup`） | — | 主播放栏压缩为紧凑高度；练习工具栏自动折叠；隐藏 3D 区快捷键提示（避免遮挡琴键） |
-| `ShouldFoldPracticeTools(refW, closeup)` | — | `refW < 1100` **或** 手部特写 → 折叠 |
-| `Layout.MainBarHeightNormal / Compact` | **132 / 72** | 常规 / 特写紧凑高度（占屏 ≤22%，由 `PlayerBar_OccupiesAtMostTwentyTwoPercentOfScreenHeight` 守护） |
-| `Layout.ToolbarHeightExpanded / Collapsed` | **124 / 36** | 展开 / 折叠高度 |
-| `Layout.ProgressRowHeightNormal / Compact` | 18 / 14 | 进度条行高 |
-| 分析面板 | — | 从右侧滑出（`StretchRightColumn`），宽 420；与角色面板**互斥**打开，避免互相遮挡 |
-
-> 用户手动展开 / 收起优先于自动折叠（`_foldTouched`）：一旦用户手动操作，直到断点再次变化前不再自动覆盖。
+| 首页内容宽度 | 840 | 宽窗口曲库两列，小于 840 时改为单列 |
+| 首页内容宽度 | 620 | 低于该宽度时收起键盘图形，给练习入口留空间 |
+| 顶栏宽度 | 现有顶栏断点 | 窄窗口优先保留曲名、状态与角色 |
+| 手部特写 | — | 收起左上快捷键提示，保持单行底栏和右上视角 |
+| 播放时间标签 | 两侧控件间可用宽度 ≥ 232 | 空间不足时收起当前时间和总时长，保留拖动区 |
+| 底栏 | 72 | 两种视角共用同一高度 |
+| 分析与角色 | — | 两个右侧面板互斥打开 |
 
 > 覆盖测试：`LayoutTokens_FitAtAllRequiredResolutions`、`LayoutTokens_KeepMainBarAboveMinimumUsableHeight`、`NarrowWidthThreshold_SitsBetweenCommonWindowSizes`、`ShouldFoldPracticeTools_FoldsOnNarrowOrCloseup`。
 
@@ -244,7 +253,7 @@
 |---|---|---|
 | **正文对比度 ≥ 4.5:1** | 主文字（`TextPrimary`）在所有面板背景上均满足 | `TextPrimary_MeetsWcagAaOnAllPanelBackgrounds` |
 | **强调底上文字可读** | `TextOnAccent` 在 `Accent` / `Selected` 底上满足 | `TextOnAccent_IsReadableOnAccentAndSelectedStates` |
-| **辅助 / 状态文字 ≥ 3:1** | 次级文字与状态标签在对应底色上满足最低对比 | `SecondaryAndStatusText_MeetMinimumContrast` |
+| **练习入口及曲库文字 ≥ 4.5:1** | 次级文字在胡桃木和控件底色上也可读 | `PracticeHero_TextIsReadableOnWalnutAndNeutralSurfaces` |
 | **错误 / 警告文字可读** | 错误 / 警告文字色在其横幅底色上可读 | `ErrorAndWarningText_AreReadableOnTheirBanners` |
 | 对比度分级 | `ContrastRatio` 返回 1..21；正文建议 ≥ 4.5，辅助文字建议 ≥ 3 | — |
 

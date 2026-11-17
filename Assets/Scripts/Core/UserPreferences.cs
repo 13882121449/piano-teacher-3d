@@ -80,7 +80,7 @@ namespace PianoTeacher3D.Core
             public const int AvatarIndexMin = 0;
             public const int AvatarIndexMax = 2;
             public const int CameraModeMin = 0;
-            public const int CameraModeMax = 2;   // Closeup / Full / Free
+            public const int CameraModeMax = 3;   // 特写、全景、自由观察、踏板
             public const int PracticeHandMin = 0;
             public const int PracticeHandMax = 2; // Both / LeftOnly / RightOnly
             public const int HighlightModeMin = 0;
@@ -92,6 +92,9 @@ namespace PianoTeacher3D.Core
 
         /// <summary>最后打开的曲目 ID（安全内部 ID，不含路径）。</summary>
         public string LastSongId = "";
+        public float LastSongPosition;
+        public bool AutoSustainDemo;
+        public bool ShowFingerNumbers;
 
         /// <summary>最后使用的视角（<c>CameraControl.CameraMode</c> 的整数值）。</summary>
         public int LastCameraMode = Defaults.LastCameraMode;
@@ -104,6 +107,9 @@ namespace PianoTeacher3D.Core
 
         /// <summary>琴键高亮模式（<c>Piano.HighlightMode</c>）。</summary>
         public int HighlightMode = Defaults.HighlightMode;
+
+        /// <summary>教学模式的独立高亮设置，旧文件默认只高亮发声琴键。</summary>
+        public int TeachingHighlightMode = (int)Piano.HighlightMode.Active;
 
         /// <summary>角色下标。</summary>
         public int AvatarIndex = Defaults.AvatarIndex;
@@ -210,7 +216,8 @@ namespace PianoTeacher3D.Core
             UserPreferences loaded = null;
             try
             {
-                loaded = JsonUtility.FromJson<UserPreferences>(json);
+                loaded = new UserPreferences();
+                JsonUtility.FromJsonOverwrite(json, loaded);
             }
             catch (Exception ex)
             {
@@ -277,10 +284,14 @@ namespace PianoTeacher3D.Core
         public void ResetToDefaults()
         {
             LastSongId = "";
+            LastSongPosition = 0f;
+            AutoSustainDemo = false;
+            ShowFingerNumbers = false;
             LastCameraMode = Defaults.LastCameraMode;
             Speed = Defaults.Speed;
             PracticeHand = Defaults.PracticeHand;
             HighlightMode = Defaults.HighlightMode;
+            TeachingHighlightMode = (int)Piano.HighlightMode.Active;
             AvatarIndex = Defaults.AvatarIndex;
             SelectedCharacterId = Defaults.SelectedCharacterId;
             MetronomeEnabled = Defaults.MetronomeEnabled;
@@ -298,10 +309,14 @@ namespace PianoTeacher3D.Core
         private void CopyFrom(UserPreferences other)
         {
             LastSongId = other.LastSongId ?? "";
+            LastSongPosition = other.LastSongPosition;
+            AutoSustainDemo = other.AutoSustainDemo;
+            ShowFingerNumbers = other.ShowFingerNumbers;
             LastCameraMode = other.LastCameraMode;
             Speed = other.Speed;
             PracticeHand = other.PracticeHand;
             HighlightMode = other.HighlightMode;
+            TeachingHighlightMode = other.TeachingHighlightMode;
             AvatarIndex = other.AvatarIndex;
             SelectedCharacterId = other.SelectedCharacterId ?? Defaults.SelectedCharacterId;
             MetronomeEnabled = other.MetronomeEnabled;
@@ -325,9 +340,13 @@ namespace PianoTeacher3D.Core
             LastCameraMode = ClampEnum(LastCameraMode, Defaults.CameraModeMin, Defaults.CameraModeMax, Defaults.LastCameraMode);
             PracticeHand = ClampEnum(PracticeHand, Defaults.PracticeHandMin, Defaults.PracticeHandMax, Defaults.PracticeHand);
             HighlightMode = ClampEnum(HighlightMode, Defaults.HighlightModeMin, Defaults.HighlightModeMax, Defaults.HighlightMode);
+            TeachingHighlightMode = ClampEnum(TeachingHighlightMode, Defaults.HighlightModeMin,
+                Defaults.HighlightModeMax, (int)Piano.HighlightMode.Active);
             QualityTier = ClampEnum(QualityTier, Defaults.QualityTierMin, Defaults.QualityTierMax, Defaults.QualityTier);
 
             if (string.IsNullOrEmpty(LastSongId)) LastSongId = "";
+            if (LastSongId.Length == 0 || !float.IsFinite(LastSongPosition) || LastSongPosition < 0f)
+                LastSongPosition = 0f;
 
             // 角色 ID 为空按「未选择」处理 → 回落写实默认（与字段初始值一致；按 LastSongId 归一化先例）
             if (string.IsNullOrEmpty(SelectedCharacterId)) SelectedCharacterId = Defaults.SelectedCharacterId;

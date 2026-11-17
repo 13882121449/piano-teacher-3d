@@ -31,7 +31,7 @@
 <!-- SECTION:local-check:BEGIN -->
 ### 本机自检（由 Environment_Matrix_Checklist 自动写入）
 
-- 时间：2026-11-12 15:25:30
+- 时间：2026-11-16 12:16:51
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -53,10 +53,9 @@
 <!-- SECTION:player-runtime:BEGIN -->
 ### 真实 Player 运行环境（本地自检）
 
-- 日期：2026-11-12。
-- Windows Development Build，1280×720 无边框窗口，High 画质，目标 60 FPS，VSync 关闭。
-- i9-14900HX、RTX 4060 Laptop、Direct3D11。
-- PianoLesson + demo.mid。预热 2 秒，采样 20 秒，切换场景实际切换 9 次。
-- 数据文件：`_verify_out/1112_windows_v3/player_<scenario>.json`。
-- 采样与异常启动记录见[优化验证 v3](../reports/1112_优化验证_v3.md)。
+- 采样时间：2026-11-13 15:00:40
+- Player：PianoTeacher3D.exe（Development Build，请求 1280×720 窗口）
+- 场景：PianoLesson + StreamingAssets/Songs/demo.mid
+- 数据文件：`_verify_out/1113_体验改造_v1/整体验证/player_<scenario>.json`
+- 说明：本机为开发机（独显），不代表低配/集显设备；三类设备矩阵仍需分别采集。
 <!-- SECTION:player-runtime:END -->

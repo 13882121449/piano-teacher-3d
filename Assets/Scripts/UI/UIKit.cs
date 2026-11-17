@@ -1,4 +1,5 @@
 ﻿using System;
+using PianoTeacher3D.Characters;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -44,6 +45,35 @@ namespace PianoTeacher3D.UI
         /// <summary>1px 分割线（仅用于面板内分区）。</summary>
         public static RectTransform Divider(Transform parent, string name)
             => UITheme.CreateDivider(parent, name, Vector2.zero, Vector2.one);
+
+        /// <summary>优先展示实际模型渲染图。缺少图片时显示通用的角色剪影。</summary>
+        internal static void PlaceCharacterPreview(RectTransform parent, string characterId,
+            Texture2D customThumbnail = null)
+        {
+            string path = CharacterRegistry.PortraitResourcesPath(characterId);
+            var texture = customThumbnail;
+            if (texture == null && !string.IsNullOrEmpty(path))
+                texture = Resources.Load<Texture2D>(path + "_render");
+
+            if (texture != null)
+            {
+                var preview = new GameObject("CharacterPreview", typeof(RectTransform),
+                    typeof(RawImage), typeof(AspectRatioFitter));
+                preview.transform.SetParent(parent, false);
+                var image = preview.GetComponent<RawImage>();
+                image.texture = texture;
+                image.raycastTarget = false;
+                var fitter = preview.GetComponent<AspectRatioFitter>();
+                fitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+                fitter.aspectRatio = texture.width / (float)texture.height;
+                return;
+            }
+
+            var head = Panel(parent, "CharacterHead", UITheme.PianoIvoryShadow, 16);
+            UITheme.PlaceTopCenter(head, 24f, 32f, 32f);
+            var shoulders = Panel(parent, "CharacterShoulders", UITheme.CardBorder, 16);
+            UITheme.PlaceTopCenter(shoulders, 62f, 60f, 32f);
+        }
 
         // ==================== 文本 ====================
 

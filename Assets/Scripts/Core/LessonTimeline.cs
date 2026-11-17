@@ -38,6 +38,11 @@ namespace PianoTeacher3D.Core
 
         /// <summary>上次采样到的音频时钟（秒）；&lt; 0 表示需要重新对齐（P1-7）。</summary>
         private double _lastDspTime = -1.0;
+        internal float LeadInRemaining { get; private set; }
+        /// <summary>开始播放前，演奏者仍在准备首个手型。</summary>
+        public bool IsPreparing => LeadInRemaining > 0f;
+
+        internal void BeginLeadIn(float seconds) => LeadInRemaining = Mathf.Max(0f, seconds);
 
         private void Update()
         {
@@ -46,6 +51,12 @@ namespace PianoTeacher3D.Core
             // 游戏级暂停（timeScale=0）时时间轴也必须冻结：dspTime 不认 timeScale，
             // 所以这里显式挡住，保持"暂停时时间不走"的既有语义。
             if (Time.timeScale <= 0f) return;
+
+            if (LeadInRemaining > 0f)
+            {
+                LeadInRemaining = Mathf.Max(0f, LeadInRemaining - Time.deltaTime);
+                return;
+            }
 
             CurrentTime += SampleDelta() * PlaybackSpeed;
 
@@ -78,7 +89,7 @@ namespace PianoTeacher3D.Core
         {
             double now = AudioSettings.dspTime;
             float delta = Time.deltaTime;
-            if (now > 0.0 && _lastDspTime >= 0.0 && now > _lastDspTime)
+            if (Time.captureFramerate == 0 && now > 0.0 && _lastDspTime >= 0.0 && now > _lastDspTime)
             {
                 delta = (float)(now - _lastDspTime);
             }
@@ -130,11 +141,20 @@ namespace PianoTeacher3D.Core
         public void Pause()
         {
             if (State != PlaybackState.Playing) return;
+            LeadInRemaining = 0f;
+            ChangeState(PlaybackState.Paused);
+        }
+
+        /// <summary>恢复练习位置，等待用户开始播放。</summary>
+        public void RestorePaused(float seconds)
+        {
+            Seek(seconds);
             ChangeState(PlaybackState.Paused);
         }
 
         public void Stop()
         {
+            LeadInRemaining = 0f;
             CurrentTime = 0f;
             ResetClock();
             ChangeState(PlaybackState.Stopped);
@@ -143,6 +163,7 @@ namespace PianoTeacher3D.Core
 
         public void Seek(float seconds)
         {
+            LeadInRemaining = 0f;
             CurrentTime = Mathf.Clamp(seconds, 0f, TotalDuration);
             ResetClock(); // 跳转后以新时间点为基准，避免下一帧把跳转距离当成播放进度
             OnTimeChanged?.Invoke(CurrentTime);
@@ -150,6 +171,7 @@ namespace PianoTeacher3D.Core
 
         public void Restart()
         {
+            LeadInRemaining = 0f;
             CurrentTime = 0f;
             ResetClock();
             ChangeState(PlaybackState.Playing);
