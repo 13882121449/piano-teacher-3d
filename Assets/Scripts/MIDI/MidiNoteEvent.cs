@@ -2,6 +2,13 @@ using System;
 
 namespace PianoTeacher3D.MIDI
 {
+    public enum NoteHand : byte
+    {
+        Unspecified,
+        Left,
+        Right
+    }
+
     /// <summary>
     /// 标准化 MIDI 音符事件（对应方案 3.3 的最小字段集）。
     /// 时间单位为秒，由 MidiParser 将 tick 转换为秒。
@@ -27,6 +34,9 @@ namespace PianoTeacher3D.MIDI
         /// <summary>通道号（0-15）。</summary>
         public int Channel;
 
+        /// <summary>曲目加载时估算的演奏手，未分配时按传统音域判断。</summary>
+        public NoteHand Hand;
+
         public float EndTime => StartTime + Duration;
 
         public MidiNoteEvent(int pitch, float startTime, float duration, int velocity, int track, int channel)
@@ -37,6 +47,7 @@ namespace PianoTeacher3D.MIDI
             Velocity = velocity;
             Track = track;
             Channel = channel;
+            Hand = NoteHand.Unspecified;
         }
 
         public override string ToString()

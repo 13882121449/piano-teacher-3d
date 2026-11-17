@@ -77,12 +77,13 @@ namespace PianoTeacher3D.MIDI
         /// 延音踏板（CC64）保持区间，秒制升序；曲目没有 CC64 时为空列表（永不为 null）。
         /// </summary>
         public IReadOnlyList<SustainSpan> SustainSpans { get; }
+        public bool HasRecordedSustain { get; }
 
         public MidiParseResult(bool success, string error, List<MidiNoteEvent> notes,
             float totalDuration, ushort division, int trackCount,
             IReadOnlyList<TempoChange> tempoChanges = null, int danglingNoteCount = 0,
             int midiFormat = 0, IReadOnlyList<string> warnings = null,
-            IReadOnlyList<SustainSpan> sustainSpans = null)
+            IReadOnlyList<SustainSpan> sustainSpans = null, bool hasRecordedSustain = false)
         {
             Success = success;
             Error = error;
@@ -95,6 +96,7 @@ namespace PianoTeacher3D.MIDI
             MidiFormat = midiFormat;
             Warnings = warnings ?? NoWarnings;
             SustainSpans = sustainSpans ?? NoSustain;
+            HasRecordedSustain = hasRecordedSustain || SustainSpans.Count > 0;
         }
 
         private static readonly SustainSpan[] NoSustain = new SustainSpan[0];
@@ -438,8 +440,8 @@ namespace PianoTeacher3D.MIDI
                     }
                 }
 
-                return new MidiParseResult(true, null, notes, (float)maxEndSeconds,
-                    division, trackCount, tempoChanges, danglingCount, format, warnings, sustainSpans);
+                return new MidiParseResult(true, null, PianoNoteFilter.AssignHands(notes), (float)maxEndSeconds,
+                    division, trackCount, tempoChanges, danglingCount, format, warnings, sustainSpans, sustainEvents.Count > 0);
             }
             catch (EndOfStreamException)
             {

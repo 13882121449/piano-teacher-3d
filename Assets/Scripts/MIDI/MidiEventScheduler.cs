@@ -27,11 +27,17 @@ namespace PianoTeacher3D.MIDI
 
             foreach (var n in notes)
             {
+                if (n.Duration <= 0f) continue;
                 _events.Add((n.StartTime, true, n));
                 _events.Add((n.EndTime, false, n));
                 _sortedNotes.Add(n);
             }
-            _events.Sort((a, b) => a.time.CompareTo(b.time));
+            _events.Sort((a, b) =>
+            {
+                int time = a.time.CompareTo(b.time);
+                // 同一时刻先松旧音再按新音，避免重复音的末尾事件释放新音。
+                return time != 0 ? time : a.isOn.CompareTo(b.isOn);
+            });
             _sortedNotes.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
         }
 
@@ -41,6 +47,8 @@ namespace PianoTeacher3D.MIDI
             _sortedNotes.Clear();
             _cursor = 0;
         }
+
+        public void Rewind() => _cursor = 0;
 
         /// <summary>
         /// 收集起始时间落在 [from, to) 区间内的音符（按 StartTime 升序），用于高亮预提示。

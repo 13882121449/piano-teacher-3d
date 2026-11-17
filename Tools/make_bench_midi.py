@@ -13,6 +13,7 @@ SMF（Format 0，PPQ 480，120 BPM），保证曲目可复现、可重新生成�
 ----
     python Tools/make_bench_midi.py            # 重新生成三首曲目
     python Tools/make_bench_midi.py --check    # 只校验现有文件（存在且可解析头）
+    python Tools/make_bench_midi.py --articulation # 生成演奏和踏板短样本
 
 约定
 ----
@@ -66,12 +67,14 @@ def note(pitch, start_beat, length_beat, velocity=90):
     ]
 
 
-def write_midi(path: Path, notes, title: str):
+def write_midi(path: Path, notes, title: str, sustain=()):
     events = [(0, b"\xFF\x03" + vlq(len(title)) + title.encode("ascii", "replace"))]
     events.append((0, b"\xFF\x51\x03" + TEMPO_US.to_bytes(3, "big")))
     events.append((0, b"\xFF\x58\x04\x04\x02\x18\x08"))  # 4/4
-    for pitch, start, length in notes:
-        events += note(pitch, start, length)
+    for pitch, start, length, *velocity in notes:
+        events += note(pitch, start, length, *velocity)
+    for beat, down in sustain:
+        events.append((round(beat * PPQ), bytes([0xB0, 64, 127 if down else 0])))
     header = b"MThd" + struct.pack(">IHHH", 6, 0, 1, PPQ)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(header + track_chunk(events))
@@ -129,6 +132,46 @@ def fast_scale_and_leaps():
     return notes
 
 
+def articulation_samples():
+    repeated = [(64, i * 0.5, 0.22, 50 + i * 9) for i in range(8)]
+    trill = [(64 + i % 2, i * 0.25, 0.22, 76) for i in range(16)]
+    scale = [(pitch, i * 0.25, 0.23, 82) for i, pitch in
+             enumerate([60, 62, 64, 65, 67, 69, 71, 72, 71, 69, 67, 65, 64, 62, 60])]
+    touch = [(pitch, i * 0.5, 0.19 if i < 4 else 0.52, 85) for i, pitch in
+             enumerate([60, 62, 64, 65, 67, 65, 64, 62])]
+    leaps = [(pitch, i * 0.65, 0.32, 96) for i, pitch in
+             enumerate([60, 84, 62, 86, 64, 88])]
+    pedal_chords = [(pitch, i * 2, 0.85, 75) for i, chord in
+                    enumerate([[48, 60, 64, 67], [43, 62, 67, 71], [48, 60, 64, 67]])
+                    for pitch in chord]
+    presses = [(0.16, True), (1.84, False), (2.16, True), (3.84, False), (4.16, True), (5.75, False)]
+
+    # 两手在中央 C 两侧同时按键，再接含黑键的相邻和弦与上行穿指。
+    adjacent_hands = [
+        (pitch, beat, 0.9, 80)
+        for beat, pitches in [
+            (0.5, (53, 57, 59, 60, 64, 67)),
+            (2.0, (54, 57, 59, 61, 64, 68)),
+        ]
+        for pitch in pitches
+    ]
+    adjacent_hands += [
+        (pitch, 3.5 + i * 0.25, 0.23, 82)
+        for i, pitch in enumerate((60, 62, 64, 65, 67, 69, 71, 72))
+    ]
+    # 七个音全部位于传统分手线下方，单手演示输入不可行。
+    unplayable_span = [
+        (pitch, 0.5, 1.0, 80) for pitch in (36, 40, 43, 47, 52, 55, 59)
+    ]
+    return (
+        ("repeated", repeated, ()), ("trill", trill, ()), ("thumb_crossing", scale, ()),
+        ("staccato_legato", touch, ()), ("wide_leaps", leaps, ()),
+        ("pedal_cc64", pedal_chords, presses), ("pedal_without_cc64", pedal_chords, ()),
+
+        ("near_hands", adjacent_hands, ()), ("unplayable_span", unplayable_span, ()),
+    )
+
+
 def check():
     ok = True
     for name in ("bench_black_keys.mid", "bench_chords.mid", "bench_fast_scale.mid"):
@@ -149,10 +192,17 @@ def check():
 def main():
     parser = argparse.ArgumentParser(description="生成手部接触评测标注曲目集")
     parser.add_argument("--check", action="store_true", help="只校验现有文件")
+    parser.add_argument("--articulation", action="store_true", help="只生成演奏和踏板短样本")
     args = parser.parse_args()
 
     if args.check:
         return check()
+
+    if args.articulation:
+        for name, notes, sustain in articulation_samples():
+            path = write_midi(OUT_DIR / "articulation" / (name + ".mid"), notes, name, sustain)
+            print(f"✓ {path.relative_to(PROJECT_ROOT)}  ({len(notes)} 个音)")
+        return 0
 
     todos = [
         ("bench_black_keys.mid", black_keys(), "Bench Black Keys"),
