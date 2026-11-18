@@ -36,7 +36,7 @@ namespace PianoTeacher3D.Tests
         [UnityTest]
         public IEnumerator Apply_SitsOnStool_WithFeetOnFloor()
         {
-            var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);
+            var view = VrmCharacterView.TryCreate(_profile, null, out string error);
             Assert.IsNotNull(view, error);
 
             try
@@ -70,9 +70,9 @@ namespace PianoTeacher3D.Tests
                 Assert.AreEqual(lAnkle.position.y, rAnkle.position.y, 0.01f, "左右踝高度应一致");
                 Assert.AreEqual(-lAnkle.position.x, rAnkle.position.x, 0.01f, "左右腿应关于中线对称");
 
-                // 躯干长度合理：头应比髋高 50–70 cm
+                // 躯干长度合理：头应比髋高 42–70 cm（genki 是 VRoid 比例，躯干比写实成人短，实测 0.49 m）
                 float torso = head.position.y - hips.position.y;
-                Assert.That(torso, Is.InRange(0.50f, 0.70f), $"头髋距离异常：{torso:F3} m");
+                Assert.That(torso, Is.InRange(0.42f, 0.70f), $"头髋距离异常：{torso:F3} m");
             }
             finally
             {
@@ -81,14 +81,13 @@ namespace PianoTeacher3D.Tests
         }
 
         [UnityTest]
-        public IEnumerator AllRocketboxCharacters_FitTheBenchOnTheFloor()
+        public IEnumerator BuiltInCharacters_FitTheBenchOnTheFloor()
         {
             var registry = new CharacterRegistry();
-            foreach (var id in new[] { CharacterRegistry.RocketboxFemaleId,
-                CharacterRegistry.RocketboxMaleId, CharacterRegistry.RocketboxChildId })
+            foreach (var id in CharacterRegistry.BuiltInIds)
             {
                 Assert.IsTrue(registry.TryGet(id, out var profile));
-                var view = RocketboxCharacterView.TryCreate(profile, null, out string error);
+                var view = VrmCharacterView.TryCreate(profile, null, out string error);
                 Assert.IsNotNull(view, error);
                 try
                 {
@@ -102,7 +101,7 @@ namespace PianoTeacher3D.Tests
                     var stool = view.RootTransform.Find("StoolRoot");
                     var cushion = stool.Find("StoolCushion").GetComponent<Renderer>().bounds;
                     float seat = view.PoseSettings.SeatSurfaceHeight + view.PoseSettings.SeatHeightOffset;
-                    float floor = stool.Find("StoolLeg_1_1").GetComponent<Renderer>().bounds.min.y;
+                    float floor = stool.Find("StoolLegs").GetComponent<Renderer>().bounds.min.y;
                     Debug.Log($"[PT3D][SeatFit] {id} 髋={hips.position.ToString("F3")} 座垫={cushion.max.y:F3} 凳脚={floor:F3}");
                     Assert.That(cushion.max.y, Is.EqualTo(seat).Within(0.003f), id);
                     Assert.That(cushion.center.z, Is.EqualTo(hips.position.z).Within(0.003f), id);
@@ -115,7 +114,7 @@ namespace PianoTeacher3D.Tests
         [UnityTest]
         public IEnumerator Apply_KeepsLeftAndRightArmsSymmetric()
         {
-            var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);
+            var view = VrmCharacterView.TryCreate(_profile, null, out string error);
             Assert.IsNotNull(view, error);
 
             try
@@ -143,7 +142,7 @@ namespace PianoTeacher3D.Tests
         [UnityTest]
         public IEnumerator Restore_ReturnsToBindPose()
         {
-            var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);
+            var view = VrmCharacterView.TryCreate(_profile, null, out string error);
             Assert.IsNotNull(view, error);
 
             try

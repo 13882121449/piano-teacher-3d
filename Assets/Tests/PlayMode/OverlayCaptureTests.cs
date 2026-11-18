@@ -47,17 +47,36 @@ namespace PianoTeacher3D.Tests.PlayMode
             for (int i = 0; i < 120; i++) yield return null;
             var session = UnityEngine.Object.FindFirstObjectByType<LessonSessionController>();
             Assert.IsNotNull(session);
-            // batchmode 下会话跳过偏好恢复，这里显式换成默认的写实女演奏者，截图与实际运行一致
-            session.RestoreCharacter(PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId);
+            // batchmode 下会话跳过偏好恢复，这里显式换成默认演奏者 genki，截图与实际运行一致
+            session.RestoreCharacter(PianoTeacher3D.Characters.CharacterRegistry.VroidGenkiId);
             for (int i = 0; i < 30; i++) yield return null;
             session.SetCameraMode(CameraMode.Full);
             for (int i = 0; i < 60; i++) yield return null;
             yield return Grab(Path.Combine(directory, "lesson_full.png"));
 
-            session.SetCameraMode(CameraMode.Closeup);
+            // 背影构图（参考图二）：播放中截，琴弦在振动
+            session.SetCameraMode(CameraMode.Back);
             session.Play();
+            for (int i = 0; i < 150; i++) yield return null;
+            yield return Grab(Path.Combine(directory, "lesson_back.png"));
+
+            session.SetCameraMode(CameraMode.Closeup);
             for (int i = 0; i < 70; i++) yield return null;
             yield return Grab(Path.Combine(directory, "lesson_closeup.png"));
+
+            // 教学叠加：五线谱 + 下落音符 + 音名 + 教学面板
+            var teaching = session.Teaching;
+            if (teaching != null)
+            {
+                teaching.SetStaffVisible(true);
+                if (teaching.NoteNames == PianoTeacher3D.Teaching.NoteNameStyle.Off) teaching.CycleNoteNames();
+                var chip = GameObject.Find("Btn_教学");
+                if (chip != null) chip.GetComponent<UnityEngine.UI.Button>().onClick.Invoke();
+                for (int i = 0; i < 60; i++) yield return null;
+                yield return Grab(Path.Combine(directory, "lesson_teaching.png"));
+                teaching.SetStaffVisible(false);
+                while (teaching.NoteNames != PianoTeacher3D.Teaching.NoteNameStyle.Off) teaching.CycleNoteNames();
+            }
             session.Pause();
         }
 
@@ -75,6 +94,7 @@ namespace PianoTeacher3D.Tests.PlayMode
             {
                 // ① 3D 画面（带后处理，毛玻璃模糊源也在这一步写入）
                 main.targetTexture = rt;
+                PianoTeacher3D.Piano.StagePlanarReflection.RenderFor(main);
                 main.Render();
                 main.targetTexture = null;
 

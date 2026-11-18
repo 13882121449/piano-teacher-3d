@@ -3,7 +3,8 @@
     "rootNamespace": "PianoTeacher3D",
     "references": [
         "Unity.RenderPipelines.Core.Runtime",
-        "Unity.RenderPipelines.Universal.Runtime"
+        "Unity.RenderPipelines.Universal.Runtime",
+        "VRM10"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

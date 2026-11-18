@@ -18,7 +18,8 @@ MonoBehaviour:
   m_RendererFeatures:
   - {fileID: 5562540437206166014}
   - {fileID: 7462015529300000001}
-  m_RendererFeatureMap: 
+  - {fileID: 8287691288292321906}
+  m_RendererFeatureMap: fe696b580e1d324d01fd5fa496678e67726ac30e51cb0373
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 0}
   shaders:
@@ -108,3 +109,16 @@ MonoBehaviour:
     Downsample: 4
     Iterations: 3
     Offset: 1.25
+--- !u!114 &8287691288292321906
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5b6d00cd3f0249a2b4ee7dc86f9a8d63, type: 3}
+  m_Name: MToonOutline
+  m_EditorClassIdentifier: 
+  m_Active: 1

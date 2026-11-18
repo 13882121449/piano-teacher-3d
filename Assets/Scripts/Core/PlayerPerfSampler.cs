@@ -211,7 +211,7 @@ namespace PianoTeacher3D.Core
                 bool legacy = _scenario == "cinema-reference";
                 string song = Path.Combine(Application.streamingAssetsPath, "Songs", "cinematic", "cinematic_tide.mid");
                 _session.LoadSong(song);
-                _session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+                _session.RestoreCharacter(CharacterRegistry.VroidGenkiId);
                 _session.SetDisplayMode(DisplayMode.Showcase);
                 _session.SetCameraMode(CameraMode.Full);
                 _session.SetAutomaticStageCamera(true);

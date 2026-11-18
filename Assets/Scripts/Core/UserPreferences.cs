@@ -40,11 +40,11 @@ namespace PianoTeacher3D.Core
             public const int AvatarIndex = 0;
 
             /// <summary>
-            /// 默认角色 ID（写实角色默认化，写实化批次 1；值对应
-            /// <see cref="PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId"/>）。
+            /// 默认角色 ID（2026-11-18 起默认演奏者改为 genki；值对应
+            /// <see cref="PianoTeacher3D.Characters.CharacterRegistry.VroidGenkiId"/>）。
             /// 资产缺失时恢复失败会回落内置角色，见会话层 <c>RestoreCharacter</c>。
             /// </summary>
-            public const string SelectedCharacterId = "rocketbox.female01";
+            public const string SelectedCharacterId = "vroid.genki";
 
             /// <summary>默认视角：1 = 全景（<c>CameraControl.CameraMode.Full</c>）。</summary>
             public const int LastCameraMode = 1;
@@ -80,7 +80,7 @@ namespace PianoTeacher3D.Core
             public const int AvatarIndexMin = 0;
             public const int AvatarIndexMax = 2;
             public const int CameraModeMin = 0;
-            public const int CameraModeMax = 3;   // 特写、全景、自由观察、踏板
+            public const int CameraModeMax = 4;   // 特写、全景、自由观察、踏板、背影
             public const int PracticeHandMin = 0;
             public const int PracticeHandMax = 2; // Both / LeftOnly / RightOnly
             public const int HighlightModeMin = 0;

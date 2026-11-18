@@ -11,7 +11,8 @@ namespace PianoTeacher3D.CameraControl
         Closeup, // 手部特写
         Full,    // 全景
         Free,    // 自由观察
-        Pedal    // 踏板特写
+        Pedal,   // 踏板特写
+        Back     // 背影：从演奏者背后看竖琴钢琴与身后的海（2026-11-18，参考图二构图）
     }
 
     /// <summary>
@@ -199,7 +200,7 @@ namespace PianoTeacher3D.CameraControl
 
         private static CameraModePreset[] CreatePresets()
         {
-            var presets = new CameraModePreset[4];
+            var presets = new CameraModePreset[5];
             presets[(int)CameraMode.Closeup] = new CameraModePreset(CameraMode.Closeup, "手部特写")
             {
                 NearClip = 0.05f,
@@ -221,6 +222,11 @@ namespace PianoTeacher3D.CameraControl
                 FarClip = 30f,
                 FollowDamping = 12f,
                 MaxFovStepPerSecond = 60f
+            };
+            presets[(int)CameraMode.Back] = new CameraModePreset(CameraMode.Back, "背影")
+            {
+                NearClip = 0.08f,
+                FarClip = 60f
             };
             return presets;
         }
@@ -479,6 +485,20 @@ namespace PianoTeacher3D.CameraControl
                         preset.Target = CameraTarget.Create(focus, 0.32f, direction, 0.87f, 42f);
                         _currentFocus = focus;
                         pose = CameraPose.FromTarget(preset.Target);
+                        return true;
+                    }
+                    return SolveFullDesired(preset, out pose);
+                case CameraMode.Back:
+                    if (_keyMap != null)
+                    {
+                        // 演奏者背后略偏右、肩高略上，看向琴弦中部：竖琴、演奏者背影和身后的海同框
+                        Transform piano = _keyMap.transform;
+                        Vector3 focus = piano.TransformPoint(new Vector3(_keyMap.TotalWidth * 0.52f, 1.10f, -0.11f));
+                        Vector3 direction = piano.TransformDirection(new Vector3(-0.16f, 0.11f, 1f)).normalized;
+                        preset.Target = CameraTarget.Create(focus, 1.1f, direction, 3.15f, 44f);
+                        _currentFocus = focus;
+                        pose = CameraPose.FromTarget(preset.Target);
+                        preset.Pose = pose;
                         return true;
                     }
                     return SolveFullDesired(preset, out pose);

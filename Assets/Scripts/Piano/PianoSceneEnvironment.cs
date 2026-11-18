@@ -137,6 +137,8 @@ namespace PianoTeacher3D.Piano
         private Material _nearRibbon;
         private Material _farRibbon;
         private UnderwaterStage _underwater;
+        private OceanAmbience _ocean;
+        private StagePlanarReflection _reflection;
         private bool _hasStageCue;
         private PianoKeyMap _keyMap;
         private bool _built;
@@ -244,6 +246,7 @@ namespace PianoTeacher3D.Piano
             if (_nearRibbon != null) _nearRibbon.SetFloat(StageEffects, effects);
             if (_farRibbon != null) _farRibbon.SetFloat(StageEffects, effects);
             _underwater?.SetQuality(quality.Tier == QualityTier.High);
+            if (_reflection != null) _reflection.ResolutionScale = quality.Tier == QualityTier.High ? 0.5f : 0.4f;
 
             // 后处理按档分层（写实化批次 2）：URP 激活时 Bloom 只在高画质档呼吸发光，
             // Standard 档强度归零（等效关闭，不改 QualityProfile 结构）；ACES / 暗角 / 色彩两档共用。
@@ -387,6 +390,7 @@ namespace PianoTeacher3D.Piano
         {
             _environmentVisible = visible;
             RefreshEnvironmentVisibility();
+            if (_ocean != null) _ocean.SetVisible(visible);
         }
 
         /// <summary>更新演奏展示的环境布光。进入教学时恢复稳定的常规曝光与舞台循环。</summary>
@@ -655,6 +659,12 @@ namespace PianoTeacher3D.Piano
                 _underwater.Build(sceneryShader, sunShader, platform, mesh => Own(mesh), material => Own(material));
                 foreach (var habitatRenderer in habitat.GetComponentsInChildren<Renderer>(true))
                     Register(habitatRenderer.gameObject);
+                // 2026-11-18：气泡、海雪、环境声与混响（参考图二）。粒子在 Start 里生成，随环境开关整体启停
+                _ocean = habitat.AddComponent<OceanAmbience>();
+                _ocean.SetVisible(_environmentVisible);
+                // 琴台镜面倒影（参考图二）：平面取琴台顶面；标准档用 0.4 倍分辨率、高画质档 0.5 倍
+                _reflection = platform.gameObject.AddComponent<StagePlanarReflection>();
+                _reflection.PlaneY = platform.bounds.max.y;
                 var etching = _root.Find("MoonlitPlatformEtching");
                 if (etching != null) etching.GetComponent<Renderer>().forceRenderingOff = true;
                 surface.forceRenderingOff = true;

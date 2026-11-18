@@ -107,7 +107,7 @@
 <!-- SECTION:resource-load:BEGIN -->
 ### 资源加载采样（方案 11.4「资源加载耗时和失败率采样」）
 
-- 时间：2026-11-18 16:28:37
+- 时间：2026-11-18 19:12:22
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -115,11 +115,11 @@
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
 - 曲目目录：`StreamingAssets/Songs`；曲目数：1
-- 最慢单曲：9.7 ms；失败数：0
+- 最慢单曲：8.8 ms；失败数：0
 
 | 曲目 | 加载耗时 (ms) | 结果 |
 |---|---|---|
-| demo.mid | 9.7 | 成功 |
+| demo.mid | 8.8 | 成功 |
 
 **口径说明**：耗时用 `System.Diagnostics.Stopwatch` 包裹 `LessonSessionController.LoadSong`，包含校验 + 解析 + 一次性提交；示例曲为毫秒级，5 秒上限只用于捕获卡死，不代表目标设备上的加载性能。
 <!-- SECTION:resource-load:END -->
@@ -136,16 +136,16 @@
 
 | 指标 | 数值 |
 |---|---|
-| 平均帧时间 | 16.67 ms |
+| 平均帧时间 | 16.68 ms |
 | p50 帧时间 | 16.67 ms |
-| p95 帧时间 | 16.68 ms |
-| p99 帧时间 | 16.70 ms |
-| 最大帧时间 | 20.64 ms |
+| p95 帧时间 | 16.67 ms |
+| p99 帧时间 | 16.69 ms |
+| 最大帧时间 | 28.51 ms |
 | 平均 FPS | 60.0 |
-| 1% low FPS | 58.6 |
-| 托管内存（GC.GetTotalMemory） | 10.0 → 10.2 MB（增量 +0.22 MB） |
-| Mono 已用 / 总分配 | 10.2 / 114.2 MB |
-| Mesh / Material / AudioClip / GameObject | 213 / 106 / 9 / 550 |
+| 1% low FPS | 56.5 |
+| 托管内存（GC.GetTotalMemory） | 20.7 → 14.4 MB（增量 -6.24 MB） |
+| Mono 已用 / 总分配 | 14.4 / 458.8 MB |
+| Mesh / Material / AudioClip / GameObject | 197 / 109 / 10 / 570 |
 
 **口径说明**
 
@@ -168,16 +168,16 @@
 
 | 指标 | 数值 |
 |---|---|
-| 平均帧时间 | 16.67 ms |
+| 平均帧时间 | 16.68 ms |
 | p50 帧时间 | 16.67 ms |
-| p95 帧时间 | 16.68 ms |
-| p99 帧时间 | 16.73 ms |
-| 最大帧时间 | 19.32 ms |
+| p95 帧时间 | 16.67 ms |
+| p99 帧时间 | 16.72 ms |
+| 最大帧时间 | 27.38 ms |
 | 平均 FPS | 60.0 |
-| 1% low FPS | 58.8 |
-| 托管内存（GC.GetTotalMemory） | 10.0 → 10.2 MB（增量 +0.12 MB） |
-| Mono 已用 / 总分配 | 10.2 / 108.2 MB |
-| Mesh / Material / AudioClip / GameObject | 200 / 96 / 9 / 650 |
+| 1% low FPS | 56.6 |
+| 托管内存（GC.GetTotalMemory） | 20.7 → 14.5 MB（增量 -6.11 MB） |
+| Mono 已用 / 总分配 | 14.5 / 459.1 MB |
+| Mesh / Material / AudioClip / GameObject | 194 / 99 / 10 / 658 |
 
 **口径说明**
 

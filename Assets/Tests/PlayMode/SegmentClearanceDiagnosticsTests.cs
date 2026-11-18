@@ -27,7 +27,7 @@ namespace PianoTeacher3D.Tests.PlayMode
             var fingers = Object.FindFirstObjectByType<FingerPoseController>();
             Assert.IsNotNull(session);
 
-            foreach (string id in new[] { Characters.CharacterRegistry.RocketboxFemaleId, Characters.CharacterRegistry.RocketboxMaleId })
+            foreach (string id in Characters.CharacterRegistry.BuiltInIds)
             {
                 session.RestoreCharacter(id);
                 for (int i = 0; i < 10; i++) yield return null;

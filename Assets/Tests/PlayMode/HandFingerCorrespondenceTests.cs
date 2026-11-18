@@ -77,7 +77,7 @@ namespace PianoTeacher3D.Tests.PlayMode
         [UnityTest]
         public IEnumerator RightThumb_ReleasesToLightlyCurledPose()
         {
-            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            _session.RestoreCharacter(Characters.CharacterRegistry.VroidGenkiId);
             yield return null;
             var rig = (IFingerJointRig)_avatar.RightHand;
             Assert.IsTrue(rig.TryGetJoints(0, out _, out var middle, out var tip));
@@ -103,8 +103,7 @@ namespace PianoTeacher3D.Tests.PlayMode
         {
             var failures = new List<string>();
             var keys = _session.GetComponent<PianoKeyAnimator>();
-            foreach (string id in new[] { Characters.CharacterRegistry.RocketboxFemaleId,
-                         Characters.CharacterRegistry.RocketboxMaleId, Characters.CharacterRegistry.RocketboxChildId })
+            foreach (string id in Characters.CharacterRegistry.BuiltInIds)
             {
                 _session.RestoreCharacter(id);
                 yield return null;
@@ -180,7 +179,9 @@ namespace PianoTeacher3D.Tests.PlayMode
                     int end = System.Array.IndexOf(bones, distal);
                     if (end < 0) continue;
                     var weights = mesh.boneWeights;
-                    skinned.BakeMesh(baked);
+                    // useScale = true：顶点按渲染器完整变换（含缩放）烘焙，下面的 TransformPoint 才不会二次缩放
+                    // （genki 的角色根缩放 1.08；不带缩放烘焙会让每个顶点偏移约 8%）
+                    skinned.BakeMesh(baked, true);
                     var vertices = baked.vertices;
 
                     bool IsThumb(int index) => index == root || index == middle || index == end;
@@ -217,7 +218,7 @@ namespace PianoTeacher3D.Tests.PlayMode
         public IEnumerator ImportedFinger_DoesNotTwistTowardAKeyBehindTheKnuckle()
         {
             const int pitch = 64;
-            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            _session.RestoreCharacter(Characters.CharacterRegistry.VroidGenkiId);
             yield return null;
             var right = (IFingerJointRig)_avatar.RightHand;
             var note = new MidiNoteEvent(pitch, 0f, 2f, 80, 0, 0) { Hand = NoteHand.Right };

@@ -47,16 +47,12 @@ namespace PianoTeacher3D.Tests.PlayMode
         [UnityTest]
         public IEnumerator CharacterCards_RebindFingersAndUpdateTheToolbar()
         {
-            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            _session.RestoreCharacter(Characters.CharacterRegistry.VroidGenkiId);
             _session.Seek(0.5f);
             float position = _session.CurrentTime;
-            var labels = new[] { "写实男性", "儿童", "写实女性" };
-            var ids = new[]
-            {
-                Characters.CharacterRegistry.RocketboxMaleId,
-                Characters.CharacterRegistry.RocketboxChildId,
-                Characters.CharacterRegistry.RocketboxFemaleId
-            };
+            // 2026-11-18：角色库只剩 genki，卡片切换仍须重新绑定手指与工具栏
+            var labels = new[] { "Genki" };
+            var ids = new[] { Characters.CharacterRegistry.VroidGenkiId };
             var pose = Object.FindFirstObjectByType<Avatar.FingerPoseController>();
             var avatar = Object.FindFirstObjectByType<Avatar.AvatarManager>();
             var leftHandField = typeof(Avatar.FingerPoseController).GetField("_leftHand",

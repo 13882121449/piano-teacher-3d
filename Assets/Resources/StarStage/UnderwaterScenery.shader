@@ -32,6 +32,11 @@ Shader "PianoTeacher3D/UnderwaterScenery"
                 float4 _Sun, _SunTarget, _BaseTint, _StageSequence, _WaterTint;
             CBUFFER_END
 
+            // 2026-11-18 琴台镜面倒影（StagePlanarReflection 写入；强度 0 = 关闭）
+            TEXTURE2D(_PT3D_PlanarReflection);
+            SAMPLER(sampler_PT3D_PlanarReflection);
+            float _PT3D_PlanarReflectionStrength;
+
             struct Attributes { float4 vertex : POSITION; float3 normal : NORMAL; float4 color : COLOR; float2 motion : TEXCOORD0; };
             struct Varyings
             {
@@ -140,6 +145,17 @@ Shader "PianoTeacher3D/UnderwaterScenery"
                 float3 environment = GlossyEnvironmentReflection(reflect(-view, normal), i.world, 0.27, 1);
                 color += _StageSurface * (float3(0.052,0.114,0.124) * pool * diffuse * shadow +
                     environment * glint * 0.22);
+                if (_StageSurface > 0.5 && _PT3D_PlanarReflectionStrength > 0.001)
+                {
+                    // 屏幕坐标取样（反射相机在投影里左右翻过一次，u 翻回来），水纹轻微扰动
+                    float2 suv = GetNormalizedScreenSpaceUV(i.clip);
+                    float ripple = Noise(i.world.xz * 3.1 + time * 0.12) - 0.5;
+                    suv += normal.xz * 0.015 + float2(ripple, -ripple) * 0.006;
+                    suv.x = 1.0 - suv.x;
+                    float3 mirrored = SAMPLE_TEXTURE2D(_PT3D_PlanarReflection, sampler_PT3D_PlanarReflection, saturate(suv)).rgb;
+                    float fresnel = 0.22 + 0.78 * pow(1.0 - saturate(dot(normal, view)), 3.0);
+                    color = lerp(color, color * 0.55 + mirrored * 0.9, saturate(fresnel * _PT3D_PlanarReflectionStrength));
+                }
                 color += i.color * _Glow;
                 float fog = max(1.0 - exp(-distanceToEye * 0.078 * _StageSequence.z), smoothstep(13.0, 19.5, distanceToEye));
                 float3 water = lerp(float3(0.003,0.022,0.031), float3(0.012,0.119,0.164),

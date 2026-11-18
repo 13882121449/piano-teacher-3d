@@ -54,7 +54,7 @@ namespace PianoTeacher3D.UI
 
             var piano = new GameObject("Piano");
             piano.transform.SetParent(transform, false);
-            var keyMap = piano.AddComponent<PianoKeyMap>();
+            var keyMap = piano.AddComponent<PianoKeyMap>();   // arch-ok: 主菜单背景只展示静态琴体，不参与课程调度
             keyMap.BuildKeys();
             piano.transform.localPosition = new Vector3(-keyMap.TotalWidth * 0.5f, 0f, 0f);
 
@@ -84,18 +84,30 @@ namespace PianoTeacher3D.UI
             if (reduced) PlaceCamera(0f);
         }
 
+        // 2026-11-18：鼠标视差——镜头随指针轻微偏转（左右 ±3.5°、上下 ±2°），弹簧跟随，像隔着玻璃看海
+        private Vector2 _parallax, _parallaxVel;
+
         private void Update()
         {
             if (_reducedMotion || _camera == null) return;
-            _time += Time.unscaledDeltaTime;
+            float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
+            _time += dt;
+            Vector2 target = Vector2.zero;
+            if (Screen.width > 0 && Screen.height > 0 && !Application.isBatchMode)
+            {
+                Vector3 mouse = Input.mousePosition;
+                target = new Vector2(Mathf.Clamp(mouse.x / Screen.width * 2f - 1f, -1f, 1f),
+                                     Mathf.Clamp(mouse.y / Screen.height * 2f - 1f, -1f, 1f));
+            }
+            PianoTeacher3D.UI.UIMotion.Spring(ref _parallax, ref _parallaxVel, target, 1.2f, 1f, dt);
             PlaceCamera(_time);
         }
 
         private void PlaceCamera(float time)
         {
             float phase = time * DriftSpeed * Mathf.PI * 2f;
-            float yaw = (BaseYaw + Mathf.Sin(phase) * YawSwing) * Mathf.Deg2Rad;
-            float pitch = (BasePitch + Mathf.Sin(phase * 0.5f + 1.3f) * PitchSwing) * Mathf.Deg2Rad;
+            float yaw = (BaseYaw + Mathf.Sin(phase) * YawSwing - _parallax.x * 3.5f) * Mathf.Deg2Rad;
+            float pitch = (BasePitch + Mathf.Sin(phase * 0.5f + 1.3f) * PitchSwing - _parallax.y * 2f) * Mathf.Deg2Rad;
             var offset = new Vector3(Mathf.Sin(yaw) * Mathf.Cos(pitch), Mathf.Sin(pitch),
                 Mathf.Cos(yaw) * Mathf.Cos(pitch));
             var t = _camera.transform;

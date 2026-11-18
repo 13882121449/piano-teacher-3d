@@ -13,6 +13,9 @@ namespace PianoTeacher3D.Tests
         public IEnumerator Grand_PreservesKeyboardAndProvidesMovingPedalContact()
         {
             var piano = new GameObject("GrandPianoTest");
+            // 本用例验证保留的低轮廓三角琴外壳；2026-11-18 起默认外壳是竖琴钢琴（见 Harp_* 用例）
+            bool harp = PianoKeyMap.UseHarpCase;
+            PianoKeyMap.UseHarpCase = false;
             try
             {
                 var keys = piano.AddComponent<PianoKeyMap>();
@@ -105,9 +108,47 @@ namespace PianoTeacher3D.Tests
             }
             finally
             {
+                PianoKeyMap.UseHarpCase = harp;
                 Object.Destroy(piano);
             }
 
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Harp_KeepsKeyboardStringsPerKeyAndLegsOnFloor()
+        {
+            var piano = new GameObject("HarpPianoTest");
+            bool harp = PianoKeyMap.UseHarpCase;
+            PianoKeyMap.UseHarpCase = true;
+            try
+            {
+                var keys = piano.AddComponent<PianoKeyMap>();
+                keys.BuildKeys();
+                var before = keys.KeyRoots.ToDictionary(p => p.Key, p => p.Value.localPosition);
+                keys.SetUnderwaterAppearance(true);
+                var shell = piano.transform.Find("PianoCase/CinematicPiano");
+                Assert.IsNotNull(shell);
+                var body = shell.Find("HarpBody").GetComponent<MeshFilter>().sharedMesh.bounds;
+                var strings = shell.Find("HarpStrings");
+                Assert.IsNotNull(strings, "竖琴钢琴应有外露的琴弦");
+                Assert.IsNotNull(strings.GetComponent<HarpStringVibration>(), "琴弦应能随按键振动");
+                var uvs = new System.Collections.Generic.List<Vector2>();
+                strings.GetComponent<MeshFilter>().sharedMesh.GetUVs(0, uvs);
+                Assert.AreEqual(PianoKeyMap.KeyCount, uvs.Select(uv => Mathf.RoundToInt(uv.x)).Distinct().Count(), "88 根弦，每键一根");
+                Assert.That(body.min.y, Is.InRange(-0.003f, 0.012f), "涡卷腿应落到舞台地面");
+                Assert.Greater(body.max.y, 1.6f, "立柱与琴颈要高出演奏者头部");
+                Assert.Less(shell.Find("HarpStrings").GetComponent<MeshFilter>().sharedMesh.bounds.max.z, -0.08f,
+                    "琴弦在键盘后方，不挡手");
+                foreach (var kv in before)
+                    Assert.AreEqual(kv.Value, keys.KeyRoots[kv.Key].localPosition, "换琴壳不能移动琴键");
+                Assert.IsNotNull(keys.RightPedalContact, "踏板接触点保留");
+            }
+            finally
+            {
+                PianoKeyMap.UseHarpCase = harp;
+                Object.Destroy(piano);
+            }
             yield return null;
         }
 

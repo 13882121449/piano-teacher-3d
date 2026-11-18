@@ -319,6 +319,9 @@ namespace PianoTeacher3D.Piano
             BuildPedals(frame, dark, brass);
         }
 
+        /// <summary>水下演奏外壳是否使用竖琴钢琴（默认 true；false 退回低轮廓三角琴）。</summary>
+        public static bool UseHarpCase = true;
+
         /// <summary>切换演奏外壳，键盘、踏板和琴凳参考点始终共用。</summary>
         public void SetUnderwaterAppearance(bool enabled, bool legacy = false)
         {
@@ -332,8 +335,14 @@ namespace PianoTeacher3D.Piano
                     if (piece.TryGetComponent<Renderer>(out _) || piece.name == "CastFrame")
                         _legacyParts.Add(piece);
                 _cinematicCase = CreateAnchor(_caseRoot, "CinematicPiano", Vector3.zero);
-                new CinematicPianoCase(_cinematicCase, TotalWidth, KeybedHeight, Track, CreateMaterial)
-                    .Build();
+                // 2026-11-18：演奏外壳换成竖琴钢琴（外露 88 根弦，随按键振动发光）；
+                // 原低轮廓三角琴外壳 CinematicPianoCase 保留，UseHarpCase = false 时仍可切回。
+                if (UseHarpCase)
+                    new HarpPianoCase(_cinematicCase, TotalWidth, KeybedHeight, Track, CreateMaterial, _ownedMaterials)
+                        .Build();
+                else
+                    new CinematicPianoCase(_cinematicCase, TotalWidth, KeybedHeight, Track, CreateMaterial)
+                        .Build();
             }
             if (useLegacy && _underwaterCase == null) BuildUnderwaterCase();
 

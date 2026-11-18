@@ -115,6 +115,48 @@ namespace PianoTeacher3D.Characters
         }
 
         /// <summary>
+        /// 按 Humanoid 映射校验预制体（VRM 等不使用 Biped 命名的模型）：
+        /// Humanoid Avatar 有效、材质有主贴图、两手肩 / 上臂 / 前臂 / 手与五指各三节都已映射。
+        /// </summary>
+        public static CharacterValidation ValidateHumanoidPrefabRoot(GameObject root)
+        {
+            if (root == null) return CharacterValidation.Fail("角色预制体为空。");
+            try
+            {
+                var animator = root.GetComponentInChildren<Animator>(true);
+                if (animator == null) return CharacterValidation.Fail("角色缺少 Animator 组件。");
+                var avatar = animator.avatar;
+                if (avatar == null || !avatar.isValid || !avatar.isHuman)
+                    return CharacterValidation.Fail("角色没有有效的 Humanoid Avatar。");
+
+                var materials = ValidateMaterials(root);
+                if (!materials.Ok) return materials;
+
+                var missing = new List<string>(4);
+                foreach (var id in new[]
+                         {
+                             HumanBodyBones.LeftShoulder, HumanBodyBones.LeftUpperArm, HumanBodyBones.LeftLowerArm,
+                             HumanBodyBones.LeftHand, HumanBodyBones.RightShoulder, HumanBodyBones.RightUpperArm,
+                             HumanBodyBones.RightLowerArm, HumanBodyBones.RightHand
+                         })
+                {
+                    if (animator.GetBoneTransform(id) == null) missing.Add(id.ToString());
+                }
+                for (var id = HumanBodyBones.LeftThumbProximal; id <= HumanBodyBones.RightLittleDistal; id++)
+                {
+                    if (animator.GetBoneTransform(id) == null) missing.Add(id.ToString());
+                }
+                if (missing.Count == 0) return CharacterValidation.Pass;
+                return CharacterValidation.Fail("缺少骨骼 " + string.Join("、", missing.GetRange(0, Mathf.Min(3, missing.Count))) +
+                                                (missing.Count > 3 ? $" 等 {missing.Count} 根" : string.Empty));
+            }
+            catch (Exception e)
+            {
+                return CharacterValidation.Fail("角色预制体校验异常：" + e.Message);
+            }
+        }
+
+        /// <summary>
         /// 材质贴图完整性（方案 7.1「必要的材质、纹理…齐全」）。
         ///
         /// <para>

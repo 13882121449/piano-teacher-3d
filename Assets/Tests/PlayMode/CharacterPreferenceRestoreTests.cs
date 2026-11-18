@@ -40,16 +40,16 @@ namespace PianoTeacher3D.Tests.PlayMode
             // 激活写实女性角色：走 Prefab 路径加载 Resources 里的 FBX；
             // 成功触发 OnCharacterViewChanged → ID 写进会话内存偏好（与生产持久化同一代码路径）
             var registry = session.CharacterRegistry;
-            Assert.IsTrue(registry.TryGet(CharacterRegistry.RocketboxFemaleId, out CharacterProfile female),
+            Assert.IsTrue(registry.TryGet(CharacterRegistry.VroidGenkiId, out CharacterProfile female),
                 "写实女性角色必须在注册表中");
             CharacterSwitchResult activate = session.ActivateCharacter(female);
             Assert.IsTrue(activate.Succeeded, "内置角色切换必须成功：" + activate.Error);
-            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, session.CurrentCharacterView.CharacterId);
+            Assert.AreEqual(CharacterRegistry.VroidGenkiId, session.CurrentCharacterView.CharacterId);
 
             // 无参重载读会话内存偏好（刚被持久化为卡通 ID）→ 恢复回同一角色
             session.RestoreCharacter();
 
-            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, session.CurrentCharacterView.CharacterId,
+            Assert.AreEqual(CharacterRegistry.VroidGenkiId, session.CurrentCharacterView.CharacterId,
                 "恢复后必须回到持久化的角色");
         }
 
@@ -66,9 +66,9 @@ namespace PianoTeacher3D.Tests.PlayMode
             // 贴图已入库、门禁解除（原注释约定「届时移除 Expect、恢复直接成功」，此处即兑现）。
             // 降级路径（恢复失败 → LogWarning + 回落内置 0）仍保留在 RestoreCharacter 里，
             // 只是当前资产不再触发它。
-            session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+            session.RestoreCharacter(CharacterRegistry.VroidGenkiId);
 
-            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, session.CurrentCharacterView.CharacterId,
+            Assert.AreEqual(CharacterRegistry.VroidGenkiId, session.CurrentCharacterView.CharacterId,
                 "贴图入库后写实女性应可直接恢复（不再回落内置角色）");
         }
 

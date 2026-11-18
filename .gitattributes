@@ -28,6 +28,7 @@
 *.psd   binary
 *.fbx   binary
 *.glb   binary
+*.vrm   binary
 *.wav   binary
 *.mp3   binary
 

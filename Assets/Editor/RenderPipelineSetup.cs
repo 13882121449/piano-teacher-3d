@@ -15,7 +15,7 @@ namespace PianoTeacher3D.EditorTools
     /// 职责：① 创建 Renderer Data（含 SSAO Renderer Feature）；② 创建 Standard / High 两档
     /// Pipeline Asset 并关联 Renderer；③ 色彩空间切 Linear（一次性，触发资产重导入）；
     /// ④ 按设备建议把对应档位赋给 <c>GraphicsSettings.defaultRenderPipelineAsset</c>。
-    /// 与 <c>RocketboxAvatarSetup</c> 同一套 <c>-executeMethod</c> 模式：batchmode 可跑、失败非零退出。
+    /// 与项目其他编辑器工具同一套 <c>-executeMethod</c> 模式：batchmode 可跑、失败非零退出。
     /// </para>
     /// <para>
     /// 用法：<c>Unity.exe -batchmode -nographics -projectPath &lt;项目&gt; -executeMethod

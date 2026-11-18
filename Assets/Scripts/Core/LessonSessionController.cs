@@ -196,6 +196,33 @@ namespace PianoTeacher3D.Core
                 _ => "海底序奏"
             };
         public PracticeHand PracticeHand => _practiceHand;
+
+        // 2026-11-18 教学模块（下落音符 / 等待模式 / 评分 / 五线谱 / 练习记录）需要的只读入口
+        private PianoTeacher3D.Teaching.TeachingDirector _teaching;
+
+        /// <summary>教学总控（场景搭好后可用）。</summary>
+        public PianoTeacher3D.Teaching.TeachingDirector Teaching => _teaching;
+
+        /// <summary>当前曲目的全部音符（未按练习手过滤）；没有曲目时为 null。</summary>
+        public IReadOnlyList<MidiNoteEvent> SongNotes => HasSong ? _currentSong.Notes : null;
+
+        /// <summary>开始播放前演奏者仍在准备首个手型。</summary>
+        public bool IsPreparing => _timeline != null && _timeline.IsPreparing;
+
+        /// <summary>A-B 循环起点（未循环时为 0）。</summary>
+        public float LoopStart => _timeline != null ? _timeline.LoopStart : 0f;
+
+        /// <summary>循环跳回起点时触发（参数：跳回后的时间）。</summary>
+        public event Action<float> OnLooped;
+
+        /// <summary>等待模式：让时间轴原地停住 / 放开（只影响推进，不改变播放状态）。</summary>
+        public void SetTeachingHold(bool hold)
+        {
+            if (_timeline != null) _timeline.Hold = hold;
+        }
+
+        /// <summary>琴键映射。</summary>
+        public PianoKeyMap KeyMap => _keyMap;
         public bool IsLooping => _timeline != null && _timeline.IsLooping;
         public int CurrentAvatarIndex => _avatar != null ? _avatar.CurrentIndex : 0;
 
@@ -694,6 +721,9 @@ namespace PianoTeacher3D.Core
             // 10. UI（控制栏 + 角色选择；状态栏由控制栏内部装配）
             if (!_guidedPractice)
             {
+                _timeline.Looped += t => OnLooped?.Invoke(t);
+                _teaching = gameObject.AddComponent<PianoTeacher3D.Teaching.TeachingDirector>();
+                _teaching.Initialize(this, _keyMap);
                 var controlsUI = gameObject.AddComponent<PianoTeacher3D.UI.LessonControlsUI>();
                 controlsUI.Initialize(this);
                 var avatarUI = gameObject.AddComponent<PianoTeacher3D.UI.AvatarSelectionUI>();
@@ -704,7 +734,10 @@ namespace PianoTeacher3D.Core
             _scheduler.OnNoteOn += _keyAnimator.OnNoteOn;
             _scheduler.OnNoteOn += note =>
             {
-                if (_timeline.State == PlaybackState.Playing) _audio.OnNoteOn(note);
+                if (_timeline.State != PlaybackState.Playing) return;
+                // 学生在弹练习手时，示范不再替这只手出声（两份声音会叠在一起）
+                if (_teaching != null && _teaching.ShouldMuteDemo(note)) return;
+                _audio.OnNoteOn(note);
             };
             _scheduler.OnNoteOn += _handIK.OnNoteOn;
             _scheduler.OnNoteOn += _fingerPose.OnNoteOn;
@@ -1780,6 +1813,11 @@ namespace PianoTeacher3D.Core
                 SwitchAvatar(0);
                 return;
             }
+
+            // 旧偏好里的角色已不在角色库（例如 2026-11-18 移除的写实角色）：改用默认演奏者 genki
+            if (_characterRegistry != null && _characterRegistry.TryGet(CharacterRegistry.VroidGenkiId, out CharacterProfile genki) &&
+                ActivateCharacter(genki).Succeeded)
+                return;
 
             // 旧偏好文件（无 ID）或 ID 已不在注册表：走既有下标路径（保持向后兼容）
             SwitchAvatar(Mathf.Clamp(_prefs != null ? _prefs.AvatarIndex : 0, 0, AvatarManager.AvatarCount - 1));

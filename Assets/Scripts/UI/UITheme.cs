@@ -1278,6 +1278,8 @@ namespace PianoTeacher3D.UI
 
             ApplyButtonState(btn, ButtonState.Default, style);
             SetButtonTooltip(btn, string.IsNullOrEmpty(tooltip) ? null : ComposeTooltip(tooltip, shortcut));
+            // 2026-11-18：所有按钮统一的「跟手」动效（悬停放大、按下回弹、光斑跟随、按压光环）
+            UIPressMotion.Attach(btn);
             return btn;
         }
 
@@ -1657,6 +1659,7 @@ namespace PianoTeacher3D.UI
             slider.minValue = 0f;
             slider.maxValue = 1f;
             slider.value = 0f;
+            UISliderMotion.Attach(slider);   // 2026-11-18：滑钮悬停放大、拖动再大一档
             return slider;
         }
 
@@ -1885,6 +1888,7 @@ namespace PianoTeacher3D.UI
             CameraMode.Closeup => "手部特写",
             CameraMode.Full => "全景",
             CameraMode.Pedal => "踏板特写",
+            CameraMode.Back => "背影",
             _ => "自由观察"
         };
 

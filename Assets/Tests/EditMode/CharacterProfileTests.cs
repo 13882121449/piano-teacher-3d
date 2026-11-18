@@ -260,25 +260,27 @@ namespace PianoTeacher3D.Tests
         [Test]
         public void SupportsSlot_ReflectsDeclaredSlots()
         {
-            var profile = CharacterRegistry.CreateBuiltIn(1);
+            // 2026-11-18：内置只剩 genki（VRM），外观由 MToon 材质决定，只声明缩略图槽位
+            var profile = CharacterRegistry.CreateBuiltIn(0);
             _created.Add(profile);
 
             Assert.IsTrue(profile.SupportsSlot(AppearanceSlot.Thumbnail));
-            Assert.IsTrue(profile.SupportsSlot(AppearanceSlot.BodyTint));
+            Assert.IsFalse(profile.SupportsSlot(AppearanceSlot.BodyTint));
             Assert.IsFalse(profile.SupportsSlot(AppearanceSlot.FaceTexture));
+            Assert.IsNull(CharacterRegistry.CreateBuiltIn(1), "越界索引返回 null");
         }
 
         [Test]
-        public void RocketboxProfile_DeclaresLicenseAndResourcePath()
+        public void GenkiProfile_DeclaresLicenseAndResourcePath()
         {
-            var profile = CharacterRegistry.CreateRocketbox();
+            var profile = CharacterRegistry.CreateVroidGenkiProfile();
             _created.Add(profile);
 
             Assert.AreEqual(CharacterSource.Prefab, profile.Source);
-            Assert.AreEqual("MIT", profile.LicenseName);
+            StringAssert.Contains("可商用", profile.LicenseName);
             Assert.IsFalse(string.IsNullOrEmpty(profile.LicenseUrl));
-            StringAssert.Contains("Rocketbox", profile.ResourcesPath);
-            StringAssert.Contains("坐姿", profile.Notes);
+            StringAssert.Contains("VRoid", profile.ResourcesPath);
+            StringAssert.Contains("MToon10", profile.Notes);
             Assert.IsTrue(CharacterAssetValidator.ValidateProfile(profile).Ok);
         }
     }

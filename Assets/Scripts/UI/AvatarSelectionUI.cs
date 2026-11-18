@@ -73,10 +73,7 @@ namespace PianoTeacher3D.UI
         private Text _licenseText;
         private Button _photoButton;
         private PhotoCustomizationPanel _photoPanel;
-        private PhotoAvatarPanel _createPhotoPanel;
         private Button _pageButton;
-        private Button _archivePhotoButton;
-        private string _confirmArchiveId;
         private int _page;
         private Button _closeButton;
         private GameObject _panelTrigger;
@@ -131,7 +128,6 @@ namespace PianoTeacher3D.UI
         {
             // Esc：有浮层时不抢按键（由状态栏 / 主控制层优先处理）
             if (!IsPanelOpen) return;
-            if (_createPhotoPanel != null && _createPhotoPanel.IsOpen) return;
             if (UITheme.ConsumeEscape()) ShowPanel(false);
         }
 
@@ -150,7 +146,10 @@ namespace PianoTeacher3D.UI
                 GoToCurrentPage();
             }
 
-            _panel.gameObject.SetActive(show);
+            // 2026-11-18：角色面板弹出 / 收回动效
+            UIAppear.Attach(_panel.gameObject, 0f, 0.94f);
+            if (show) _panel.gameObject.SetActive(true);
+            else UIAppear.Hide(_panel.gameObject);
             if (show) Highlight(CurrentCharacterId());
             if (events != null)
                 events.SetSelectedGameObject(show ? _closeButton.gameObject : _panelTrigger);
@@ -220,18 +219,7 @@ namespace PianoTeacher3D.UI
                 16f, CardTop + CardHeight + 8f, PanelWidth - 32f, 32f);
             _photoButton.interactable = hasCustomization;
 
-            var addPhoto = UITheme.CreateButton(_panel, "从照片创建…", Vector2.zero,
-                new Vector2(220f, 32f), OpenPhotoAvatarPanel, UITheme.FontSmall, ButtonStyle.Primary,
-                "在本地用正脸照片创建一位新的演奏角色");
-            UITheme.PlaceTopLeft(addPhoto.GetComponent<RectTransform>(), 16f, CardTop + CardHeight + 46f, 220f, 32f);
-            addPhoto.interactable = _session != null;
-
-            _archivePhotoButton = UITheme.CreateButton(_panel, "移出角色库", Vector2.zero,
-                new Vector2(112f, 32f), ArchiveCurrentPhoto, UITheme.FontCaption, ButtonStyle.Ghost,
-                "将当前照片角色移到本地回收目录");
-            UITheme.PlaceTopRight(_archivePhotoButton.GetComponent<RectTransform>(), 16f,
-                CardTop + CardHeight + 46f, 112f, 32f);
-            _archivePhotoButton.gameObject.SetActive(false);
+            // 2026-11-18：演奏角色只保留 genki（VRM），「从照片创建角色」依赖已移除的写实模型，一并移除
 
             _pageButton = UITheme.CreateButton(_panel, "下一页", Vector2.zero,
                 new Vector2(88f, 26f), NextPage, UITheme.FontCaption, ButtonStyle.Ghost);
@@ -340,55 +328,6 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        private void OpenPhotoAvatarPanel()
-        {
-            if (_session == null) return;
-            if (_createPhotoPanel == null)
-            {
-                var go = new GameObject("PhotoAvatarCreator");
-                go.transform.SetParent(transform, false);
-                _createPhotoPanel = go.AddComponent<PhotoAvatarPanel>();
-                _createPhotoPanel.Initialize(SavePhotoAvatar);
-            }
-            _createPhotoPanel.Show();
-        }
-
-        private string SavePhotoAvatar(PhotoAvatarData data)
-        {
-            if (_registry == null || _session == null) return "角色库还未准备好。";
-            if (!_registry.SavePhotoAvatar(data, out var profile, out string error)) return error;
-            var result = _session.ActivateCharacter(profile);
-            if (!result.Succeeded)
-            {
-                if (!_registry.ArchivePhotoAvatar(profile, out string archiveError))
-                    return result.Error + " " + archiveError;
-                return result.Error;
-            }
-            GoToCurrentPage();
-            BuildCards();
-            Highlight(CurrentCharacterId());
-            return null;
-        }
-
-        private void ArchiveCurrentPhoto()
-        {
-            if (_session == null || !_registry.TryGet(CurrentCharacterId(), out var profile) ||
-                profile.PhotoAvatar == null) return;
-            if (_confirmArchiveId != profile.CharacterId)
-            {
-                _confirmArchiveId = profile.CharacterId;
-                UITheme.GetLabel(_archivePhotoButton).text = "确认移出";
-                return;
-            }
-
-            if (!_registry.TryGet(CharacterRegistry.RocketboxFemaleId, out var fallback)) return;
-            var result = _session.ActivateCharacter(fallback);
-            if (!result.Succeeded || !_registry.ArchivePhotoAvatar(profile, out _)) return;
-            _page = 0;
-            BuildCards();
-            Highlight(CurrentCharacterId());
-        }
-
         /// <summary>面板里只放前 <paramref name="max"/> 个字符，完整原因进日志，避免文本溢出。</summary>
         private static string Truncate(string text, int max)
         {
@@ -447,7 +386,6 @@ namespace PianoTeacher3D.UI
 
         private static string BuildTag(CharacterProfile profile)
         {
-            if (profile.PhotoAvatar != null) return "照片拟合 · 本地";
             string style = profile.Style switch
             {
                 CharacterStyle.Realistic => "写实",
@@ -503,17 +441,6 @@ namespace PianoTeacher3D.UI
 
         private void Highlight(string activeCharacterId)
         {
-            if (_archivePhotoButton != null)
-            {
-                bool photo = _registry != null && _registry.TryGet(activeCharacterId, out var current) &&
-                    current.PhotoAvatar != null;
-                _archivePhotoButton.gameObject.SetActive(photo);
-                if (activeCharacterId != _confirmArchiveId)
-                {
-                    _confirmArchiveId = null;
-                    UITheme.GetLabel(_archivePhotoButton).text = "移出角色库";
-                }
-            }
             for (int i = 0; i < _cards.Count; i++)
             {
                 var profile = _profiles[i];

@@ -114,3 +114,8 @@ SHA-256 为 `55f4c05e84875c33f6d80d607b8b583f2a5829d96ec07b31a86af074f4163c33`�
 | 资源 | 文件 | 来源 | 许可证 | 再分发 / 署名 | 说明 |
 |---|---|---|---|---|---|
 | 思源黑体 SC（Noto Sans SC）Regular / Medium / Bold | `Assets/Resources/Fonts/NotoSansSC-*.otf`（各约 8.3 MB） | https://github.com/notofonts/noto-cjk （`Sans/SubsetOTF/SC`，main 分支） | SIL Open Font License 1.1（全文见 `Docs/licenses/NotoSansSC-OFL.txt`） | 允许随软件嵌入和再分发；不得单独出售字体文件；保留许可证文本 | 替换内置 `LegacyRuntime.ttf`，覆盖简体中文常用字；iOS 的苹方 / SF 字体不能随软件分发，因此不用 |
+| genki（VRoid 官方样例 AvatarSample_A，VRM 0.x） | `Assets/Characters/VRoid/Resources/Characters/VRoid/Genki.vrm`（约 26.8 MB） | VRoid Studio 1.26 导出，作者 VRoid Project；用户提供的 `genki.vrm` | VRoid Hub 条款：任何人可用、个人与法人可商用、可修改、可再分发、无需署名（模型 meta 内 `otherPermissionUrl` 原文） | 无需署名；可随软件分发 | 2026-11-18 起唯一的演奏者；导入时由 UniVRM 迁移为 VRM 1.0、材质为 URP MToon10 |
+| UniVRM（`com.vrmc.gltf` + `com.vrmc.vrm`）v0.131.4 | `Packages/manifest.json`（git URL 锁定标签，不入库源码） | https://github.com/vrm-c/UniVRM | MIT | 保留版权声明 | VRM 导入、MToon10 着色器、SpringBone、表情；依赖 test-framework 1.4.6 |
+
+
+> 2026-11-18：Microsoft Rocketbox 三个写实角色（女性 / 男性 / 儿童）及其贴图、演出服着色器、照片头像功能已按用户要求移除，文件已放入回收站，git 历史中可找回；上文第 1 节开头对 Rocketbox 演出服贴图的说明仅作历史记录。

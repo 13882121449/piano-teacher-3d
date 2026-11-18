@@ -52,6 +52,8 @@ namespace PianoTeacher3D.UI
         private Button _restartBtn;
         private UISegmentedControl _cameraSeg;
         private RectTransform _morePanel;
+        private Button _teachBtn;
+        private TeachingPanelUI _teachUI;
         private Button _moreBtn;
         private bool _moreOpen;
 
@@ -132,10 +134,11 @@ namespace PianoTeacher3D.UI
         private const float BeatDotsWidth = 52f;
         private const float DisplayWidth = 84f;
         private const float AnalysisWidth = 68f;
-        private const float CameraWidth = 240f;
+        private const float CameraWidth = 300f;
 
         // ---- 「更多」浮层：放低频工具，底栏只留播放 / 时间 / 进度 / 手型 / 速度 / 循环 ----
-        private const float MoreWidth = 64f;               // 底栏上的「更多」胶囊宽度
+        private const float MoreWidth = 64f;
+        private const float TeachWidth = 64f;              // 2026-11-18：底栏「教学」胶囊               // 底栏上的「更多」胶囊宽度
         private const float MorePanelWidth = 404f;
         private const float MorePanelHeight = 148f;
         private const float MorePanelGap = UITheme.Space8; // 与底栏之间的缝
@@ -144,7 +147,7 @@ namespace PianoTeacher3D.UI
         private static readonly float[] SpeedOptions = { 0.5f, 1f, 1.5f };
         private static readonly string[] SpeedLabels = { "0.5×", "1.0×", "1.5×" };
         private static readonly string[] HandLabels = { "双手", "左手", "右手" };
-        private static readonly string[] CameraLabels = { "特写", "全景", "自由", "踏板" };
+        private static readonly string[] CameraLabels = { "特写", "全景", "自由", "踏板", "背影" };
 
         // ==================== 初始化 / 事件连线 ====================
 
@@ -283,10 +286,12 @@ namespace PianoTeacher3D.UI
                 bool spaceAvailable = !UITheme.IsSelectableFocused();
                 if (spaceAvailable && Input.GetKeyDown(KeyCode.Space)) TogglePlay();
                 if (Input.GetKeyDown(KeyCode.LeftBracket)) Restart();
-                if (Input.GetKeyDown(KeyCode.R)) _session.ResetCamera();
-                if (Input.GetKeyDown(KeyCode.H)) CycleHighlight();
-                if (Input.GetKeyDown(KeyCode.T)) _session.ToggleDisplayMode();
-                if (Input.GetKeyDown(KeyCode.M)) ToggleMetronome();
+                // 电脑键盘弹奏开启时字母键用来弹琴，字母快捷键让位（按钮入口仍可用）
+                bool letters = !PianoTeacher3D.Teaching.TeachingDirector.KeyboardPlayActive;
+                if (letters && Input.GetKeyDown(KeyCode.R)) _session.ResetCamera();
+                if (letters && Input.GetKeyDown(KeyCode.H)) CycleHighlight();
+                if (letters && Input.GetKeyDown(KeyCode.T)) _session.ToggleDisplayMode();
+                if (letters && Input.GetKeyDown(KeyCode.M)) ToggleMetronome();
                 if (Input.GetKeyDown(KeyCode.F1) && _status != null) _status.ToggleHelp();
                 if (UITheme.ConsumeTab()) ToggleAnalysis();
             }
@@ -594,6 +599,7 @@ namespace PianoTeacher3D.UI
             _cameraSeg.SetOptionTooltip(1, "全景：观察坐姿、双臂与完整键盘关系");
             _cameraSeg.SetOptionTooltip(2, "自由观察：右键拖动旋转、滚轮缩放，R 重置视角");
             _cameraSeg.SetOptionTooltip(3, "踏板特写：观察右脚和延音踏板");
+            _cameraSeg.SetOptionTooltip(4, "背影：从演奏者身后看竖琴钢琴和海");
             UITheme.PlaceTopRight(_cameraSeg.Rect, UITheme.Layout.ScreenMargin,
                 UITheme.Layout.ScreenMargin + UITheme.Layout.StatusBarHeight + UITheme.Space8,
                 CameraWidth, UITheme.HeightInput);
@@ -661,6 +667,16 @@ namespace PianoTeacher3D.UI
             _moreBtn.gameObject.name = "Btn_更多";
             _moreBtn.name = "Btn_更多";
             UIKit.SetChip(_moreBtn, "更多", "", false, true);
+
+            // 2026-11-18：教学工具（下落音符 / 五线谱 / 音名 / 等待模式 / 电脑键盘 / A-B 循环 / 渐进提速 / 手型要点）
+            _teachBtn = UIKit.Chip(_playerBar, "TeachChip", TeachWidth, ToggleTeaching,
+                "教学工具：下落音符 / 五线谱 / 等待模式与评分 / A-B 循环 / 手型要点");
+            _teachBtn.gameObject.name = "Btn_教学";
+            UIKit.SetChip(_teachBtn, "教学", "", false, true);
+            if (_session.Teaching != null)
+                _teachUI = TeachingPanelUI.Create(_session, (RectTransform)_canvas.transform, _playerBar);
+            // 2026-11-18：「更多」浮层从右下角（锚点）弹出、收回
+            UIAppear.Attach(_morePanel.gameObject, 0f, 0.92f);
             _morePanel.gameObject.SetActive(false);
 
             // 方向键可以跨底栏、视角、循环标记与更多面板移动。
@@ -691,17 +707,29 @@ namespace PianoTeacher3D.UI
             SetMoreOpen(!_moreOpen);
         }
 
+        private void ToggleTeaching() => SetTeachingOpen(_teachUI == null || !_teachUI.IsOpen);
+
+        private void SetTeachingOpen(bool open)
+        {
+            if (_teachUI == null) return;
+            if (open) SetMoreOpen(false);
+            _teachUI.SetOpen(open);
+            UIKit.SetChip(_teachBtn, "教学", "", open, true);
+        }
+
         private void SetMoreOpen(bool open)
         {
             if (_moreOpen == open) return;
             if (open)
             {
+                if (_teachUI != null && _teachUI.IsOpen) SetTeachingOpen(false);
                 ShowAnalysis(false);
                 ResolveAvatarUI();
                 if (_avatarUI != null && _avatarUI.IsPanelOpen) _avatarUI.ShowPanel(false);
             }
             _moreOpen = open;
-            _morePanel.gameObject.SetActive(open);
+            if (open) _morePanel.gameObject.SetActive(true);
+            else UIAppear.Hide(_morePanel.gameObject);
             UIKit.SetChip(_moreBtn, "更多", "", open, true);
             var focus = open && !_highlightChip.interactable ? _displayChip : _highlightChip;
             EventSystem.current?.SetSelectedGameObject(open ? focus.gameObject : _moreBtn.gameObject);
@@ -724,7 +752,12 @@ namespace PianoTeacher3D.UI
             // ---- 右簇（从右往左）：更多 → 循环 → 速度 → 手型 ----
             float rx = pad;
             UITheme.PlaceRight(_moreBtn.GetComponent<RectTransform>(), rx, chipY, MoreWidth, chipH);
-            rx += MoreWidth + UITheme.Layout.ChipGapGroup;
+            rx += MoreWidth + UITheme.Layout.ChipGapInner;
+            if (_teachBtn != null)
+            {
+                UITheme.PlaceRight(_teachBtn.GetComponent<RectTransform>(), rx, chipY, TeachWidth, chipH);
+                rx += TeachWidth + UITheme.Layout.ChipGapGroup;
+            }
             UITheme.PlaceRight(_loopChip.GetComponent<RectTransform>(), rx, chipY, LoopWidth, chipH);
             rx += LoopWidth + UITheme.Layout.ChipGapInner;
             UITheme.PlaceRight(_speedChip.GetComponent<RectTransform>(), rx, chipY, SpeedWidth, chipH);
@@ -785,6 +818,7 @@ namespace PianoTeacher3D.UI
                 UITheme.PlaceRight(_morePanel, pad,
                     barHeight + MorePanelGap + loopOffset, MorePanelWidth, MorePanelHeight);
                 LayoutMorePanel();
+                _teachUI?.Layout(pad, barHeight + MorePanelGap + loopOffset);
             }
         }
 
@@ -1121,6 +1155,7 @@ namespace PianoTeacher3D.UI
             ResolveAvatarUI();
             if (_avatarUI != null && _avatarUI.IsPanelOpen) { _avatarUI.ShowPanel(false); return; }
             if (_moreOpen) ToggleMore();
+            else if (_teachUI != null && _teachUI.IsOpen) SetTeachingOpen(false);
         }
 
         private void BackToLibrary()

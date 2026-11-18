@@ -153,6 +153,17 @@ namespace PianoTeacher3D.UI
             UITheme.PlaceTopRight(settings.GetComponent<RectTransform>(), UITheme.Space32, UITheme.Space16, 72f,
                 UITheme.HeightSmall);
 
+            // 2026-11-18：课程路线 + 今日练习 / 连续天数
+            var path = UIKit.TextButton(header, "课程", 72f, UITheme.HeightSmall, OpenLessonPath);
+            path.gameObject.name = "EntryCard_课程";
+            UITheme.PlaceTopRight(path.GetComponent<RectTransform>(), 326f, UITheme.Space16, 72f, UITheme.HeightSmall);
+            var progress = PianoTeacher3D.Teaching.PracticeProgressStore.Shared;
+            int todayMinutes = Mathf.FloorToInt(progress.SecondsOn(System.DateTime.Now) / 60f);
+            int streak = progress.StreakDays();
+            var stats = UIKit.Label(header, $"今日练习 {todayMinutes} 分钟  ·  连续 {streak} 天", UITheme.FontBodySmall,
+                UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "PracticeStats");
+            UITheme.PlaceTopLeft(stats.rectTransform, UITheme.Space32 + 156f, 14f, 240f, UITheme.HeightSmall);
+
             _motionToggle = UIKit.TextButton(header, "减少动效", 118f, UITheme.HeightSmall, ToggleMotion);
             _motionToggle.gameObject.name = "MenuMotionToggle";
             UITheme.PlaceTopRight(_motionToggle.GetComponent<RectTransform>(), 200f, UITheme.Space16, 118f,
@@ -218,6 +229,7 @@ namespace PianoTeacher3D.UI
         private void UpdateMotion()
         {
             bool reduced = PlayerPrefs.GetInt(PrefReduceMotion, 0) == 1;
+            UIMotion.Reduced = reduced;   // 界面弹簧动效与 3D 背景共用同一个开关
             if (_ribbon != null) _ribbon.GetComponent<MenuKeyRibbon>().SetReducedMotion(reduced);
             if (_room != null) _room.SetReducedMotion(reduced);
             UITheme.SetButtonLabel(_motionToggle, reduced ? "减少动效：开" : "减少动效：关");
@@ -226,6 +238,8 @@ namespace PianoTeacher3D.UI
         private void BuildPracticeHero(string practicePath, bool isResume)
         {
             var hero = UITheme.CreateRect(_content, "PracticeHero", Vector2.zero, Vector2.zero, UITheme.Transparent);
+            // 2026-11-18：进入主菜单时顶栏 → 主卡片 → 曲库依次浮现
+            UIAppear.Attach(hero.gameObject, 0.08f, 0.97f, new Vector2(0f, -18f));
             UITheme.StretchTop(hero, 0f, 0f, 0f, LibraryTop);
 
             float inset = _layoutWidth >= 920f ? 48f : 12f;
@@ -328,6 +342,9 @@ namespace PianoTeacher3D.UI
             UITheme.PlaceTopLeft(rule, UITheme.Space24, 56f, width - UITheme.Space24 * 2f, 1f);
 
             _overlay = layerGo;
+            // 2026-11-18：遮罩淡入、面板从中心弹出
+            UIAppear.Attach(layerGo, 0f, 1f);
+            UIAppear.Attach(panel.gameObject, 0f, 0.92f);
             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(close.gameObject);
             bodyTop = 72f;
             return panel;
@@ -336,9 +353,9 @@ namespace PianoTeacher3D.UI
         private void CloseOverlay()
         {
             if (_overlay == null) return;
-            _overlay.SetActive(false);
-            Destroy(_overlay);
+            var closing = _overlay;
             _overlay = null;
+            UIAppear.Hide(closing, () => Destroy(closing));
             SetBackgroundInteraction(true);
             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(_overlayTrigger);
             _overlayTrigger = null;
@@ -486,10 +503,61 @@ namespace PianoTeacher3D.UI
 
         // ---------- 单一曲库：内置、最近导入与失效文件 ----------
 
+        private List<string> _librarySongs = new List<string>();
+
+        /// <summary>课程路线：曲库按顺序排成关卡，每首给星级目标；上一课拿到 1 星解锁下一课。</summary>
+        private void OpenLessonPath()
+        {
+            var panel = CreateOverlay("OverlayLessonPath", 600f, 440f, "课程路线", out float bodyTop);
+            var store = PianoTeacher3D.Teaching.PracticeProgressStore.Shared;
+            var intro = UIKit.Label(panel, "接上 MIDI 键盘或在「教学」里开启电脑键盘弹奏，系统按准确率给星：80% 一星 · 90% 二星 · 原速 97% 三星",
+                UITheme.FontCaption, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "PathIntro");
+            UITheme.PlaceTopLeft(intro.rectTransform, UITheme.Space24, bodyTop, 552f, 18f);
+            bool unlocked = true;
+            int shown = Mathf.Min(_librarySongs.Count, 7);
+            for (int i = 0; i < shown; i++)
+            {
+                string songPath = _librarySongs[i];
+                var record = store.GetSong(songPath);
+                int stars = record != null ? record.Stars : 0;
+                float top = bodyTop + 28f + i * 46f;
+                string starText = new string('★', stars) + new string('☆', 3 - stars);
+                string goal = stars switch
+                {
+                    0 => "目标：准确率 80%",
+                    1 => "目标：准确率 90%",
+                    2 => "目标：原速 97%",
+                    _ => "已满星"
+                };
+                string best = record != null ? $"最佳 {record.BestAccuracy * 100f:0}%" : "未练习";
+                bool open = unlocked;
+                var row = UIKit.SecondaryButton(panel, $"{i + 1}.  {SongTitle(songPath)}", new Vector2(552f, 40f),
+                    () => { if (open) LoadLesson(songPath); }, open ? "开始这一课" : "完成上一课（1 星）后解锁", fontSize: UITheme.FontBody);
+                row.gameObject.name = "Lesson_" + (i + 1);
+                row.interactable = open;
+                UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), UITheme.Space24, top, 552f, 40f);
+                var label = UITheme.GetLabel(row);
+                label.alignment = TextAnchor.MiddleLeft;
+                UITheme.StretchAll(label.rectTransform, UITheme.Space16, 260f, 0f, 0f);
+                var meta = UIKit.Label(row.transform, open ? $"{starText}   {best}   {goal}" : "未解锁 · 上一课拿到 1 星后开放",
+                    UITheme.FontBodySmall, stars > 0 ? UITheme.Warning : UITheme.TextSecondary, TextAnchor.MiddleRight, FontStyle.Normal, "LessonMeta");
+                UITheme.PlaceTopRight(meta.rectTransform, UITheme.Space16, 0f, 250f, 40f);
+                unlocked = stars >= 1;
+            }
+            if (shown == 0)
+            {
+                var empty = UIKit.Label(panel, "曲库还是空的：先在主菜单导入 MIDI 曲目", UITheme.FontBody, UITheme.TextSecondary,
+                    TextAnchor.MiddleCenter, FontStyle.Normal, "PathEmpty");
+                UITheme.PlaceTopLeft(empty.rectTransform, UITheme.Space24, bodyTop + 60f, 552f, 30f);
+            }
+        }
+
         private void BuildLibrarySection(List<string> songs, List<string> missing)
         {
+            _librarySongs = new List<string>(songs);
             var shelf = UITheme.CreatePanel(_content, "LibraryShelf", Vector2.zero, Vector2.zero,
                 UITheme.PanelBg, UITheme.RadiusLarge);
+            UIAppear.Attach(shelf.gameObject, 0.16f, 0.98f, new Vector2(0f, -22f));
             UITheme.StretchAll(shelf, -UITheme.Space16, -UITheme.Space16, -UITheme.Space8, LibraryTop - 16f);
             shelf.GetComponent<Image>().raycastTarget = false;
 
@@ -558,6 +626,13 @@ namespace PianoTeacher3D.UI
                 var arrow = UIKit.Label(row.transform, "›", UITheme.FontTitle, UITheme.TextSecondary,
                     TextAnchor.MiddleRight, FontStyle.Normal, "OpenArrow");
                 UITheme.PlaceTopRight(arrow.rectTransform, UITheme.Space16, 0f, 28f, SongRowHeight);
+                var record = PianoTeacher3D.Teaching.PracticeProgressStore.Shared.GetSong(songPath);
+                if (record != null && record.Stars > 0)
+                {
+                    var starLabel = UIKit.Label(row.transform, new string('★', record.Stars) + new string('☆', 3 - record.Stars),
+                        UITheme.FontBodySmall, UITheme.Warning, TextAnchor.MiddleRight, FontStyle.Normal, "SongStars");
+                    UITheme.PlaceTopRight(starLabel.rectTransform, 44f, 0f, 60f, SongRowHeight);
+                }
                 KeepSelectionVisible(row, scroll, y);
             }
 

@@ -32,11 +32,19 @@ namespace PianoTeacher3D.EditorTools
             // 黑键清漆偏弱：侧壁在掠射角下若反光太强，会把水下的青色环境映成灰青色
             ClearCoat("PianoKeyEbony", new Color(0.018f, 0.018f, 0.020f), 0.42f, 0.35f, 0.80f);
 
+            // 竖琴钢琴（2026-11-18）：金属感深海蓝漆 + 一层厚清漆，掠射角能读出蓝青色的珠光高光
+            ClearCoat("HarpLacquer", new Color(0.035f, 0.17f, 0.40f), 0.70f, 1.0f, 0.94f, 0.55f);
+            // 弦钉 / 珠饰：珍珠银
+            ClearCoat("HarpPearl", new Color(0.80f, 0.83f, 0.86f), 0.80f, 0.6f, 0.90f, 1.0f);
+            // 琴凳软垫：雾蓝绒面
+            ClearCoat("HarpCushion", new Color(0.30f, 0.42f, 0.52f), 0.18f, 0.0f, 0.5f, 0.0f);
+
             AssetDatabase.SaveAssets();
             Debug.Log("[PianoMaterials] 材质已生成：" + Folder);
         }
 
-        private static void ClearCoat(string name, Color color, float baseSmoothness, float coatMask, float coatSmoothness)
+        private static void ClearCoat(string name, Color color, float baseSmoothness, float coatMask, float coatSmoothness,
+            float metallic = 0f)
         {
             var shader = Shader.Find("Universal Render Pipeline/Complex Lit")
                          ?? Shader.Find("Universal Render Pipeline/Lit");
@@ -60,7 +68,7 @@ namespace PianoTeacher3D.EditorTools
 
             mat.SetColor("_BaseColor", color);
             mat.SetFloat("_Smoothness", baseSmoothness);
-            mat.SetFloat("_Metallic", 0f);
+            mat.SetFloat("_Metallic", metallic);
             mat.SetFloat("_ClearCoatMask", coatMask);
             mat.SetFloat("_ClearCoatSmoothness", coatSmoothness);
             mat.EnableKeyword("_CLEARCOAT");

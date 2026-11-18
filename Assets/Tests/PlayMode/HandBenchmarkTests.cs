@@ -234,7 +234,7 @@ namespace PianoTeacher3D.Tests.PlayMode
             Assert.IsTrue(Directory.Exists(dir), "请运行 Tools/make_bench_midi.py --articulation");
             var files = Directory.GetFiles(dir, "*.mid");
             System.Array.Sort(files, System.StringComparer.Ordinal);
-            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            _session.RestoreCharacter(Characters.CharacterRegistry.VroidGenkiId);
             yield return null;
             yield return MeasureFingerContact(files);
         }
@@ -249,7 +249,7 @@ namespace PianoTeacher3D.Tests.PlayMode
             var pose = Object.FindFirstObjectByType<FingerPoseController>();
             pose.UseAnatomicalContact = true;
             _handIK.Assignment.UsePreparedPhrases = true;
-            _session.RestoreCharacter(Characters.CharacterRegistry.RocketboxFemaleId);
+            _session.RestoreCharacter(Characters.CharacterRegistry.VroidGenkiId);
             string path = Path.Combine(Application.streamingAssetsPath, "Songs", BenchFolder, "bench_fast_scale.mid");
             _session.LoadSong(path);
             Assert.IsTrue(_session.HasSong);
@@ -466,7 +466,7 @@ namespace PianoTeacher3D.Tests.PlayMode
                               $"MCP/PIP/DIP上限={pose.MaxMcpDegrees}/{pose.MaxPipDegrees}/{pose.MaxDipDegrees} " +
                               $"轨迹={output}");
                     Assert.Greater(sampled, 0, "没有采到演奏帧");
-                    if (song == "bench_fast_scale" && role == Characters.CharacterRegistry.RocketboxFemaleId &&
+                    if (song == "bench_fast_scale" && role == Characters.CharacterRegistry.VroidGenkiId &&
                         System.Environment.GetEnvironmentVariable("PT3D_CHECK_RIGHT_THUMB") == "1")
                     {
                         string openingContactText = openingThumbContact == int.MaxValue ? "未触键" : $"{openingThumbContact} 帧";
@@ -769,9 +769,8 @@ namespace PianoTeacher3D.Tests.PlayMode
                     Debug.Log($"[KEYCAP] {song} 正确键帽={keyedContacts}/{keyedSamples} " +
                               $"起音命中={delays.Count}/{events.Count} 落键延迟P95={onsetP95}帧");
                     Assert.Zero(penetrationFrames, $"{song}：分配指尖不应低于键面 4 mm");
-                    if (_session.CurrentCharacterView.CharacterId == Characters.CharacterRegistry.RocketboxMaleId
-                        && song == "bench_black_keys")
-                        Assert.Less(hoverFrames, sampledFrames / 2, "男角色的黑键悬空帧不能占多数");
+                    if (song == "bench_black_keys")
+                        Assert.Less(hoverFrames, sampledFrames / 2, "黑键悬空帧不能占多数");
                 }
             }
             finally { Time.captureFramerate = previousCaptureRate; }

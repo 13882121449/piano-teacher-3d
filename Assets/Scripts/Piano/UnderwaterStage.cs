@@ -20,6 +20,12 @@ namespace PianoTeacher3D.Piano
         private Vector3 _platformCenter;
         private readonly Transform[] _shoals = new Transform[2];
         private Transform _jellyfish;
+        // 2026-11-18 参考图二：再加两只小水母；鲸鱼在琴后缓慢绕竖直圆环上升；生物随音乐律动
+        private Transform[] _jellies = System.Array.Empty<Transform>();
+        private Transform _piano;
+        private readonly float[] _shoalPhase = new float[2];
+        private float _jellyPhase;
+        private float _lastMoveTime = -1f;
         private Material _sun;
         private Material _habitat;
         private Material _amber;
@@ -37,7 +43,7 @@ namespace PianoTeacher3D.Piano
             whaleSkin.SetFloat("_Whale", 1f);
             whaleSkin.SetFloat("_Shine", 0.13f);
             _amber = keepMaterial(new Material(sceneryShader) { name = "水母" });
-            _amber.SetFloat(Glow, 0.29f);
+            _amber.SetFloat(Glow, 0.85f);
             _amber.SetFloat("_Shine", 0.75f);
             var stone = keepMaterial(new Material(sceneryShader) { name = "湿玄武岩琴台" });
             stone.SetColor("_BaseTint", new Color(0.035f, 0.078f, 0.105f));
@@ -74,7 +80,14 @@ namespace PianoTeacher3D.Piano
             _whale = Part("HumpbackWhale", keepMesh(BuildWhale()), whaleSkin);
             for (int i = 0; i < _shoals.Length; i++)
                 _shoals[i] = Part("FishShoal" + (i + 1), keepMesh(BuildShoal(i)), _habitat);
-            _jellyfish = Part("AmberJellyfish", keepMesh(BuildJellyfish()), _amber);
+            var jellyMesh = keepMesh(BuildJellyfish());
+            _jellyfish = Part("AmberJellyfish", jellyMesh, _amber);
+            _jellies = new[]
+            {
+                _jellyfish,
+                Part("AmberJellyfish2", jellyMesh, _amber),
+                Part("AmberJellyfish3", jellyMesh, _amber)
+            };
             Part("WaterParticles", keepMesh(BuildParticles()), _habitat);
             BuildSun(sunShader, keepMaterial);
             Move(0f);
@@ -106,7 +119,7 @@ namespace PianoTeacher3D.Piano
             }
             ApplySunAndTime(_sun, source, target, sequence);
             _sun.SetVector(WaterTint, tint);
-            _amber.SetFloat(Glow, _hasCue ? _cue.JellyGlow : 0.29f);
+            _amber.SetFloat(Glow, _hasCue ? _cue.JellyGlow : 0.85f);
             Move(_hasCue ? _cue.Seconds : Time.time);
         }
 
@@ -231,8 +244,9 @@ namespace PianoTeacher3D.Piano
         {
             var kelp = new StageMesh();
             var random = new System.Random(5789);
-            Color dark = new(0.058f, 0.115f, 0.055f);
-            Color gold = new(0.47f, 0.34f, 0.10f);
+            // 参考图二：海带由暗琥珀渐变到金黄，逆光下像发光的金色缎带
+            Color dark = new(0.16f, 0.10f, 0.025f);
+            Color gold = new(0.86f, 0.58f, 0.14f);
             for (int i = 0; i < 22; i++)
             {
                 float sign = i % 2 == 0 ? -1f : 1f;
@@ -411,8 +425,9 @@ namespace PianoTeacher3D.Piano
         private static Mesh BuildJellyfish()
         {
             var jelly = new StageMesh();
-            Color bronze = new(0.31f, 0.091f, 0.021f);
-            Color peach = new(0.94f, 0.53f, 0.16f);
+            // 参考图二：金黄色发光水母（伞盖内亮外暗）
+            Color bronze = new(0.52f, 0.30f, 0.05f);
+            Color peach = new(1.0f, 0.84f, 0.34f);
             jelly.Surface(20, 38, (u, v) =>
             {
                 float a = u * Mathf.PI * 2f;
@@ -455,6 +470,11 @@ namespace PianoTeacher3D.Piano
         private void Move(float time)
         {
             if (_whale == null) return;
+            if (!_hasCue)
+            {
+                MoveIdle(time);
+                return;
+            }
             float turn = time * 0.072f;
             float side = 5.4f * Mathf.Sin(turn);
             float depth = 7.5f + 2.9f * (1f - Mathf.Cos(turn));
@@ -486,6 +506,73 @@ namespace PianoTeacher3D.Piano
             _jellyfish.localPosition = Across(1.19f + Mathf.Sin(drift) * 0.49f,
                 2.95f + Mathf.Cos(drift) * 0.37f, 1.87f + Mathf.Sin(drift + 0.8f) * 0.21f);
             _jellyfish.localScale = new Vector3(1f + pulse * 0.16f, 1f - pulse * 0.11f, 1f + pulse * 0.16f);
+        }
+
+        /// <summary>
+        /// 闲置 / 教学时的生物运动（2026-11-18，参考图二）：
+        /// 鲸鱼在竖琴背后 5–6 m 的竖直圆环上 60 s 一圈（从演奏者背后看：在画面右侧抬头上升、越过顶端、在左侧下潜）；
+        /// 鱼群与水母随音乐能量（<see cref="OceanAmbience.MusicEnergy"/>）加快游动、增强发光。
+        /// </summary>
+        private void MoveIdle(float time)
+        {
+            float dt = _lastMoveTime < 0f ? 0f : Mathf.Clamp(time - _lastMoveTime, 0f, 0.1f);
+            _lastMoveTime = time;
+            float energy = OceanAmbience.MusicEnergy;
+
+            if (_piano == null)
+            {
+                var keys = FindFirstObjectByType<PianoKeyMap>();
+                if (keys != null) _piano = keys.transform;
+            }
+            if (_piano != null)
+            {
+                float a = time * Mathf.PI * 2f / 60f;
+                // 距琴 5–6 m：再远会被水雾吃掉（雾密度 0.078/m，10 m 外只剩四成对比度）
+                Vector3 local = new Vector3(0.62f - 2.6f * Mathf.Sin(a), 2.45f - 2.45f * Mathf.Cos(a), -5.4f - 0.9f * Mathf.Sin(a));
+                Vector3 velocity = new Vector3(-2.6f * Mathf.Cos(a), 2.45f * Mathf.Sin(a), -0.9f * Mathf.Cos(a));
+                Vector3 world = _piano.TransformPoint(local);
+                Vector3 heading = transform.InverseTransformDirection(_piano.TransformDirection(velocity.normalized));
+                float stroke = time * 1.1f;
+                _whale.localPosition = transform.InverseTransformPoint(world) + Vector3.up * (Mathf.Sin(stroke) * 0.05f);
+                _whale.localRotation = SwimRotation(heading, 2.4f * Mathf.Sin(stroke - 0.6f), 5f * Mathf.Sin(time * 0.31f));
+            }
+            else
+            {
+                // 场景里没有钢琴（单独搭建环境时）：沿用原来绕舞台的巡游路线
+                float turn = time * 0.072f;
+                float stroke = time * 1.38f;
+                Vector3 heading = Across(5.4f * Mathf.Cos(turn), 2.9f * Mathf.Sin(turn), 0f);
+                _whale.localPosition = Across(5.4f * Mathf.Sin(turn), 7.5f + 2.9f * (1f - Mathf.Cos(turn)),
+                    2.05f + Mathf.Sin(time * 0.24f) * 0.18f + Mathf.Sin(stroke) * 0.055f);
+                _whale.localRotation = SwimRotation(heading, 2.8f * Mathf.Sin(stroke - 0.6f), 6f * Mathf.Sin(time * 0.38f));
+            }
+
+            for (int i = 0; i < _shoals.Length; i++)
+            {
+                float speed = (i == 0 ? 0.36f : -0.23f) * (1f + energy * 0.9f);
+                _shoalPhase[i] += speed * dt;
+                float arc = _shoalPhase[i] + i * 2.71f;
+                float radius = 4.15f + i * 3.2f - energy * 0.35f;
+                float rise = 2.48f + i * 0.64f + 0.28f * Mathf.Sin(arc * 2f);
+                _shoals[i].localPosition = _platformCenter + Across(radius * Mathf.Sin(arc), radius * Mathf.Cos(arc), rise);
+                Vector3 tangent = Across(radius * Mathf.Cos(arc), -radius * Mathf.Sin(arc),
+                    0.56f * Mathf.Cos(arc * 2f)) * Mathf.Sign(speed);
+                _shoals[i].localRotation = SwimRotation(tangent, 0f, Mathf.Sign(speed) * 7f);
+            }
+
+            _jellyPhase += dt * (2.25f + energy * 1.6f);
+            float drift = time * 0.69f;
+            for (int j = 0; j < _jellies.Length; j++)
+            {
+                if (_jellies[j] == null) continue;
+                float pulse = Mathf.Sin(_jellyPhase + j * 1.9f);
+                float size = j == 0 ? 1f : (j == 1 ? 0.55f : 0.42f);
+                Vector3 home = j == 0 ? Across(1.19f, 2.95f, 1.87f) : (j == 1 ? Across(-2.1f, 3.6f, 1.25f) : Across(2.6f, 4.4f, 2.7f));
+                _jellies[j].localPosition = home + Across(Mathf.Sin(drift + j) * 0.45f, Mathf.Cos(drift + j * 0.7f) * 0.32f,
+                    Mathf.Sin(drift * 0.8f + j * 2.1f) * 0.24f);
+                _jellies[j].localScale = new Vector3(1f + pulse * 0.16f, 1f - pulse * 0.11f, 1f + pulse * 0.16f) * size;
+            }
+            _amber.SetFloat(Glow, 0.85f + energy * 0.75f);
         }
 
         // 所有生物模型的头沿本地 X 轴。俯仰和滚转使用转向后的局部坐标。

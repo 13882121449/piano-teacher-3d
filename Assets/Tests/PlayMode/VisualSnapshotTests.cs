@@ -158,7 +158,7 @@ public class VisualSnapshotTests
         // 注意：SwitchAvatar(int) 是「程序化内置角色」的旧下标路径，走它会把写实角色换回方块人；
         // 视觉基线要的是 Rocketbox 真人，所以这里按角色 ID 走注册表 + 切换事务。
         if (session.CharacterRegistry != null &&
-            session.CharacterRegistry.TryGet(PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId,
+            session.CharacterRegistry.TryGet(PianoTeacher3D.Characters.CharacterRegistry.VroidGenkiId,
                 out var baselineProfile))
         {
             var baselineResult = session.ActivateCharacter(baselineProfile);
@@ -501,7 +501,7 @@ public class VisualSnapshotTests
         PianoTeacher3D.Characters.CharacterProfile rocketboxProfile = null;
         bool foundProfile = session.CharacterRegistry != null
             && session.CharacterRegistry.TryGet(
-                PianoTeacher3D.Characters.CharacterRegistry.RocketboxFemaleId, out rocketboxProfile);
+                PianoTeacher3D.Characters.CharacterRegistry.VroidGenkiId, out rocketboxProfile);
         var rocketboxResult = foundProfile
             ? session.ActivateCharacter(rocketboxProfile)
             : default(PianoTeacher3D.Characters.CharacterSwitchResult);
@@ -729,7 +729,7 @@ public class VisualSnapshotTests
         SceneManager.LoadScene("PianoLesson");
         yield return null;
         var session = UnityEngine.Object.FindFirstObjectByType<LessonSessionController>();
-        session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+        session.RestoreCharacter(CharacterRegistry.VroidGenkiId);
         session.SetDisplayMode(DisplayMode.Showcase);
         session.SetCameraMode(CameraMode.Full);
         for (int i = 0; i < 60; i++) yield return null;
@@ -782,12 +782,7 @@ public class VisualSnapshotTests
         yield return Capture(camera, Path.Combine(directory, "rear.png"), includeInterface: false);
         camera.transform.SetPositionAndRotation(previousPose.position, previousPose.rotation);
         if (controller != null) controller.enabled = true;
-        foreach (var id in new[] { CharacterRegistry.RocketboxMaleId, CharacterRegistry.RocketboxChildId })
-        {
-            session.RestoreCharacter(id);
-            for (int i = 0; i < 40; i++) yield return null;
-            yield return Capture(camera, Path.Combine(directory, id + ".png"), includeInterface: false);
-        }
+
 
         SceneManager.LoadScene("MainMenu");
         yield return null;

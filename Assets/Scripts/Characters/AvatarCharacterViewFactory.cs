@@ -5,7 +5,7 @@ namespace PianoTeacher3D.Characters
 {
     /// <summary>
     /// 默认的视图工厂：程序化角色交给 <see cref="ProceduralCharacterView"/> 包装，
-    /// 预制体角色交给 <see cref="RocketboxCharacterView"/> 加载。
+    /// 预制体角色（VRM）交给 <see cref="VrmCharacterView"/> 加载。
     /// <para>
     /// 之所以把它放在 <c>Characters</c> 而不是 <c>Avatar</c>：角色来源的知识属于角色库，
     /// <c>AvatarManager</c> 只负责持有工厂实例并把骨骼属性转述出去。
@@ -48,7 +48,10 @@ namespace PianoTeacher3D.Characters
                 return new ProceduralCharacterView(_avatar, profile.ProceduralIndex, profile);
             }
 
-            return RocketboxCharacterView.TryCreate(profile, _parent, out error);
+            if (profile.Vrm) return VrmCharacterView.TryCreate(profile, _parent, out error);
+            // 2026-11-18：写实 FBX 角色（Rocketbox）已移除，预制体角色只支持 VRM
+            error = $"角色「{profile.DisplayName}」不是 VRM 预制体，当前版本只支持 VRM 角色。";
+            return null;
         }
     }
 }

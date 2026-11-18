@@ -33,20 +33,21 @@ namespace PianoTeacher3D.Characters
         [Tooltip("Source=ProceduralBuiltIn 时必填，对应 AvatarManager 内置索引 0..2")]
         public int ProceduralIndex;
 
-        [Tooltip("Source=Prefab 且没有直接引用预制体时的 Resources 路径（不含扩展名），例如 Characters/Rocketbox/Female_Adult_01")]
+        [Tooltip("Source=Prefab 且没有直接引用预制体时的 Resources 路径（不含扩展名），例如 Characters/VRoid/Genki")]
         public string ResourcesPath;
 
         [Tooltip("角色库卡片缩略图；为空时 UI 用占位图")]
         public Texture2D Thumbnail;
 
-        /// <summary>只用于从本地照片角色库创建的资料。</summary>
-        [System.NonSerialized] public Customization.PhotoAvatarData PhotoAvatar;
 
         [Header("外观槽位（方案 9.5）")]
         [Tooltip("允许被照片生成结果替换的槽位；未声明的槽位不会在 UI 上出现「应用」按钮")]
         public AppearanceSlot[] SupportedAppearanceSlots = { AppearanceSlot.Thumbnail };
 
         [Header("适配参数（方案 8.2）")]
+        [Tooltip("VRM 预制体（UniVRM VRM-1.0 导入器生成）：走 VrmCharacterView，骨骼按 Humanoid 映射取")]
+        public bool Vrm;
+
         [Tooltip("导入模型统一缩放；1 表示不缩放")]
         [Range(0.1f, 10f)] public float RootScale = 1f;
 

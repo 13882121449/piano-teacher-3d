@@ -140,14 +140,14 @@ public class AtomicWriteAndQualityTests
     // ==================== 角色选择持久化（写实化批次 1） ====================
 
     [Test]
-    public void SelectedCharacterId_FieldDefault_IsRealisticRocketbox()
+    public void SelectedCharacterId_FieldDefault_IsGenki()
     {
         var prefs = new UserPreferences();
 
         Assert.AreEqual(UserPreferences.Defaults.SelectedCharacterId, prefs.SelectedCharacterId,
-            "字段初始值必须等于默认值：旧偏好文件缺该字段时 JsonUtility 保留初始值 → 写实角色默认化");
-        Assert.AreEqual("rocketbox.female01", UserPreferences.Defaults.SelectedCharacterId,
-            "默认必须是写实角色（与 CharacterRegistry.RocketboxFemaleId 一致），不得悄悄改回色块人");
+            "字段初始值必须等于默认值：旧偏好文件缺该字段时 JsonUtility 保留初始值");
+        Assert.AreEqual("vroid.genki", UserPreferences.Defaults.SelectedCharacterId,
+            "2026-11-18 起默认演奏者是 genki（与 CharacterRegistry.VroidGenkiId 一致），不得悄悄改回色块人");
     }
 
     [Test]

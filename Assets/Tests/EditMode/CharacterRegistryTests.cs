@@ -26,43 +26,43 @@ namespace PianoTeacher3D.Tests
         }
 
         [Test]
-        public void BuiltInCount_IsFour()
+        public void BuiltInCount_IsOne()
         {
-            Assert.AreEqual(3, _registry.Count);
-            Assert.AreEqual(3, _registry.All.Count);
+            // 2026-11-18：内置角色只剩 genki（Rocketbox 三位写实角色已移除）
+            Assert.AreEqual(1, _registry.Count);
+            Assert.AreEqual(1, _registry.All.Count);
         }
 
         [Test]
         public void BuiltInIds_MatchDeclaredOrder()
         {
-            Assert.AreEqual(CharacterRegistry.RocketboxFemaleId, _registry.All[0].CharacterId);
-            Assert.AreEqual(CharacterRegistry.RocketboxMaleId, _registry.All[1].CharacterId);
-            Assert.AreEqual(CharacterRegistry.RocketboxChildId, _registry.All[2].CharacterId);
+            Assert.AreEqual(CharacterRegistry.VroidGenkiId, _registry.All[0].CharacterId);
         }
 
         [Test]
-        public void BuiltInProfiles_ArePrefabSourcedRealisticAvatars()
+        public void BuiltInProfiles_ArePrefabSourcedVrmAvatars()
         {
             for (int i = 0; i < CharacterRegistry.BuiltInIds.Length; i++)
             {
                 Assert.IsTrue(_registry.TryGet(CharacterRegistry.BuiltInIds[i], out var profile));
                 Assert.AreEqual(CharacterSource.Prefab, profile.Source);
-                Assert.AreEqual(CharacterStyle.Realistic, profile.Style);
+                Assert.AreEqual(CharacterStyle.Anime, profile.Style);
+                Assert.IsTrue(profile.Vrm);
                 Assert.AreEqual(-1, profile.ProceduralIndex);
                 Assert.IsFalse(string.IsNullOrEmpty(profile.ResourcesPath));
-                Assert.AreEqual("MIT", profile.LicenseName);
+                Assert.IsFalse(string.IsNullOrEmpty(profile.LicenseName));
             }
         }
 
         [Test]
-        public void RocketboxProfile_HasResourcePathAndHighQualityTier()
+        public void GenkiProfile_HasResourcePathAndVrmFlag()
         {
-            Assert.IsTrue(_registry.TryGet(CharacterRegistry.RocketboxFemaleId, out var profile));
+            Assert.IsTrue(_registry.TryGet(CharacterRegistry.VroidGenkiId, out var profile));
             Assert.AreEqual(CharacterSource.Prefab, profile.Source);
             Assert.IsNull(profile.Prefab);
-            Assert.AreEqual(CharacterRegistry.RocketboxResourcesPath, profile.ResourcesPath);
-            Assert.AreEqual(2, profile.QualityTier);
-            Assert.AreEqual(CharacterStyle.Realistic, profile.Style);
+            Assert.AreEqual(CharacterRegistry.VroidGenkiResourcesPath, profile.ResourcesPath);
+            Assert.IsTrue(profile.Vrm);
+            Assert.AreEqual(CharacterStyle.Anime, profile.Style);
         }
 
         [Test]
@@ -77,7 +77,7 @@ namespace PianoTeacher3D.Tests
         [Test]
         public void IsRegistered_ReflectsContents()
         {
-            Assert.IsTrue(_registry.IsRegistered(CharacterRegistry.RocketboxFemaleId));
+            Assert.IsTrue(_registry.IsRegistered(CharacterRegistry.VroidGenkiId));
             Assert.IsFalse(_registry.IsRegistered("nope"));
         }
 
@@ -90,7 +90,7 @@ namespace PianoTeacher3D.Tests
                 var result = _registry.Register(duplicate);
                 Assert.IsFalse(result.Ok);
                 StringAssert.Contains("已注册", result.Message);
-                Assert.AreEqual(3, _registry.Count);
+                Assert.AreEqual(1, _registry.Count);   // 只有内置的 genki
             }
             finally
             {
@@ -113,7 +113,7 @@ namespace PianoTeacher3D.Tests
             {
                 var result = _registry.Register(profile);
                 Assert.IsTrue(result.Ok, result.Message);
-                Assert.AreEqual(4, _registry.Count);
+                Assert.AreEqual(2, _registry.Count);   // genki + 新注册的一个
                 Assert.IsTrue(_registry.TryGet("test.extra", out var found));
                 Assert.AreSame(profile, found);
             }
@@ -136,7 +136,7 @@ namespace PianoTeacher3D.Tests
             {
                 var result = _registry.Register(profile);
                 Assert.IsFalse(result.Ok);
-                Assert.AreEqual(3, _registry.Count);
+                Assert.AreEqual(1, _registry.Count);   // 只有内置的 genki
             }
             finally
             {
@@ -152,10 +152,10 @@ namespace PianoTeacher3D.Tests
         }
 
         [Test]
-        public void FilterByStyle_Realistic_ReturnsThree()
+        public void FilterByStyle_Realistic_ReturnsEmpty_AfterVrmSwitch()
         {
-            var list = _registry.FilterByStyle(CharacterStyle.Realistic);
-            Assert.AreEqual(3, list.Count);   // 写实女性 + 写实男性 + Rocketbox
+            // 2026-11-18：写实角色已全部移除
+            Assert.AreEqual(0, _registry.FilterByStyle(CharacterStyle.Realistic).Count);
         }
 
         [Test]
@@ -166,9 +166,11 @@ namespace PianoTeacher3D.Tests
         }
 
         [Test]
-        public void FilterByStyle_Anime_ReturnsEmpty()
+        public void FilterByStyle_Anime_ReturnsGenki()
         {
-            Assert.AreEqual(0, _registry.FilterByStyle(CharacterStyle.Anime).Count);
+            var list = _registry.FilterByStyle(CharacterStyle.Anime);
+            Assert.AreEqual(1, list.Count);
+            Assert.AreEqual(CharacterRegistry.VroidGenkiId, list[0].CharacterId);
         }
 
         [Test]
@@ -178,15 +180,16 @@ namespace PianoTeacher3D.Tests
         }
 
         [Test]
-        public void FilterByQualityTier_One_ReturnsEmpty()
+        public void FilterByQualityTier_One_ReturnsGenki()
         {
-            Assert.AreEqual(0, _registry.FilterByQualityTier(1).Count);
+            // genki 是标准档角色（QualityTier 1），低配设备也能用
+            Assert.AreEqual(1, _registry.FilterByQualityTier(1).Count);
         }
 
         [Test]
         public void FilterByQualityTier_Two_ReturnsAll()
         {
-            Assert.AreEqual(3, _registry.FilterByQualityTier(2).Count);
+            Assert.AreEqual(1, _registry.FilterByQualityTier(2).Count);
         }
 
         [Test]
@@ -200,9 +203,9 @@ namespace PianoTeacher3D.Tests
         [Test]
         public void BuiltInProfiles_HaveDistinctIds()
         {
-            Assert.AreNotEqual(CharacterRegistry.BuiltInIds[0], CharacterRegistry.BuiltInIds[1]);
-            Assert.AreNotEqual(CharacterRegistry.BuiltInIds[1], CharacterRegistry.BuiltInIds[2]);
-            Assert.AreNotEqual(CharacterRegistry.BuiltInIds[2], CharacterRegistry.RocketboxFemaleId);
+            var ids = new System.Collections.Generic.HashSet<string>(CharacterRegistry.BuiltInIds);
+            Assert.AreEqual(CharacterRegistry.BuiltInIds.Length, ids.Count);
+            Assert.AreEqual(CharacterRegistry.BuiltInIds.Length, CharacterRegistry.BuiltInDisplayNames.Length);
         }
     }
 }

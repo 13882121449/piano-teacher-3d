@@ -36,7 +36,7 @@ namespace PianoTeacher3D.Tests
         [UnityTest]
         public IEnumerator Rotational_ReachesReachableTarget_WithoutTouchingPositionOrScale()
         {
-            var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);
+            var view = VrmCharacterView.TryCreate(_profile, null, out string error);
             Assert.IsNotNull(view, "角色实例化失败：" + error);
 
             try
@@ -87,7 +87,7 @@ namespace PianoTeacher3D.Tests
         [UnityTest]
         public IEnumerator Rotational_UnreachableTarget_DoesNotPretendToReach()
         {
-            var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);
+            var view = VrmCharacterView.TryCreate(_profile, null, out string error);
             Assert.IsNotNull(view, error);
 
             try
@@ -164,7 +164,7 @@ namespace PianoTeacher3D.Tests
         [UnityTest]
         public IEnumerator AvatarManager_PicksRotationalSolver_OnlyForSkinnedCharacters()
         {
-            var view = RocketboxCharacterView.TryCreate(_profile, null, out string error);
+            var view = VrmCharacterView.TryCreate(_profile, null, out string error);
             Assert.IsNotNull(view, error);
 
             try

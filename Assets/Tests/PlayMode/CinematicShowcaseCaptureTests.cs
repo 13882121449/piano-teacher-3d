@@ -97,7 +97,7 @@ public class CinematicShowcaseCaptureTests
                 Assert.IsNotNull(camera);
                 Assert.IsTrue(session.HasSong);
                 Assert.That(session.TotalDuration, Is.InRange(23f, 25f));
-                session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+                session.RestoreCharacter(CharacterRegistry.VroidGenkiId);
                 session.SetQualityTier(QualityTier.High);
                 session.SetDisplayMode(DisplayMode.Showcase);
                 session.SetCameraMode(CameraMode.Full);
@@ -193,7 +193,7 @@ public class CinematicShowcaseCaptureTests
             var session = Object.FindFirstObjectByType<LessonSessionController>();
             var controller = Object.FindFirstObjectByType<CameraModeController>();
             var camera = Camera.main;
-            session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+            session.RestoreCharacter(CharacterRegistry.VroidGenkiId);
             session.SetDisplayMode(DisplayMode.Showcase);
             session.SetQualityTier(QualityTier.High);
             session.SetAutomaticStageCamera(false);
@@ -267,7 +267,7 @@ public class CinematicShowcaseCaptureTests
         yield return null;
         var session = Object.FindFirstObjectByType<LessonSessionController>();
         var map = Object.FindFirstObjectByType<PianoKeyMap>();
-        session.RestoreCharacter(CharacterRegistry.RocketboxFemaleId);
+        session.RestoreCharacter(CharacterRegistry.VroidGenkiId);
         session.SetQualityTier(QualityTier.High);
         session.SetDisplayMode(DisplayMode.Teaching);
         session.SetAutomaticStageCamera(false);
@@ -298,7 +298,7 @@ public class CinematicShowcaseCaptureTests
             camera.cullingMask = 1 << studio;
             var root = view.RootTransform;
             var profile = CharacterRegistry.CreateBuiltIn(0);
-            var standing = RocketboxCharacterView.TryCreate(profile, null, out var error);
+            var standing = VrmCharacterView.TryCreate(profile, null, out var error);
             Assert.IsNotNull(standing, error);
             studioRoot.transform.position = Vector3.zero;
             try

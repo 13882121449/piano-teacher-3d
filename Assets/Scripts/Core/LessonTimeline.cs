@@ -42,6 +42,15 @@ namespace PianoTeacher3D.Core
         /// <summary>开始播放前，演奏者仍在准备首个手型。</summary>
         public bool IsPreparing => LeadInRemaining > 0f;
 
+        /// <summary>
+        /// 等待模式（2026-11-18）：为 true 时时间轴原地停住（状态仍是 Playing，音频时钟照常对齐），
+        /// 学生弹对当前音后由教学模块放开。
+        /// </summary>
+        public bool Hold { get; set; }
+
+        /// <summary>循环跳回起点时触发（参数：跳回后的时间）。渐进提速据此计圈。</summary>
+        public event System.Action<float> Looped;
+
         internal void BeginLeadIn(float seconds) => LeadInRemaining = Mathf.Max(0f, seconds);
 
         private void Update()
@@ -58,6 +67,12 @@ namespace PianoTeacher3D.Core
                 return;
             }
 
+            if (Hold)
+            {
+                SampleDelta();   // 照常消费时钟，放开时不会补进停住的这段
+                return;
+            }
+
             CurrentTime += SampleDelta() * PlaybackSpeed;
 
             if (TotalDuration > 0f && CurrentTime >= TotalDuration)
@@ -65,6 +80,7 @@ namespace PianoTeacher3D.Core
                 if (IsLooping)
                 {
                     CurrentTime = LoopStart;
+                    Looped?.Invoke(CurrentTime);
                 }
                 else
                 {
@@ -75,6 +91,7 @@ namespace PianoTeacher3D.Core
             else if (IsLooping && LoopEnd > LoopStart && CurrentTime >= LoopEnd)
             {
                 CurrentTime = LoopStart; // A-B 循环跳回
+                Looped?.Invoke(CurrentTime);
             }
 
             OnTimeChanged?.Invoke(CurrentTime);

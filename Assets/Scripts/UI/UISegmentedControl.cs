@@ -14,8 +14,12 @@ namespace PianoTeacher3D.UI
     /// </para>
     /// <para>纯表现层：只通过 <see cref="OnChanged"/> 通知调用方，自身不读写会话状态。</para>
     /// </summary>
-    public class UISegmentedControl : MonoBehaviour
+    public class UISegmentedControl : MonoBehaviour, IUIMotionTickable
     {
+        // 2026-11-18：iOS 式滑动选中胶囊。选中项本身透明，蓝色胶囊在各项下方弹簧滑动到新位置
+        private Image _pill;
+        private float _pillX, _pillXVel, _pillW, _pillWVel;
+        private bool _pillPlaced;
         private readonly List<Button> _segments = new List<Button>();
         private readonly List<Text> _labels = new List<Text>();
         private readonly List<string> _optionLabels = new List<string>();
@@ -83,6 +87,73 @@ namespace PianoTeacher3D.UI
             if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
             img.raycastTarget = false;
             UITheme.SetOutline(img, true, UITheme.Divider, 1f);
+
+            var pillGo = new GameObject("SelectionPill", typeof(RectTransform));
+            pillGo.transform.SetParent(_rt, false);
+            _pill = pillGo.AddComponent<Image>();
+            _pill.raycastTarget = false;
+            _pill.color = UITheme.Selected;
+            UITheme.SetRoundedSprite(_pill, UITheme.RadiusSmall);
+            var prt = _pill.rectTransform;
+            prt.anchorMin = new Vector2(0f, 0f);
+            prt.anchorMax = new Vector2(0f, 1f);
+            prt.pivot = new Vector2(0f, 0.5f);
+            prt.sizeDelta = new Vector2(0f, -4f);
+            prt.anchoredPosition = Vector2.zero;
+            _pill.enabled = false;
+        }
+
+        /// <summary>选中胶囊（测试 / 诊断用）。</summary>
+        public RectTransform SelectionPill => _pill != null ? _pill.rectTransform : null;
+
+        private void OnRectTransformDimensionsChange()
+        {
+            // 尺寸变化（窗口缩放）时胶囊直接对齐，不做动画
+            _pillPlaced = false;
+            if (isActiveAndEnabled) UIMotionTicker.Add(this);
+        }
+
+        private void OnEnable()
+        {
+            _pillPlaced = false;
+            UIMotionTicker.Add(this);
+        }
+
+        private void OnDisable()
+        {
+            UIMotionTicker.Remove(this);
+        }
+
+        public bool Tick(float dt)
+        {
+            if (this == null || _pill == null || _rt == null) return false;
+            int n = _segments.Count;
+            float width = _rt.rect.width;
+            if (n == 0 || _selected < 0 || width <= 1f)
+            {
+                _pill.enabled = false;
+                return width <= 1f && n > 0;   // 布局还没算出宽度：下一帧再试
+            }
+            float segment = width / n;
+            float targetX = segment * _selected + 2f;
+            float targetW = segment - 4f;
+            bool enabled = _interactable && _optionEnabled[_selected];
+            _pill.color = enabled ? UITheme.Selected : UITheme.Disabled;
+            _pill.enabled = true;
+            if (!_pillPlaced || UIMotion.Reduced)
+            {
+                _pillX = targetX; _pillW = targetW; _pillXVel = _pillWVel = 0f;
+                _pillPlaced = true;
+            }
+            else
+            {
+                UIMotion.Spring(ref _pillX, ref _pillXVel, targetX, 7f, 0.78f, dt);
+                UIMotion.Spring(ref _pillW, ref _pillWVel, targetW, 7f, 0.9f, dt);
+            }
+            var prt = _pill.rectTransform;
+            prt.anchoredPosition = new Vector2(_pillX, 0f);
+            prt.sizeDelta = new Vector2(Mathf.Max(0f, _pillW), -4f);
+            return !(UIMotion.Settled(_pillX, _pillXVel, targetX, 0.2f) && UIMotion.Settled(_pillW, _pillWVel, targetW, 0.2f));
         }
 
         /// <summary>重建选项（文字可随语言 / 语义变化）。</summary>
@@ -204,14 +275,23 @@ namespace PianoTeacher3D.UI
                 if (feedback != null)
                 {
                     feedback.SetInteractable(enabled);
-                    feedback.SetOutlineState(selected, UITheme.BorderSelected);
+                    // 选中项由滑动胶囊表示：不再给透明底加描边（Outline 会把整个图形偏移复制四份，叠成一块白底）
+                    feedback.SetOutlineState(false, UITheme.BorderSelected);
                     // 选中项悬停保持金色底（避免一悬停就失去「当前值」的视觉）
                     // 未选中项给实心 Control 底（与 chip 一致）：透明底在深色场景里只剩一圈描边，
                     // 观感上是「空白灰按钮」，分不清是禁用还是没选中。
-                    feedback.SetColors(UITheme.Control,
+                    feedback.SetColors(selected ? UITheme.Transparent : UITheme.Control,
                         !enabled ? UITheme.Disabled : (selected ? UITheme.Selected : UITheme.ControlHover));
                 }
+                // 选中项透明，由下方的滑动胶囊显示选中底色
+                if (selected && btn != null && btn.targetGraphic is Image selectedImage)
+                {
+                    selectedImage.material = null;
+                    selectedImage.color = UITheme.Transparent;
+                    UITheme.SetOutline(selectedImage, false, UITheme.BorderSelected, 1f);
+                }
             }
+            if (isActiveAndEnabled) UIMotionTicker.Add(this);
         }
 
         private void RefreshFocusChain()
