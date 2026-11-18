@@ -527,7 +527,7 @@ namespace PianoTeacher3D.UI
                 {
                     // 「✓」标记 + 粗体：颜色之外的第二重选中标识
                     label.text = on ? "✓ " + profile.DisplayName : profile.DisplayName;
-                    label.fontStyle = on ? FontStyle.Bold : FontStyle.Normal;
+                    UITheme.SetWeight(label, on);
                 }
 
                 // 选中卡的底是强调色，标签必须换成深色，否则浅灰文字在金色上几乎看不见。

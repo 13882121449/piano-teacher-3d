@@ -513,14 +513,17 @@ public class UIThemeTokenTests
     [Test]
     public void RadiusScale_MatchesChipButtonPanelHierarchy()
     {
-        // 进度条 3 < chip 8 < 按钮 10 < 面板 12：一套圆角只表达一套层级
+        // 进度条 3 < chip 16 < 按钮 20 < 玻璃面板 28：一套圆角只表达一套层级。
+        // 2026-11-18 按用户要求改为 iOS 液态玻璃风格：chip（32 高）与按钮（40 高）为胶囊形，
+        // 面板用大圆角模块（原工作台风上限 12 取消）。
         Assert.Less(UITheme.RadiusBar, UITheme.RadiusSmall);
         Assert.Less(UITheme.RadiusSmall, UITheme.RadiusMedium);
         Assert.Less(UITheme.RadiusMedium, UITheme.RadiusLarge);
-        Assert.AreEqual(8, UITheme.RadiusSmall);
-        Assert.AreEqual(10, UITheme.RadiusMedium);
-        Assert.AreEqual(12, UITheme.RadiusLarge);
-        Assert.LessOrEqual(UITheme.RadiusLarge, 12, "面板圆角不应做成大圆角（工作台而非卡片风）");
+        Assert.AreEqual(16, UITheme.RadiusSmall);
+        Assert.AreEqual(20, UITheme.RadiusMedium);
+        Assert.AreEqual(28, UITheme.RadiusLarge);
+        Assert.GreaterOrEqual(UITheme.RadiusSmall * 2f, UITheme.Layout.ChipHeight, "chip 为胶囊形");
+        Assert.GreaterOrEqual(UITheme.RadiusMedium * 2f, UITheme.HeightButton, "按钮为胶囊形");
     }
 
     [Test]

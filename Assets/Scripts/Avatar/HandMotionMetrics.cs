@@ -198,6 +198,12 @@ namespace PianoTeacher3D.Avatar
 
         /// <summary>该帧是否检测到指尖压入键面（低于键面超过容差）。</summary>
         public bool FingerPenetration;
+
+        /// <summary>该帧是否测量了指节余量（2026-11-18 P4）。</summary>
+        public bool HasSegmentClearance;
+
+        /// <summary>该帧两手所有指节与相邻琴键的最小余量（米，负 = 穿模深度）。</summary>
+        public float SegmentClearance;
     }
 
     /// <summary>
@@ -345,6 +351,15 @@ namespace PianoTeacher3D.Avatar
         /// <summary>指尖压入键面的帧数。</summary>
         public int FingerPenetrationFrames { get; internal set; }
 
+        /// <summary>指节（近节 / 中节 / 末节 / 拇指侧面）压进琴键超过容差的帧数（2026-11-18 P4）。</summary>
+        public int SegmentPenetrationFrames { get; internal set; }
+
+        /// <summary>全曲指节最小余量（米，负 = 最深穿模）；无测量时为 +∞。</summary>
+        public float MinSegmentClearance { get; internal set; } = float.PositiveInfinity;
+
+        /// <summary>测量了指节余量的帧数。</summary>
+        public int SegmentClearanceSamples { get; internal set; }
+
         // ==================== 与优化方案 §7-3 术语对齐的只读别名 ====================
         // 计算完全复用上面的字段（同一份数据、同一套采样），只把「文档里的指标名」暴露出来，
         // 避免文档、日志与代码各叫一个名字。口径定义见 Docs/animation-pipeline.md §6.4。
@@ -376,6 +391,8 @@ namespace PianoTeacher3D.Avatar
                    $" · 逐帧位移 {PerFrameDisplacement.Describe()}" +
                    $" · 换位峰值 {TransitionFingertipError.Describe()}" +
                    $" · 关节限位 {JointLimitHits} 指尖压键 {FingerPenetrationFrames}" +
+                   $" · 指节穿键 {SegmentPenetrationFrames}（{SegmentClearanceSamples} 帧，最深 " +
+                   $"{(float.IsPositiveInfinity(MinSegmentClearance) ? 0f : -MinSegmentClearance * 1000f):0.0} mm）" +
                    // 左右手分项（批次 1.3）：避免整体数字掩盖单侧塌陷
                    $"｜左 指尖 {LeftFingertipTargetError.Describe()} 键面 {LeftKeyTopDistance.Describe()}" +
                    $"｜右 指尖 {RightFingertipTargetError.Describe()} 键面 {RightKeyTopDistance.Describe()}";
@@ -444,6 +461,9 @@ namespace PianoTeacher3D.Avatar
         private readonly MetricAccumulator _rightSurface = new MetricAccumulator();
         private int _jointLimitHits;
         private int _fingerPenetrationFrames;
+        private int _segmentPenetrationFrames;
+        private int _segmentClearanceSamples;
+        private float _minSegmentClearance = float.PositiveInfinity;
 
         public int Samples => _samples;
 
@@ -584,6 +604,12 @@ namespace PianoTeacher3D.Avatar
 
             if (s.JointLimitHits > 0) _jointLimitHits += s.JointLimitHits;
             if (s.FingerPenetration) _fingerPenetrationFrames++;
+            if (s.HasSegmentClearance && !float.IsPositiveInfinity(s.SegmentClearance))
+            {
+                _segmentClearanceSamples++;
+                if (s.SegmentClearance < _minSegmentClearance) _minSegmentClearance = s.SegmentClearance;
+                if (s.SegmentClearance < -KeyClearanceProbe.PenetrationTolerance) _segmentPenetrationFrames++;
+            }
         }
 
         private void AddAssigned(float error, in HandMotionSample s, bool isLeft)
@@ -646,7 +672,10 @@ namespace PianoTeacher3D.Avatar
                 LeftKeyTopDistance = _leftSurface.Build(),
                 RightKeyTopDistance = _rightSurface.Build(),
                 JointLimitHits = _jointLimitHits,
-                FingerPenetrationFrames = _fingerPenetrationFrames
+                FingerPenetrationFrames = _fingerPenetrationFrames,
+                SegmentPenetrationFrames = _segmentPenetrationFrames,
+                SegmentClearanceSamples = _segmentClearanceSamples,
+                MinSegmentClearance = _minSegmentClearance
             };
 
             var groups = new MetricStats[(int)HandMetricGroup.Count];
@@ -719,6 +748,9 @@ namespace PianoTeacher3D.Avatar
             for (int i = 0; i < _groupError.Length; i++) _groupError[i].Clear();
             _jointLimitHits = 0;
             _fingerPenetrationFrames = 0;
+            _segmentPenetrationFrames = 0;
+            _segmentClearanceSamples = 0;
+            _minSegmentClearance = float.PositiveInfinity;
         }
 
         /// <summary>

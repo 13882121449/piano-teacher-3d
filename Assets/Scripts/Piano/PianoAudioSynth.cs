@@ -76,6 +76,37 @@ namespace PianoTeacher3D.Piano
         /// <summary>音频是否可用。false 时 <see cref="OnNoteOn"/> 静默返回，上层应提示"音频不可用"并允许静音播放。</summary>
         public bool Initialized { get; private set; }
 
+        // ==================== 起音对齐（2026-11-18 P5 音画同步） ====================
+        //
+        // 音符在 Update 里「时间轴越过音符时刻」时才触发，触发帧相对音符真实时刻晚 0～1 帧（60 fps 下 0～16 ms），
+        // 快速音阶会因此节奏发涩。这里改为按音符真实时刻排程：每个音统一在「音符时刻 + ScheduleLeadSeconds」
+        // 用 PlayScheduled 采样级准确地起音，帧相位造成的抖动被吸收掉。
+        // 25 ms 恰好约等于琴键键程（PianoKeyAnimator 16–32 ms）：声音在键到底时响起，与真实钢琴一致。
+
+        /// <summary>统一的起音提前排程量（秒）：所有音都在音符时刻之后这么久起音。</summary>
+        public const float ScheduleLeadSeconds = 0.025f;
+
+        private float _clockTime = float.NaN;
+        private float _clockSpeed = 1f;
+
+        /// <summary>每帧在调度器触发音符前调用：告诉合成器当前时间轴时刻与播放倍速。</summary>
+        public void SetTimelineClock(float currentTime, float playbackSpeed)
+        {
+            _clockTime = currentTime;
+            _clockSpeed = Mathf.Max(0.1f, playbackSpeed);
+        }
+
+        /// <summary>
+        /// 某个音符距离起音还要等多久（秒，真实时间）：ScheduleLeadSeconds 减去本帧已经晚了的时间，
+        /// 夹在 [0, ScheduleLeadSeconds]。没有时钟（未调用 <see cref="SetTimelineClock"/>）时立即起音。
+        /// </summary>
+        public static float OnsetDelay(float noteTime, float clockTime, float playbackSpeed)
+        {
+            if (float.IsNaN(clockTime) || float.IsNaN(noteTime)) return 0f;
+            float late = Mathf.Max(0f, (clockTime - noteTime) / Mathf.Max(0.1f, playbackSpeed));
+            return Mathf.Clamp(ScheduleLeadSeconds - late, 0f, ScheduleLeadSeconds);
+        }
+
         /// <summary>最近一次初始化失败的原因（中文）。成功时为 null。</summary>
         public string LastInitError { get; private set; }
 
@@ -269,7 +300,9 @@ namespace PianoTeacher3D.Piano
             float panT = Mathf.InverseLerp(PianoKeyMap.MinPitch, PianoKeyMap.MaxPitch, e.Pitch);
             src.panStereo = Mathf.Lerp(-MaxPan, MaxPan, panT);
             ApplyTone(slot, e.Velocity);
-            src.Play();
+            float delay = OnsetDelay(e.StartTime, _clockTime, _clockSpeed);
+            if (delay > 0.0005f) src.PlayScheduled(AudioSettings.dspTime + delay);
+            else src.Play();
         }
 
         /// <summary>

@@ -497,11 +497,11 @@ namespace PianoTeacher3D.UI
                 TextAnchor.MiddleLeft, FontStyle.Bold, "ViewTitle");
             UITheme.PlaceTopLeft(_hintTitle.rectTransform, pad, pad, inner, 18f);
 
-            _hintLine2 = UIKit.Label(_hintCard, "空格 播放 / 暂停　·　[ 重播",
+            _hintLine2 = UIKit.Label(_hintCard, "空格 播放 / 暂停  ·  [ 重播",
                 UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "Hint2");
             UITheme.PlaceTopLeft(_hintLine2.rectTransform, pad, pad + 22f, inner, 16f);
 
-            _hintLine3 = UIKit.Label(_hintCard, "M 节拍器　·　Tab 分析　·　F1 帮助",
+            _hintLine3 = UIKit.Label(_hintCard, "M 节拍器 · Tab 分析 · F1 帮助",
                 UITheme.FontBodySmall, UITheme.TextSecondary, TextAnchor.MiddleLeft, FontStyle.Normal, "Hint3");
             UITheme.PlaceTopLeft(_hintLine3.rectTransform, pad, pad + 42f, inner, 16f);
         }
@@ -1432,9 +1432,9 @@ namespace PianoTeacher3D.UI
 
             bool free = mode == CameraMode.Free;
             if (_hintLine2 != null)
-                _hintLine2.text = free ? "右键拖动旋转　·　滚轮缩放" : "空格 播放 / 暂停　·　[ 重播";
+                _hintLine2.text = free ? "右键拖动旋转  ·  滚轮缩放" : "空格 播放 / 暂停  ·  [ 重播";
             if (_hintLine3 != null)
-                _hintLine3.text = free ? "R 重置视角　·　Tab 分析　·　F1 帮助" : "M 节拍器　·　Tab 分析　·　F1 帮助";
+                _hintLine3.text = free ? "R 重置视角 · Tab 分析 · F1 帮助" : "M 节拍器 · Tab 分析 · F1 帮助";
         }
 
         /// <summary>底栏与提示卡上的只读状态（每个状态都能直接读出，不依赖悬停）。</summary>

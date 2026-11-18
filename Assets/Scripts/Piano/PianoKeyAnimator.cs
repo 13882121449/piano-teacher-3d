@@ -18,15 +18,24 @@ namespace PianoTeacher3D.Piano
     public class PianoKeyAnimator : MonoBehaviour
     {
         [SerializeField] private float _pressAngle = 3f;
-        [SerializeField] private float _slerpSpeed = 20f;
 
         /// <summary>判定"回弹到位"的角度阈值（度），低于它即脱离活动列表。</summary>
         private const float RestAngleThreshold = 0.05f;
+
+        // 2026-11-18 P5 音画同步：琴键改为按真实键程计时运动，不再用指数逼近（原 Slerp ×20/s）。
+        // 原写法在 60 fps 下约 100 ms 才压到 90%，而声音在 note-on 当帧就响，画面里「先响后按」。
+        // 真实钢琴是键到底、琴槌击弦时出声：键程 16–32 ms（越响越快），松键回弹约 70 ms。
+        // 这样键到底的时刻与声音起点（再加上约 20 ms 的音频缓冲）基本重合。
+        public const float LoudPressSeconds = 0.016f;
+        public const float SoftPressSeconds = 0.032f;
+        public const float ReleaseSeconds = 0.070f;
 
         private PianoKeyMap _keyMap;
 
         // ---- 预分配缓存（Initialize 中一次性创建）----
         private float[] _targetAngle;   // 目标角度（度）：> 0 表示按下
+        private float[] _angle;         // 当前角度（度）
+        private float[] _pressSpeed;    // 本次按下的角速度（度/秒，按力度决定）
         private bool[] _tracked;        // 是否已在 _activeIndex 列表中
         private int[] _activeIndex;     // 需要在本帧插值的键（pitch - MinPitch）
         private int _activeCount;
@@ -47,12 +56,15 @@ namespace PianoTeacher3D.Piano
             if (_targetAngle == null || _targetAngle.Length != size)
             {
                 _targetAngle = new float[size];
+                _angle = new float[size];
+                _pressSpeed = new float[size];
                 _tracked = new bool[size];
                 _activeIndex = new int[size];
             }
             else
             {
                 System.Array.Clear(_targetAngle, 0, size);
+                System.Array.Clear(_angle, 0, size);
                 System.Array.Clear(_tracked, 0, size);
             }
 
@@ -75,7 +87,12 @@ namespace PianoTeacher3D.Piano
 
             if (_targetAngle[i] <= 0f) _pressedCount++;
             _targetAngle[i] = _pressAngle;
+            _pressSpeed[i] = _pressAngle / PressSeconds(e.Velocity);
         }
+
+        /// <summary>按力度换算键程时间：力度 127 约 16 ms，力度 1 约 32 ms。</summary>
+        public static float PressSeconds(int velocity)
+            => Mathf.Lerp(SoftPressSeconds, LoudPressSeconds, Mathf.Clamp01(velocity / 127f));
 
         public void OnNoteOff(MIDI.MidiNoteEvent e)
         {
@@ -104,6 +121,7 @@ namespace PianoTeacher3D.Piano
             if (_targetAngle != null)
             {
                 System.Array.Clear(_targetAngle, 0, _targetAngle.Length);
+                System.Array.Clear(_angle, 0, _angle.Length);
                 System.Array.Clear(_tracked, 0, _tracked.Length);
             }
             _activeCount = 0;
@@ -121,7 +139,8 @@ namespace PianoTeacher3D.Piano
         {
             if (_keyMap == null || _targetAngle == null || _activeCount == 0) return;
 
-            float step = Time.deltaTime * _slerpSpeed;
+            float dt = Time.deltaTime;
+            float releaseSpeed = _pressAngle / ReleaseSeconds;
 
             for (int k = 0; k < _activeCount; k++)
             {
@@ -136,20 +155,34 @@ namespace PianoTeacher3D.Piano
                     continue;
                 }
 
-                var target = Quaternion.Euler(_targetAngle[i], 0f, 0f); // 绕 X 正角：键前端（+Z）向下按下
-                var rot = Quaternion.Slerp(key.localRotation, target, step);
-                key.localRotation = rot;
+                // 绕 X 正角：键前端（+Z）向下按下。按下用本次力度的键程速度，回弹用固定速度。
+                float target = _targetAngle[i];
+                float speed = target > _angle[i] ? _pressSpeed[i] : releaseSpeed;
+                if (speed <= 0f) speed = releaseSpeed;
+                _angle[i] = Mathf.MoveTowards(_angle[i], target, speed * dt);
+                key.localRotation = Quaternion.Euler(_angle[i], 0f, 0f);
 
                 // 目标为回弹且已到位：脱离活动列表，避免每帧空插值
-                if (_targetAngle[i] <= 0f && Quaternion.Angle(rot, Quaternion.identity) <= RestAngleThreshold)
+                if (target <= 0f && _angle[i] <= RestAngleThreshold)
                 {
                     key.localRotation = Quaternion.identity;
+                    _angle[i] = 0f;
                     _tracked[i] = false;
                     RemoveAt(k);
                     k--;
                 }
             }
         }
+
+        /// <summary>某个琴键当前的下沉角度（度，0 = 静止，满键程 = <see cref="PressAngle"/>）。音画同步测试用。</summary>
+        public float GetKeyAngle(int pitch)
+        {
+            if (_angle == null || !PianoKeyMap.IsInRange(pitch)) return 0f;
+            return _angle[pitch - PianoKeyMap.MinPitch];
+        }
+
+        /// <summary>满键程角度（度）。</summary>
+        public float PressAngle => _pressAngle;
 
         /// <summary>把索引 k 的元素用列表尾部元素覆盖（顺序无关，O(1) 且无分配）。</summary>
         private void RemoveAt(int k)

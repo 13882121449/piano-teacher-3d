@@ -106,3 +106,11 @@ SHA-256 为 `55f4c05e84875c33f6d80d607b8b583f2a5829d96ec07b31a86af074f4163c33`�
 
 **重要提醒（方案 6.5）**：上述代码许可证（MIT / Apache-2.0）**不等于**其第三方依赖、模型、贴图、动作数据、
 音频样本、模型权重均可自由商用。集成前必须逐项核对并填入第 3.4 节模板。
+
+---
+
+## 5. 2026-11-18 全面优化引入的外部资源（分支 `cf_develop_optimize`）
+
+| 资源 | 文件 | 来源 | 许可证 | 再分发 / 署名 | 说明 |
+|---|---|---|---|---|---|
+| 思源黑体 SC（Noto Sans SC）Regular / Medium / Bold | `Assets/Resources/Fonts/NotoSansSC-*.otf`（各约 8.3 MB） | https://github.com/notofonts/noto-cjk （`Sans/SubsetOTF/SC`，main 分支） | SIL Open Font License 1.1（全文见 `Docs/licenses/NotoSansSC-OFL.txt`） | 允许随软件嵌入和再分发；不得单独出售字体文件；保留许可证文本 | 替换内置 `LegacyRuntime.ttf`，覆盖简体中文常用字；iOS 的苹方 / SF 字体不能随软件分发，因此不用 |

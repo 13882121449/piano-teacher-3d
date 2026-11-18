@@ -143,6 +143,8 @@ namespace PianoTeacher3D.Tests.PlayMode
                           $"换位峰值={report.TransitionPeakError * 1000f:0.#}mm " +
                           $"悬空={report.HoveringFrames} 指尖压键={report.FingerPenetrationFrames} " +
                           $"掌穿模={report.PalmPenetrationFrames} " +
+                          $"指节穿键={report.SegmentPenetrationFrames}/{report.SegmentClearanceSamples} " +
+                          $"指节最深={(float.IsPositiveInfinity(report.MinSegmentClearance) ? 0f : -report.MinSegmentClearance * 1000f):0.0}mm " +
                           $"命中率={report.HitRate * 100f:0.#}% 样本={report.TargetSamples}");
                 Debug.Log($"[BENCH] song={Path.GetFileNameWithoutExtension(file)} full {report.ToLogString()}");
 

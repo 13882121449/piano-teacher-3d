@@ -142,8 +142,17 @@ namespace PianoTeacher3D.Characters
                 }
                 mesh.SetTriangles(fitted, sub, false);
             }
+            // uv1：x = 绑定姿态高度（区分腿脚与手臂），y = 沿前臂的进度（0 = 肘、1 = 腕），
+            // ConcertLimbs 用 y 在肘部附近把真实皮肤纹理渐变回纯肤色，衔接程序化上臂。
             var bindMarker = new List<Vector2>(bind.Length);
-            foreach (var point in bind) bindMarker.Add(new Vector2(point.y, 0f));
+            foreach (var point in bind)
+            {
+                bool left = (point.x < split) == leftIsLower;
+                Vector3 start = left ? leftElbow : rightElbow;
+                Vector3 along = left ? leftForearm : rightForearm;
+                float progress = Vector3.Dot(point - start, along) / along.sqrMagnitude;
+                bindMarker.Add(new Vector2(point.y, progress));
+            }
             mesh.SetUVs(1, bindMarker);
             renderer.sharedMesh = mesh;
         }

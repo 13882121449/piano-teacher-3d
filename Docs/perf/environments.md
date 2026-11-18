@@ -31,7 +31,7 @@
 <!-- SECTION:local-check:BEGIN -->
 ### 本机自检（由 Environment_Matrix_Checklist 自动写入）
 
-- 时间：2026-11-16 12:16:51
+- 时间：2026-11-18 16:26:29
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -40,8 +40,8 @@
 
 | 矩阵项 | 期望 | 本机实测 | 结论 |
 |---|---|---|---|
-| 路径含中文 | 可正常加载/导入 | `D:/WorkBuddy Project/钢琴3D教学/piano-teacher-3d/Assets` → 含中文 | 已覆盖（本次运行路径含中文） |
-| 路径含空格 | 可正常加载/导入 | 含空格 | 已覆盖（本次运行路径含空格） |
+| 路径含中文 | 可正常加载/导入 | `D:/AIClaude/嘘嘘洋/piano-teacher-3d/Assets` → 含中文 | 已覆盖（本次运行路径含中文） |
+| 路径含空格 | 可正常加载/导入 | 不含空格 | **待测**（本次运行路径不含空格） |
 | 非管理员权限 | 全部功能可用 | 是（管理员） | **待测**（需以标准用户身份复测） |
 | 无网络环境 | 全部功能可用（本地优先） | 网络可达性：可达（局域网） | **待测**（需断网复测） |
 | 不同 DPI / 缩放 | 布局可操作、不遮挡演奏区 | 屏幕 640×480 @ 96 dpi；nographics=是 | **待测**（无图形设备，无法核对视觉布局） |
@@ -53,9 +53,9 @@
 <!-- SECTION:player-runtime:BEGIN -->
 ### 真实 Player 运行环境（本地自检）
 
-- 采样时间：2026-11-13 15:00:40
+- 采样时间：2026-11-18 16:30:41
 - Player：PianoTeacher3D.exe（Development Build，请求 1280×720 窗口）
 - 场景：PianoLesson + StreamingAssets/Songs/demo.mid
-- 数据文件：`_verify_out/1113_体验改造_v1/整体验证/player_<scenario>.json`
+- 数据文件：`_verify_out/player_<scenario>.json`
 - 说明：本机为开发机（独显），不代表低配/集显设备；三类设备矩阵仍需分别采集。
 <!-- SECTION:player-runtime:END -->

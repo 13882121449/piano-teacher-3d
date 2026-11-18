@@ -415,6 +415,81 @@ namespace PianoTeacher3D.Avatar
             Assignment.Refresh(leftHand, _scratch, Time.time, Time.frameCount);
         }
 
+        // ==================== 休息手指防穿模（2026-11-18 全面优化 P4） ====================
+        //
+        // 诊断显示最深的指节穿模来自没有分配音符的休息手指：静止弯曲时末节垂得太低，陷进白键 10–14 mm
+        // （键面挡住了，画面上不显眼，但侧视与贴近特写能看到手指「切进」琴键）。这里在每只手解算完成后，
+        // 只在手正在演奏时，对其中的休息手指测指节余量，按所需角度在指根（MCP）沿弯曲轴的反方向抬指；演奏手指不受影响，
+        // 不牺牲指尖贴键。抬指量快升（300°/s）慢落（60°/s），手指开始演奏时 180°/s 收回。
+
+        /// <summary>是否启用休息手指防穿模（默认开启）。</summary>
+        public bool EnableRestingClearance = true;
+
+        private const float RestingLiftLever = 0.06f;      // 指根到典型穿模点的力臂（米）
+        private const float RestingLiftMaxDegrees = 28f;
+        private const float RestingThumbMaxDegrees = 14f;
+        private const float RestingLiftRiseSpeed = 300f;
+        private const float RestingLiftFallSpeed = 60f;
+        private const float RestingLiftReleaseSpeed = 180f;
+        private readonly float[] _leftRestingLift = new float[MaxFingers];
+        private readonly float[] _rightRestingLift = new float[MaxFingers];
+
+        /// <summary>某手某指当前的休息抬指角（度，测试 / 诊断用）。</summary>
+        public float GetRestingLift(bool leftHand, int finger)
+        {
+            var lifts = leftHand ? _leftRestingLift : _rightRestingLift;
+            return finger >= 0 && finger < lifts.Length ? lifts[finger] : 0f;
+        }
+
+        private void ApplyRestingClearance(IHandRig hand, bool leftHand)
+        {
+            var lifts = leftHand ? _leftRestingLift : _rightRestingLift;
+            var probe = (_targetSource as HandIKController)?.ClearanceProbe;
+            if (!EnableRestingClearance || probe == null || !probe.IsBuilt || !(hand is IFingerJointRig rig))
+            {
+                System.Array.Clear(lifts, 0, lifts.Length);
+                return;
+            }
+
+            float dt = Mathf.Max(0f, Time.deltaTime);
+            float scale = probe.HandScale(rig);
+            int count = Mathf.Min(hand.Fingers.Count, MaxFingers);
+
+            // 只在这只手正在演奏（至少一根手指分配了音符）时处理：整手空闲时手悬在键面上方，
+            // 保持规格静止 C 形（MCP 25° / PIP 30° / DIP 15°，见 RestingHand_ReturnsToNaturalCurl）。
+            bool handPlaying = false;
+            for (int f = 0; f < count && !handPlaying; f++) handPlaying = Assignment.GetPitch(leftHand, f) >= 0;
+
+            for (int f = 0; f < count; f++)
+            {
+                if (!rig.TryGetJoints(f, out var proximal, out _, out _) || proximal == null) continue;
+                // 演奏中没有分配音符的手指视为休息手指（即使控制器给了预备目标，也不应压在琴键里）
+                bool resting = handPlaying && Assignment.GetPitch(leftHand, f) < 0;
+                float maxDegrees = f == 0 ? RestingThumbMaxDegrees : RestingLiftMaxDegrees;
+                if (resting)
+                {
+                    // 在本帧解算出的原始姿态上测量，得到「需要多少」而不是增量，避免累积漂移
+                    float clearance = probe.FingerClearance(rig, f, -1, scale);
+                    float needed = clearance < -KeyClearanceProbe.PenetrationTolerance * 0.5f
+                        ? Mathf.Min(maxDegrees, Mathf.Rad2Deg * (-clearance + 0.0015f) / RestingLiftLever)
+                        : 0f;
+                    float speed = needed > lifts[f] ? RestingLiftRiseSpeed : RestingLiftFallSpeed;
+                    lifts[f] = Mathf.MoveTowards(lifts[f], needed, speed * dt);
+                }
+                else
+                {
+                    lifts[f] = Mathf.MoveTowards(lifts[f], 0f, RestingLiftReleaseSpeed * dt);
+                }
+
+                if (lifts[f] > 0.01f)
+                {
+                    // 指根沿弯曲轴的反方向转动 = 伸展（抬指）
+                    Vector3 axis = JointAxes.WorldCurlAxis(proximal, 0);
+                    proximal.rotation = Quaternion.AngleAxis(-lifts[f], axis) * proximal.rotation;
+                }
+            }
+        }
+
         private void UpdateFingers(IHandRig hand, bool leftHand)
         {
             if (hand == null) return;
@@ -497,6 +572,8 @@ namespace PianoTeacher3D.Avatar
                     UpdateFingerLegacy(finger, pitch, hasTarget, worldTarget, minPitch, span);
                 }
             }
+
+            ApplyRestingClearance(hand, leftHand);
         }
 
         // ==================== 三关节铰链 IK（附录 A.4.2 / A.4.4） ====================

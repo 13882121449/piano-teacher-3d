@@ -551,6 +551,85 @@ namespace PianoTeacher3D.Avatar
             _keyMap = keyMap;
             BuildLimits();
             BuildKeyTouches(keyAnimator != null ? keyAnimator.DepressedRotation : Quaternion.identity);
+            _clearanceProbe.Build(keyMap);
+        }
+
+        // ==================== 指节防穿模（2026-11-18 全面优化 P4） ====================
+        //
+        // 指尖贴键之外，中节 / 近节 / 拇指侧面也不能压进琴键：诊断显示两类真实穿模——
+        // ① 未分配的休息手指垂得太低，末节陷进白键 10–14 mm；② 演奏手指从低腕斜着伸向白键，
+        // 末节压进相邻黑键的前角。两者都随抬腕消失：腕高了，演奏手指更立、更弯（也更符合钢琴手型），
+        // 休息手指整体离开键面。
+        // 每帧在 LateUpdate（手指解算完成后）测一次两手指节余量，下一帧在所有腕位路径（含和弦摆位、
+        // 接触拟合）之后统一加一个「抬腕量」：穿模时以 ≤ 250 mm/s 抬起，余量回到 4 mm 以上后以 20 mm/s 放回，
+        // 中间区间保持不动，避免「抬起 → 指尖找键压回 → 再穿模」的来回抖动。
+
+        /// <summary>是否启用指节防穿模（基准测试做 A/B 用；默认开启）。</summary>
+        public bool EnableSegmentClearance = false;
+
+        private const float ClearanceReleaseMargin = 0.004f;
+        private const float ClearanceLiftDecay = 0.02f;
+        private const float ClearanceLiftRate = 0.25f;
+        // 抬腕上限 6 mm：只处理演奏手指斜压到相邻黑键前角的情况；再高就会牺牲指尖贴键（悬空）
+        private const float MaxClearanceLift = 0.006f;
+
+        private readonly KeyClearanceProbe _clearanceProbe = new KeyClearanceProbe();
+        private float _leftSegmentClearance = float.PositiveInfinity;
+        private float _rightSegmentClearance = float.PositiveInfinity;
+        private float _leftPlayingClearance = float.PositiveInfinity;
+        private float _rightPlayingClearance = float.PositiveInfinity;
+
+        /// <summary>指节余量探针（手指控制器用它让休息手指离开键面）。</summary>
+        public KeyClearanceProbe ClearanceProbe => _clearanceProbe;
+        private float _leftClearanceLift;
+        private float _rightClearanceLift;
+
+        /// <summary>该手当前因防穿模而附加的抬腕量（米）。</summary>
+        public float GetClearanceLift(bool leftHand) => leftHand ? _leftClearanceLift : _rightClearanceLift;
+
+        /// <summary>最近一帧该手指节与相邻琴键的最小余量（米，负 = 穿模深度；无法测量为 +∞）。</summary>
+        public float GetSegmentClearance(bool leftHand) => leftHand ? _leftSegmentClearance : _rightSegmentClearance;
+
+        /// <summary>诊断用：描述该手当前最深的指节穿模点（会分配字符串，只在测试中调用）。</summary>
+        public string DescribeSegmentClearance(bool leftHand)
+            => _clearanceProbe.DescribeWorst((leftHand ? _avatar?.LeftHand : _avatar?.RightHand) as IFingerJointRig,
+                Assignment, leftHand);
+
+        private void MeasureSegmentClearance()
+        {
+            if (!_clearanceProbe.IsBuilt || _avatar == null)
+            {
+                _leftSegmentClearance = float.PositiveInfinity;
+                _rightSegmentClearance = float.PositiveInfinity;
+                _leftPlayingClearance = float.PositiveInfinity;
+                _rightPlayingClearance = float.PositiveInfinity;
+                return;
+            }
+            var left = _avatar.LeftHand as IFingerJointRig;
+            var right = _avatar.RightHand as IFingerJointRig;
+            _leftSegmentClearance = _clearanceProbe.HandClearance(left, Assignment, true);
+            _rightSegmentClearance = _clearanceProbe.HandClearance(right, Assignment, false);
+            _leftPlayingClearance = _clearanceProbe.HandClearance(left, Assignment, true, playingOnly: true);
+            _rightPlayingClearance = _clearanceProbe.HandClearance(right, Assignment, false, playingOnly: true);
+        }
+
+        /// <summary>按上一帧测得的指节余量更新该手的抬腕量（米）。</summary>
+        private float UpdateClearanceLift(bool leftHand)
+        {
+            ref float lift = ref (leftHand ? ref _leftClearanceLift : ref _rightClearanceLift);
+            if (!EnableSegmentClearance)
+            {
+                lift = 0f;
+                return 0f;
+            }
+
+            float clearance = leftHand ? _leftPlayingClearance : _rightPlayingClearance;
+            float dt = Mathf.Max(Time.deltaTime, 1e-4f);
+            if (clearance < -KeyClearanceProbe.PenetrationTolerance * 0.5f)
+                lift = Mathf.Min(MaxClearanceLift, lift + Mathf.Min(-clearance + 0.001f, ClearanceLiftRate * dt));
+            else if (clearance > ClearanceReleaseMargin)
+                lift = Mathf.Max(0f, lift - ClearanceLiftDecay * dt);
+            return lift;
         }
 
         /// <summary>由控制器每帧传入统一时间轴时间（用于自适应速度与指标采样）。</summary>
@@ -773,6 +852,7 @@ namespace PianoTeacher3D.Avatar
         private void LateUpdate()
         {
             // 采集手腕和手指均完成更新后的实际姿态。
+            if (_avatar != null && _keyMap != null) MeasureSegmentClearance();
             if (EnableMetrics && _avatar != null && _keyMap != null) SampleMetrics();
         }
 
@@ -1099,6 +1179,8 @@ namespace PianoTeacher3D.Avatar
                 if (!fitted) rawTarget.y += AdjustContactHeight(hand, leftHand, hasTarget);
                 SeparateIdleWrist(leftHand, hasTarget || preselected, ref rawTarget);
             }
+            // P4 指节防穿模：和弦摆位、接触拟合、腕高闭环之后统一抬腕，任何路径都不让指节压进琴键
+            rawTarget.y += UpdateClearanceLift(leftHand);
             if (leftHand) _leftUsesChordPlacement = usesChordPlacement;
             else _rightUsesChordPlacement = usesChordPlacement;
             if (!usesChordPlacement || !(hand is IHandOrientationRig))
@@ -1836,7 +1918,9 @@ namespace PianoTeacher3D.Avatar
 
                 TransitionFrame = _transitionFrame,
                 JointLimitHits = jointLimitDelta,
-                FingerPenetration = leftPenetration || rightPenetration
+                FingerPenetration = leftPenetration || rightPenetration,
+                HasSegmentClearance = _clearanceProbe.IsBuilt,
+                SegmentClearance = Mathf.Min(_leftSegmentClearance, _rightSegmentClearance)
             };
             _metrics.AddSample(sample);
 

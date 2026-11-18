@@ -164,8 +164,7 @@ namespace PianoTeacher3D.UI
             if (btn.targetGraphic is Image img)
             {
                 img.color = UITheme.Transparent;
-                var sprite = UITheme.GetRoundedSprite(UITheme.RadiusSmall);
-                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+                UITheme.SetRoundedSprite(img, UITheme.RadiusSmall);
             }
             UITheme.ApplyFlatLook(btn);
             ApplyGhostText(btn);
@@ -190,8 +189,7 @@ namespace PianoTeacher3D.UI
             if (btn.targetGraphic is Image img)
             {
                 img.color = UITheme.Transparent;
-                var sprite = UITheme.GetRoundedSprite(UITheme.RadiusSmall);
-                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+                UITheme.SetRoundedSprite(img, UITheme.RadiusSmall);
             }
             UITheme.ApplyFlatLook(btn);
 
@@ -215,14 +213,13 @@ namespace PianoTeacher3D.UI
             var img = btn.targetGraphic as Image;
             if (img != null)
             {
-                var sprite = UITheme.GetRoundedSprite(UITheme.RadiusMedium);
-                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+                UITheme.SetRoundedSprite(img, UITheme.RadiusMedium);
                 UITheme.SetOutline(img, false, UITheme.BorderSelected, 1f);
             }
             var text = UITheme.GetLabel(btn);
             if (text != null)
             {
-                text.fontStyle = FontStyle.Bold;
+                UITheme.SetButtonWeight(text, true);
                 text.color = UITheme.TextOnAccent;
             }
             UITheme.SetButtonTooltip(btn, UITheme.ComposeTooltip(tooltip, shortcut));
@@ -239,8 +236,7 @@ namespace PianoTeacher3D.UI
             var img = btn.targetGraphic as Image;
             if (img != null)
             {
-                var sprite = UITheme.GetRoundedSprite(UITheme.RadiusMedium);
-                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+                UITheme.SetRoundedSprite(img, UITheme.RadiusMedium);
                 UITheme.SetOutline(img, true, UITheme.Divider, 1f);
             }
             UITheme.SetButtonTooltip(btn, UITheme.ComposeTooltip(tooltip, shortcut));
@@ -262,8 +258,7 @@ namespace PianoTeacher3D.UI
 
             if (btn.targetGraphic is Image img)
             {
-                var sprite = UITheme.GetRoundedSprite(UITheme.RadiusLarge);
-                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+                UITheme.SetRoundedSprite(img, UITheme.RadiusLarge);
                 img.color = UITheme.CardBg;
                 UITheme.SetOutline(img, true, UITheme.CardBorder, 1f);
             }
@@ -279,7 +274,7 @@ namespace PianoTeacher3D.UI
             {
                 label.text = title ?? "";
                 label.alignment = TextAnchor.UpperLeft;
-                label.fontStyle = FontStyle.Bold;
+                UITheme.SetWeight(label, true);
                 label.color = UITheme.TextPrimary;
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
@@ -360,7 +355,7 @@ namespace PianoTeacher3D.UI
             var label = UITheme.GetLabel(btn);
             if (label == null) return;
             label.color = UITheme.TextPrimary;
-            label.fontStyle = FontStyle.Normal;
+            UITheme.SetButtonWeight(label, false);
             label.alignment = TextAnchor.MiddleCenter;
             UITheme.StretchAll(label.rectTransform, UITheme.Space8, UITheme.Space8, 0f, 0f);
         }

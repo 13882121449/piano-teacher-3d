@@ -138,13 +138,17 @@ namespace PianoTeacher3D.Piano
 
             // ---- 材质（白键 1 份、黑键顶面 1 份、黑键侧壁/支撑 1 份；禁止每键 new Material）----
             // 黑键 albedo 从 0.07 提到 0.13 并给非零光泽度，避免"完全无反射的纯黑"（方案 5.4）。
-            Material whiteMat = CreateMaterial("KeyWhite", new Color(0.96f, 0.96f, 0.94f), 0.00f, 0.32f);
-            Material blackTopMat = CreateMaterial("KeyBlackTop", new Color(0.11f, 0.10f, 0.10f), 0.00f, 0.30f);
-            Material blackSideMat = CreateMaterial("KeyBlackSide", new Color(0.055f, 0.055f, 0.062f), 0.00f, 0.15f);
+            // 2026-11-18 精修：白键用干净的暖白清漆键面（现代钢琴亚克力键面的柔和高光），
+            // 黑键顶面与侧壁统一为乌木清漆，侧壁不再发灰。材质资产缺失时退回原程序化材质。
+            Material sharedWhite = PianoSharedMaterials.Get("PianoKeyIvory");
+            Material sharedBlack = PianoSharedMaterials.Get("PianoKeyEbony");
+            Material whiteMat = sharedWhite ?? CreateMaterial("KeyWhite", new Color(0.96f, 0.96f, 0.94f), 0.00f, 0.32f);
+            Material blackTopMat = sharedBlack ?? CreateMaterial("KeyBlackTop", new Color(0.11f, 0.10f, 0.10f), 0.00f, 0.30f);
+            Material blackSideMat = sharedBlack ?? CreateMaterial("KeyBlackSide", new Color(0.055f, 0.055f, 0.062f), 0.00f, 0.15f);
 
             // 程序化象牙纹理（写实化二期）：顶点级三平面 UV 已就位，贴图可以直接用。
             // 基色归白是必须的——贴图自带颜色，若仍乘原来的 0.96 白，会再压暗一层。
-            ApplyProceduralTexture(whiteMat, ProceduralTextures.Ivory(), 1f);
+            if (sharedWhite == null) ApplyProceduralTexture(whiteMat, ProceduralTextures.Ivory(), 1f);
 
             // ---- 网格（白键 1 份、黑键 3 份，全部复用于 88 键）----
             // 白键从 TopOnly 改为 AllEdges：真实白键的前端是圆润收边的，只有顶面倒角时

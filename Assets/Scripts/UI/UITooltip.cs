@@ -72,7 +72,11 @@ namespace PianoTeacher3D.UI
 
         public void OnSelect(BaseEventData eventData)
         {
-            // 键盘焦点同样给出提示（方案 3.4「控件应有键盘焦点顺序」）
+            // 键盘焦点同样给出提示（方案 3.4「控件应有键盘焦点顺序」）。
+            // 只响应方向键 / 手柄导航（AxisEventData）：鼠标点击选中（PointerEventData）
+            // 和代码设置焦点（打开「更多」浮层时把焦点放到第一项）都不弹提示，
+            // 否则提示会一直压在刚打开的面板上。
+            if (!(eventData is AxisEventData)) return;
             if (string.IsNullOrEmpty(_text)) return;
             CancelPending();
             _pending = StartCoroutine(ShowAfterDelay());
@@ -179,7 +183,7 @@ namespace PianoTeacher3D.UI
             if (bg.sprite != null) bg.type = Image.Type.Sliced;
             bg.color = UITheme.PanelBgRaised;
             bg.raycastTarget = false;
-            UITheme.SetOutline(bg, true, UITheme.Divider, 1f);
+            UITheme.ApplyGlass(bg, UITheme.RadiusSmall);
 
             _hostLabel = UITheme.CreateText(_host.transform, "", Vector2.zero, new Vector2(200f, 20f),
                 UITheme.FontBodySmall, UITheme.TextPrimary, TextAnchor.MiddleLeft);

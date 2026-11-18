@@ -51,89 +51,94 @@ namespace PianoTeacher3D.UI
     /// </summary>
     public static class UITheme
     {
-        // ==================== 配色（三层：底 → 面 → 浮，禁止第 4 级） ====================
+        // ==================== 配色：iOS 深色毛玻璃（底 → 玻璃面 → 填充控件） ====================
+        //
+        // 2026-11-18 按 iOS 深色材质重做：面板不再是不透明色块，而是 FrostedGlass 着色器
+        // 采样背后模糊的 3D 画面，再叠一层石墨灰色调（见 ApplyGlass）。下面的面板色是
+        // 「色调」，控件色接近 iOS 的 tertiarySystemFill（灰 + 半透明），选中色取 iOS
+        // 深色分段控件的 #636366。对比度测试只看 RGB，因此色调 RGB 保持足够深。
 
         /// <summary>
         /// 底：场景背景（最深）。由 <c>Core/LessonSessionController</c> 直接使用，务必保留。
-        /// 深灰琴漆色，其他界面层级在此基础上提亮。
         /// </summary>
-        public static readonly Color SceneBg = new Color32(9, 13, 22, 255);
+        public static readonly Color SceneBg = new Color32(11, 11, 13, 255);
 
-        /// <summary>面：面板底色（带轻微透明，浮于场景之上）。</summary>
-        public static readonly Color PanelBg = new Color32(24, 31, 45, 250);
+        /// <summary>面：玻璃面板色调（石墨灰，接近 iOS systemThinMaterialDark）。</summary>
+        public static readonly Color PanelBg = new Color32(30, 30, 34, 245);
 
-        /// <summary>浮：控件底色（按钮常态 / 玻璃卡之上的实体块）。</summary>
-        public static readonly Color Control = new Color32(35, 46, 65, 255);
+        /// <summary>浮：控件填充（iOS tertiarySystemFill 在深色玻璃上的等效色，略透出玻璃）。</summary>
+        public static readonly Color Control = new Color32(62, 62, 68, 220);
 
-        /// <summary>控件悬停色（唯一允许的悬停提亮，不再另造第 4 级）。</summary>
-        public static readonly Color ControlHover = new Color32(50, 66, 92, 255);
+        /// <summary>控件悬停色（比常态更亮一档）。</summary>
+        public static readonly Color ControlHover = new Color32(82, 82, 89, 230);
 
         /// <summary>控件按下色（比常态更暗，与悬停形成两个方向）。</summary>
-        public static readonly Color ControlPressed = new Color32(26, 36, 53, 255);
+        public static readonly Color ControlPressed = new Color32(46, 46, 51, 220);
 
-        // ==================== 强调色（冷白蓝） ====================
+        // ==================== 强调色（iOS 媒体控件式的白色主按钮） ====================
 
-        public static readonly Color Accent = new Color32(198, 221, 252, 255);
-        public static readonly Color AccentBright = new Color32(229, 239, 255, 255);
-        public static readonly Color AccentDim = new Color32(75, 108, 158, 255);
+        public static readonly Color Accent = new Color32(242, 242, 247, 255);
+        public static readonly Color AccentBright = new Color32(255, 255, 255, 255);
+        public static readonly Color AccentDim = new Color32(142, 142, 147, 255);
 
-        // ==================== 文字 ====================
+        // ==================== 文字（iOS label / secondaryLabel 在深色玻璃上的等效色） ====================
 
-        public static readonly Color TextPrimary = new Color32(241, 246, 253, 255);
-        public static readonly Color TextSecondary = new Color32(192, 205, 225, 255);
-        public static readonly Color TextOnAccent = new Color32(12, 20, 33, 255);
+        public static readonly Color TextPrimary = new Color32(255, 255, 255, 255);
+        public static readonly Color TextSecondary = new Color32(200, 200, 208, 255);
+        public static readonly Color TextOnAccent = new Color32(14, 14, 16, 255);
 
         public static readonly Color Walnut = new Color32(77, 53, 44, 255);
         public static readonly Color PianoIvory = new Color32(238, 231, 214, 255);
         public static readonly Color PianoIvoryShadow = new Color32(187, 176, 155, 255);
         public static readonly Color PianoFelt = new Color32(113, 47, 48, 255);
-        public static readonly Color ModalShade = new Color32(0, 0, 0, 166);
 
-        // ==================== 状态色 ====================
+        /// <summary>弹窗遮罩：玻璃弹窗自带层次，遮罩只需轻压背景。</summary>
+        public static readonly Color ModalShade = new Color32(0, 0, 0, 110);
 
-        public static readonly Color Error = new Color(0.898f, 0.451f, 0.451f, 1f);
-        public static readonly Color Success = new Color(0.298f, 0.686f, 0.314f, 1f);
+        // ==================== 状态色（iOS systemRed / systemGreen 的深色版） ====================
 
-        // ==================== 新增令牌：层次 / 分割 / 状态（方案 3.3 / 审查 2.2A） ====================
+        public static readonly Color Error = new Color32(255, 105, 97, 255);
+        public static readonly Color Success = new Color32(48, 209, 88, 255);
 
-        /// <summary>抬升面板底色：次级功能卡片、分段控件轨道之上的一级。</summary>
-        public static readonly Color PanelBgRaised = new Color32(31, 41, 59, 255);
+        // ==================== 层次 / 分割 / 状态（方案 3.3 / 审查 2.2A） ====================
 
-        /// <summary>
-        /// 可点击卡片的底色。比 <see cref="PanelBgRaised"/> 再亮一档：主菜单背景接近纯黑，
-        /// 卡片若与背景亮度差 &lt; 0.05 就会「存在但看不见」（实测截图里四张入口卡几乎与背景融为一体）。
-        /// </summary>
-        public static readonly Color CardBg = new Color32(31, 43, 63, 255);
+        /// <summary>抬升面板色调：弹窗、次级卡片（比 <see cref="PanelBg"/> 亮一档）。</summary>
+        public static readonly Color PanelBgRaised = new Color32(44, 44, 48, 250);
 
-        /// <summary>卡片描边：灰蓝，保证在深色背景上能勾出卡片轮廓（1px）。</summary>
-        public static readonly Color CardBorder = new Color32(71, 91, 120, 255);
+        /// <summary>可点击卡片的色调（iOS secondarySystemGroupedBackground 深色版）。</summary>
+        public static readonly Color CardBg = new Color32(40, 40, 44, 240);
 
-        /// <summary>顶栏 / 底栏底色（比普通面板更深，压住 3D 画面又不抢眼）。</summary>
-        public static readonly Color PanelBgDeep = new Color32(15, 22, 35, 250);
+        /// <summary>卡片描边：白色低透明发丝线（玻璃边缘的高光）。</summary>
+        public static readonly Color CardBorder = new Color(1f, 1f, 1f, 0.12f);
 
-        /// <summary>
-        /// 玻璃卡底色：直接压在 3D 画面上的一层（左上视角提示卡）。
-        /// alpha 0.72 仍保证 <see cref="TextSecondary"/> 对比度 ≥ 3:1。
-        /// </summary>
-        public static readonly Color PanelBgGlass = new Color32(19, 27, 43, 224);
-
-        /// <summary>分割线（半透明，不与强调色争抢注意力）。</summary>
-        public static readonly Color Divider = new Color(0.66f, 0.76f, 0.91f, 0.19f);
+        /// <summary>顶栏 / 底栏色调（比普通面板更深，压住 3D 画面又不抢眼）。</summary>
+        public static readonly Color PanelBgDeep = new Color32(20, 20, 23, 250);
 
         /// <summary>
-        /// 选中态底色（分段选择器选中项 / 开关开启项）。
-        /// 比 <see cref="AccentDim"/> 更深，保证与 <see cref="TextPrimary"/> 的对比度 ≥ 4.5:1（实测 6.8:1）。
+        /// 浮在 3D 画面上的轻玻璃卡（左上视角提示卡）。比 <see cref="PanelBg"/> 更透。
         /// </summary>
-        public static readonly Color Selected = new Color32(52, 78, 117, 255);
+        public static readonly Color PanelBgGlass = new Color32(28, 28, 32, 224);
 
-        /// <summary>警告色（功能降级但可继续）。</summary>
-        public static readonly Color Warning = new Color(0.960f, 0.741f, 0.365f, 1f);
+        /// <summary>玻璃面板的高光描边（iOS 材质边缘的 0.5～1px 亮线）。</summary>
+        public static readonly Color GlassStroke = new Color(1f, 1f, 1f, 0.14f);
+
+        /// <summary>分割线（iOS separator 深色版）。</summary>
+        public static readonly Color Divider = new Color(1f, 1f, 1f, 0.12f);
+
+        /// <summary>
+        /// 选中态底色（分段选择器选中项 / 开关开启项）：iOS 液态玻璃里激活开关的实心系统蓝，
+        /// 取略深的 #0071E3，与 <see cref="TextPrimary"/> 的对比度约 4.7:1。
+        /// </summary>
+        public static readonly Color Selected = new Color32(0, 113, 227, 255);
+
+        /// <summary>警告色（iOS systemOrange 深色版）。</summary>
+        public static readonly Color Warning = new Color32(255, 179, 64, 255);
 
         /// <summary>禁用底色。</summary>
-        public static readonly Color Disabled = new Color32(28, 34, 45, 255);
+        public static readonly Color Disabled = new Color32(38, 38, 42, 200);
 
         /// <summary>禁用文字色。</summary>
-        public static readonly Color TextDisabled = new Color32(112, 126, 149, 255);
+        public static readonly Color TextDisabled = new Color32(112, 112, 118, 255);
 
         /// <summary>错误文字色（比底色更亮，保证暗色面板上的对比度）。</summary>
         public static readonly Color TextError = new Color(0.949f, 0.639f, 0.639f, 1f);
@@ -144,14 +149,14 @@ namespace PianoTeacher3D.UI
         /// <summary>危险 / 破坏性操作底色（需配合确认弹窗）。</summary>
         public static readonly Color DangerBg = new Color(0.545f, 0.216f, 0.216f, 1f);
 
-        /// <summary>进度条轨道底色（比面板更深，让填充色成为唯一亮线）。</summary>
-        public static readonly Color TrackBg = new Color(0.078f, 0.086f, 0.102f, 1f);
+        /// <summary>进度条轨道：白色低透明，压在玻璃上像 iOS 媒体进度条。</summary>
+        public static readonly Color TrackBg = new Color(1f, 1f, 1f, 0.20f);
 
         /// <summary>完全透明（纯布局容器，不参与渲染与射线检测）。</summary>
         public static readonly Color Transparent = new Color(0f, 0f, 0f, 0f);
 
-        /// <summary>按钮/面板边框色（选中态、焦点态共用；颜色之外的第二重区分）。</summary>
-        public static readonly Color BorderSelected = new Color32(156, 190, 240, 255);
+        /// <summary>选中态、焦点态描边（颜色之外的第二重区分）。</summary>
+        public static readonly Color BorderSelected = new Color(1f, 1f, 1f, 0.45f);
 
         // ==================== 教学语义色（审查 2.3「颜色语义不变」） ====================
 
@@ -217,16 +222,17 @@ namespace PianoTeacher3D.UI
         public const float Space24 = 24f;
         public const float Space32 = 32f;
 
-        // ==================== 圆角等级（面板 12 / 按钮 10 / chip 8 / 进度条 3） ====================
+        // ==================== 圆角等级（面板 28 / 按钮 20 / chip 16 / 进度条 3，iOS 液态玻璃） ====================
+        // chip（32 高）与按钮（40 高）的圆角都达到半高，即胶囊形；面板用大圆角模块。
 
-        /// <summary>圆角：chip / 分段项 / 状态标签（8）。</summary>
-        public const int RadiusSmall = 8;
+        /// <summary>圆角：chip / 分段项 / 状态标签（16，32 高时为胶囊）。</summary>
+        public const int RadiusSmall = 16;
 
-        /// <summary>圆角：按钮 / 输入类控件（10）。</summary>
-        public const int RadiusMedium = 10;
+        /// <summary>圆角：按钮 / 输入类控件（20，40 高时为胶囊）。</summary>
+        public const int RadiusMedium = 20;
 
-        /// <summary>圆角：面板 / 卡片 / 浮层（12）。</summary>
-        public const int RadiusLarge = 12;
+        /// <summary>圆角：玻璃面板 / 卡片 / 浮层（28，液态玻璃模块式大圆角）。</summary>
+        public const int RadiusLarge = 28;
 
         /// <summary>圆角：进度条轨道 / 填充（3，接近直角的细线感）。</summary>
         public const int RadiusBar = 3;
@@ -337,7 +343,7 @@ namespace PianoTeacher3D.UI
             // ---- 左上视角提示卡 ----
 
             /// <summary>提示卡宽度（只占左上 220，不进入演奏区中心）。</summary>
-            public const float HintCardWidth = 220f;
+            public const float HintCardWidth = 240f;
 
             /// <summary>提示卡高度（12 内边距 + 18 标题行 + 4 + 16 + 4 + 16 + 12）。</summary>
             public const float HintCardHeight = 88f;
@@ -464,21 +470,72 @@ namespace PianoTeacher3D.UI
         // ==================== 字体 / 程序化 Sprite ====================
 
         private static Font _font;
+        private static Font _fontMedium;
+        private static Font _fontBold;
+        private static Font _builtinFont;
 
         /// <summary>
-        /// 中文字体：沿用内置 LegacyRuntime.ttf（不引入 TextMeshPro，不下载任何素材）。
+        /// 中文字体：思源黑体 SC Regular（Noto Sans SC，SIL OFL 1.1，见 Docs/licenses）。
+        /// 字体文件放在 <c>Resources/Fonts</c>；取不到时回退内置 LegacyRuntime.ttf。
         /// </summary>
         public static Font Font
         {
             get
             {
-                if (_font == null)
-                {
-                    _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                    if (_font == null) _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-                }
+                if (_font == null) _font = LoadFont("Fonts/NotoSansSC-Regular");
                 return _font;
             }
+        }
+
+        /// <summary>中等字重（按钮文字，接近 iOS 的 Semibold 观感）。</summary>
+        public static Font FontMedium
+        {
+            get
+            {
+                if (_fontMedium == null) _fontMedium = LoadFont("Fonts/NotoSansSC-Medium");
+                return _fontMedium;
+            }
+        }
+
+        /// <summary>粗体（标题、选中项）。用真实粗体字形，不再靠 Unity 的合成加粗。</summary>
+        public static Font FontBold
+        {
+            get
+            {
+                if (_fontBold == null) _fontBold = LoadFont("Fonts/NotoSansSC-Bold");
+                return _fontBold;
+            }
+        }
+
+        private static Font LoadFont(string resourcePath)
+        {
+            var font = Resources.Load<Font>(resourcePath);
+            if (font != null) return font;
+            if (_builtinFont == null)
+            {
+                _builtinFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                if (_builtinFont == null) _builtinFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            }
+            return _builtinFont;
+        }
+
+        /// <summary>
+        /// 切换字重：粗体换成真实的 Bold 字体文件，常规换回 Regular，并清掉合成加粗。
+        /// 状态切换（选中 / 取消）统一走这里，避免同一控件忽而真粗体、忽而合成粗体。
+        /// </summary>
+        public static void SetWeight(Text text, bool bold)
+        {
+            if (text == null) return;
+            text.font = bold ? FontBold : Font;
+            text.fontStyle = FontStyle.Normal;
+        }
+
+        /// <summary>按钮文字字重：中等字重，主按钮 / 选中态用粗体。</summary>
+        public static void SetButtonWeight(Text text, bool strong)
+        {
+            if (text == null) return;
+            text.font = strong ? FontBold : FontMedium;
+            text.fontStyle = FontStyle.Normal;
         }
 
         private static Sprite _rounded;
@@ -515,8 +572,30 @@ namespace PianoTeacher3D.UI
             if (_roundedByRadius.TryGetValue(radius, out var cached) && cached != null) return cached;
 
             int size = Mathf.Max(48, radius * 3);
-            var sprite = CreateRoundedSprite(size, radius);
+            var sprite = CreateRoundedSprite(size, radius, SpriteSupersample);
             _roundedByRadius[radius] = sprite;
+            return sprite;
+        }
+
+        /// <summary>
+        /// 圆角贴图的超采样倍数：贴图按 2 倍像素生成、pixelsPerUnit 也翻倍，
+        /// 九宫格边框在参考分辨率下尺寸不变，但 1080p / 高 DPI 下圆角边缘更细腻。
+        /// </summary>
+        private const int SpriteSupersample = 2;
+
+        private static readonly Dictionary<int, Sprite> _strokeByRadius = new Dictionary<int, Sprite>();
+
+        /// <summary>
+        /// 圆角描边环（九宫格，1px 宽）：玻璃面板边缘的高光线。与 <see cref="GetRoundedSprite"/>
+        /// 用同一条连续圆角曲线，描边与面板外轮廓完全重合。
+        /// </summary>
+        public static Sprite GetRoundedStrokeSprite(int radius)
+        {
+            radius = Mathf.Clamp(radius, 2, 32);
+            if (_strokeByRadius.TryGetValue(radius, out var cached) && cached != null) return cached;
+            int size = Mathf.Max(48, radius * 3);
+            var sprite = CreateRoundedSprite(size, radius, SpriteSupersample, 1f);
+            _strokeByRadius[radius] = sprite;
             return sprite;
         }
 
@@ -624,32 +703,59 @@ namespace PianoTeacher3D.UI
             }
         }
 
-        private static Sprite CreateRoundedSprite(int size, int radius)
+        /// <summary>
+        /// 连续圆角（iOS 风格）的指数：角部轮廓取超椭圆 |x|^n + |y|^n = r^n。
+        /// n = 2 是普通圆角；n ≈ 4 时直边到圆弧的曲率过渡更平滑，接近 iOS 的「squircle」。
+        /// </summary>
+        private const float CornerExponent = 4f;
+
+        /// <summary>超椭圆角的等效半径放大系数：n = 4 的角比同半径圆角更「方」，略放大让视觉半径一致。</summary>
+        private const float CornerScale = 1.22f;
+
+        /// <param name="size">参考像素尺寸（九宫格中心可拉伸）。</param>
+        /// <param name="radius">参考像素圆角。</param>
+        /// <param name="supersample">贴图像素 / 参考像素。</param>
+        /// <param name="stroke">0 = 实心；&gt; 0 = 只保留宽度为 stroke（参考像素）的描边环。</param>
+        private static Sprite CreateRoundedSprite(int size, int radius, int supersample = 1, float stroke = 0f)
         {
+            supersample = Mathf.Clamp(supersample, 1, 4);
             radius = Mathf.Clamp(radius, 1, size / 2);
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            int texSize = size * supersample;
+            float r = Mathf.Min(radius * CornerScale, size * 0.5f) * supersample;
+            int border = Mathf.CeilToInt(r) + supersample;
+            float strokePx = stroke * supersample;
+
+            var tex = new Texture2D(texSize, texSize, TextureFormat.RGBA32, false)
             {
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear,
-                name = "UITheme_Rounded"
+                name = stroke > 0f ? "UITheme_RoundedStroke" : "UITheme_Rounded"
             };
-            var pixels = new Color32[size * size];
-            for (int y = 0; y < size; y++)
+            var pixels = new Color32[texSize * texSize];
+            for (int y = 0; y < texSize; y++)
             {
-                for (int x = 0; x < size; x++)
+                for (int x = 0; x < texSize; x++)
                 {
                     float px = x + 0.5f, py = y + 0.5f;
-                    float cx = Mathf.Clamp(px, radius, size - radius);
-                    float cy = Mathf.Clamp(py, radius, size - radius);
-                    float d = Mathf.Sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-                    float a = Mathf.Clamp01(radius - d + 0.5f); // 1px 抗锯齿
-                    pixels[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
+                    // 到角心的距离（超椭圆范数）；直边区域退化为到边的距离
+                    float dx = Mathf.Max(0f, Mathf.Max(r - px, px - (texSize - r)));
+                    float dy = Mathf.Max(0f, Mathf.Max(r - py, py - (texSize - r)));
+                    float d = Mathf.Pow(Mathf.Pow(dx, CornerExponent) + Mathf.Pow(dy, CornerExponent),
+                        1f / CornerExponent);
+                    float inside = Mathf.Clamp01(r - d + 0.5f); // 1 贴图像素抗锯齿
+                    float a = inside;
+                    if (strokePx > 0f)
+                    {
+                        float inner = Mathf.Clamp01(r - strokePx - d + 0.5f);
+                        a = Mathf.Clamp01(inside - inner);
+                    }
+                    pixels[y * texSize + x] = new Color32(255, 255, 255, (byte)(a * 255f));
                 }
             }
             tex.SetPixels32(pixels);
             tex.Apply();
-            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f),
-                100f, 0, SpriteMeshType.FullRect, new Vector4(radius, radius, radius, radius));
+            return Sprite.Create(tex, new Rect(0, 0, texSize, texSize), new Vector2(0.5f, 0.5f),
+                100f * supersample, 0, SpriteMeshType.FullRect, new Vector4(border, border, border, border));
         }
 
         private static Sprite BuildCircleSprite(int size)
@@ -882,6 +988,7 @@ namespace PianoTeacher3D.UI
             img.color = color;
             img.sprite = RoundedSprite;
             img.type = Image.Type.Sliced;
+            if (IsGlassSurface(color)) ApplyGlass(img, RadiusMedium);
             return rt;
         }
 
@@ -893,7 +1000,200 @@ namespace PianoTeacher3D.UI
             img.color = color;
             var sprite = GetRoundedSprite(radius);
             if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
+            if (IsGlassSurface(color)) ApplyGlass(img, radius);
             return rt;
+        }
+
+        // ==================== 毛玻璃（iOS 材质） ====================
+
+        private const string GlassShaderName = "PianoTeacher3D/UI/FrostedGlass";
+        private const string GlassStrokeName = "GlassStroke";
+        private static Material _glassMaterial;
+        private static Material _glassControlMaterial;
+
+        /// <summary>玻璃的两档：面板（通透、强边缘高光与折射）与控件（更亮、色调更足的小玻璃）。</summary>
+        public enum GlassKind
+        {
+            Panel,
+            Control
+        }
+
+        /// <summary>
+        /// 液态玻璃面板材质（全局共享一份，所有玻璃面板同批绘制）。着色器缺失时返回 null，
+        /// 面板退回普通 Image 纯色，不影响功能。
+        /// </summary>
+        public static Material GlassMaterial
+        {
+            get
+            {
+                if (_glassMaterial == null)
+                {
+                    var shader = Shader.Find(GlassShaderName);
+                    if (shader != null)
+                        _glassMaterial = new Material(shader) { name = "UITheme_LiquidGlass" };
+                }
+                return _glassMaterial;
+            }
+        }
+
+        /// <summary>液态玻璃控件材质：按钮 / chip 常态。比面板更亮，色调更足，折射更小。</summary>
+        public static Material GlassControlMaterial
+        {
+            get
+            {
+                if (_glassControlMaterial == null)
+                {
+                    var shader = Shader.Find(GlassShaderName);
+                    if (shader != null)
+                    {
+                        _glassControlMaterial = new Material(shader) { name = "UITheme_LiquidGlassControl" };
+                        _glassControlMaterial.SetFloat("_TintStrength", 0.34f);
+                        _glassControlMaterial.SetFloat("_Brightness", 1.12f);
+                        _glassControlMaterial.SetFloat("_Lift", 0.02f);
+                        _glassControlMaterial.SetFloat("_RimIntensity", 0.62f);
+                        _glassControlMaterial.SetFloat("_Refraction", 6f);
+                        _glassControlMaterial.SetFloat("_Frost", 0.09f);
+                    }
+                }
+                return _glassControlMaterial;
+            }
+        }
+
+        private static bool IsGlassMaterial(Material material)
+            => material != null && (material == _glassMaterial || material == _glassControlMaterial);
+
+        private static readonly Dictionary<int, Sprite> _glassByRadius = new Dictionary<int, Sprite>();
+
+        /// <summary>
+        /// 液态玻璃贴图（九宫格）：alpha = 连续圆角形状；R = 离边缘的接近度（0 内部 → 1 外沿）；
+        /// G / B = 边缘外法线（打包到 0..1）。着色器据此画边缘高光并做边缘折射。
+        /// 边缘带宽度不超过九宫格边框，拉伸的中心区恒为「内部」，任何尺寸的面板都一致。
+        /// </summary>
+        public static Sprite GetGlassSprite(int radius)
+        {
+            radius = Mathf.Clamp(radius, 2, 32);
+            if (_glassByRadius.TryGetValue(radius, out var cached) && cached != null) return cached;
+            int size = Mathf.Max(48, radius * 3);
+            var sprite = CreateGlassSprite(size, radius, SpriteSupersample);
+            _glassByRadius[radius] = sprite;
+            return sprite;
+        }
+
+        private static Sprite CreateGlassSprite(int size, int radius, int supersample)
+        {
+            supersample = Mathf.Clamp(supersample, 1, 4);
+            radius = Mathf.Clamp(radius, 1, size / 2);
+            int texSize = size * supersample;
+            float r = Mathf.Min(radius * CornerScale, size * 0.5f) * supersample;
+            int border = Mathf.CeilToInt(r) + supersample;
+            float band = Mathf.Clamp(radius * 0.55f, 5f, 16f) * supersample;
+            band = Mathf.Min(band, r - supersample);
+
+            // 编码数据必须按线性值采样（项目是 Linear 色彩空间，sRGB 贴图会把 0.5 变成 0.21）
+            var tex = new Texture2D(texSize, texSize, TextureFormat.RGBA32, false, true)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                name = "UITheme_LiquidGlass"
+            };
+            var pixels = new Color32[texSize * texSize];
+            for (int y = 0; y < texSize; y++)
+            {
+                for (int x = 0; x < texSize; x++)
+                {
+                    float px = x + 0.5f, py = y + 0.5f;
+                    float left = r - px, right = px - (texSize - r);
+                    float bottom = r - py, top = py - (texSize - r);
+                    float dx = Mathf.Max(0f, Mathf.Max(left, right));
+                    float dy = Mathf.Max(0f, Mathf.Max(bottom, top));
+                    float sx = left > right ? -1f : 1f;
+                    float sy = bottom > top ? -1f : 1f;
+                    float d = Mathf.Pow(Mathf.Pow(dx, CornerExponent) + Mathf.Pow(dy, CornerExponent),
+                        1f / CornerExponent);
+                    float alpha = Mathf.Clamp01(r - d + 0.5f);
+
+                    float edge = 0f;
+                    Vector2 normal = Vector2.zero;
+                    if (dx > 0f || dy > 0f)
+                    {
+                        edge = Mathf.Clamp01(1f - (r - d) / Mathf.Max(1f, band));
+                        // 超椭圆的梯度方向：(dx^(n-1), dy^(n-1))
+                        normal = new Vector2(sx * Mathf.Pow(dx, CornerExponent - 1f),
+                            sy * Mathf.Pow(dy, CornerExponent - 1f)).normalized;
+                    }
+                    pixels[y * texSize + x] = new Color32(
+                        (byte)Mathf.RoundToInt(edge * 255f),
+                        (byte)Mathf.RoundToInt((normal.x * 0.5f + 0.5f) * 255f),
+                        (byte)Mathf.RoundToInt((normal.y * 0.5f + 0.5f) * 255f),
+                        (byte)Mathf.RoundToInt(alpha * 255f));
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, texSize, texSize), new Vector2(0.5f, 0.5f),
+                100f * supersample, 0, SpriteMeshType.FullRect, new Vector4(border, border, border, border));
+        }
+
+        /// <summary>
+        /// 设置圆角贴图：玻璃材质的 Image 用编码了边缘信息的玻璃贴图，其余用普通圆角贴图。
+        /// 控件创建后再改圆角时一律走这里，避免把玻璃控件的贴图换回普通贴图。
+        /// </summary>
+        public static void SetRoundedSprite(Image image, int radius)
+        {
+            if (image == null) return;
+            var sprite = IsGlassMaterial(image.material) ? GetGlassSprite(radius) : GetRoundedSprite(radius);
+            if (sprite == null) return;
+            image.sprite = sprite;
+            image.type = Image.Type.Sliced;
+        }
+
+        /// <summary>
+        /// 给圆角 Image 上色：<paramref name="glass"/> 为 true 时做成液态玻璃控件，
+        /// 否则为实心填充（激活态、主按钮、危险操作——与 iOS 一致，激活开关是实心的）。
+        /// </summary>
+        public static void PaintSurface(Image image, Color color, int radius, bool glass)
+        {
+            if (image == null) return;
+            if (glass && GlassControlMaterial != null)
+            {
+                ApplyGlass(image, radius, GlassKind.Control);
+            }
+            else
+            {
+                image.material = null;
+                var sprite = GetRoundedSprite(radius);
+                if (sprite != null) { image.sprite = sprite; image.type = Image.Type.Sliced; }
+            }
+            image.color = color;
+        }
+
+        /// <summary>该底色是否属于「面板」层（顶栏、底栏、浮层、卡片），这些表面一律做成玻璃。</summary>
+        public static bool IsGlassSurface(Color color)
+            => SameRgb(color, PanelBg) || SameRgb(color, PanelBgRaised) || SameRgb(color, PanelBgDeep)
+               || SameRgb(color, PanelBgGlass) || SameRgb(color, CardBg);
+
+        private static bool SameRgb(Color a, Color b)
+            => Mathf.Abs(a.r - b.r) < 0.002f && Mathf.Abs(a.g - b.g) < 0.002f && Mathf.Abs(a.b - b.b) < 0.002f;
+
+        /// <summary>
+        /// 把一个圆角 Image 变成液态玻璃：换上编码了边缘信息的玻璃贴图与玻璃材质。
+        /// 边缘高光与折射由着色器完成，不再叠额外的描边物体。
+        /// Image.color 的 RGB 是玻璃色调，alpha 是整体不透明度。可重复调用。
+        /// </summary>
+        public static void ApplyGlass(Image image, int radius) => ApplyGlass(image, radius, GlassKind.Panel);
+
+        /// <summary>按指定档位（面板 / 控件）套用液态玻璃。</summary>
+        public static void ApplyGlass(Image image, int radius, GlassKind kind)
+        {
+            if (image == null) return;
+            var material = kind == GlassKind.Control ? GlassControlMaterial : GlassMaterial;
+            if (material == null) return;
+            image.material = material;
+            image.sprite = GetGlassSprite(radius);
+            image.type = Image.Type.Sliced;
+            // 早期版本挂过独立描边物体，统一移除
+            var stroke = image.rectTransform.Find(GlassStrokeName);
+            if (stroke != null) stroke.gameObject.SetActive(false);
         }
 
         /// <summary>创建纯色块（无 sprite，用作分割线 / 进度标记 / 纯布局容器）。默认不接收射线。</summary>
@@ -937,6 +1237,7 @@ namespace PianoTeacher3D.UI
             text.alignment = anchor;
             text.color = color;
             text.fontStyle = style;
+            if (style == FontStyle.Bold) SetWeight(text, true);
             text.horizontalOverflow = HorizontalWrapMode.Overflow;
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.raycastTarget = false;
@@ -973,6 +1274,7 @@ namespace PianoTeacher3D.UI
             var text = CreateText(go.transform, label, Vector2.zero, size, fontSize, LabelColor(style),
                 TextAnchor.MiddleCenter, style == ButtonStyle.Primary ? FontStyle.Bold : FontStyle.Normal);
             text.raycastTarget = false;
+            SetButtonWeight(text, style == ButtonStyle.Primary);
 
             ApplyButtonState(btn, ButtonState.Default, style);
             SetButtonTooltip(btn, string.IsNullOrEmpty(tooltip) ? null : ComposeTooltip(tooltip, shortcut));
@@ -1057,14 +1359,18 @@ namespace PianoTeacher3D.UI
                     break;
             }
 
-            if (btn.targetGraphic is Image img) img.color = background;
+            if (btn.targetGraphic is Image img)
+            {
+                bool glass = style != ButtonStyle.Primary && style != ButtonStyle.Danger &&
+                             (state == ButtonState.Default || state == ButtonState.Hover ||
+                              state == ButtonState.Pressed || state == ButtonState.Disabled);
+                PaintSurface(img, background, RadiusFor(style), glass);
+            }
             var text = GetLabel(btn);
             if (text != null)
             {
                 text.color = label;
-                text.fontStyle = (style == ButtonStyle.Primary || state == ButtonState.Selected)
-                    ? FontStyle.Bold
-                    : FontStyle.Normal;
+                SetButtonWeight(text, style == ButtonStyle.Primary || state == ButtonState.Selected);
             }
             SetOutline(btn, border, state == ButtonState.Error ? Error : BorderSelected);
         }
@@ -1127,6 +1433,9 @@ namespace PianoTeacher3D.UI
         public static void SetOutline(Graphic graphic, bool on, Color color, float px)
         {
             if (graphic == null) return;
+            // 玻璃面板已有九宫格高光描边（ApplyGlass）。Outline 会把玻璃网格再复制四份，
+            // 既多画四次模糊采样，又让边缘发糊，所以玻璃面板上的普通描边请求直接忽略。
+            if (on && px <= 1f && IsGlassMaterial(graphic.material)) return;
             var outline = graphic.GetComponent<Outline>();
             if (!on)
             {
@@ -1188,16 +1497,15 @@ namespace PianoTeacher3D.UI
             ApplyFlatLook(btn);
             if (btn.targetGraphic is Image img)
             {
-                var sprite = GetRoundedSprite(radius);
-                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
-                img.color = ChipBackground(active, enabled);
-                SetOutline(img, true, active && enabled ? BorderSelected : Divider, 1f);
+                bool solid = active && enabled;
+                PaintSurface(img, ChipBackground(active, enabled), radius, !solid);
+                SetOutline(img, true, solid ? BorderSelected : Divider, 1f);
             }
             var label = GetLabel(btn);
             if (label != null)
             {
                 label.color = !enabled ? TextDisabled : (active ? TextPrimary : TextSecondary);
-                label.fontStyle = active && enabled ? FontStyle.Bold : FontStyle.Normal;
+                SetButtonWeight(label, active && enabled);
             }
             btn.interactable = enabled;
         }
@@ -1213,16 +1521,15 @@ namespace PianoTeacher3D.UI
             ApplyFlatLook(btn);
             if (btn.targetGraphic is Image img)
             {
-                var sprite = GetRoundedSprite(radius);
-                if (sprite != null) { img.sprite = sprite; img.type = Image.Type.Sliced; }
-                img.color = !enabled ? Disabled : (selected ? Selected : Control);
+                bool solid = selected && enabled;
+                PaintSurface(img, !enabled ? Disabled : (selected ? Selected : Control), radius, !solid);
                 SetOutline(img, selected, BorderSelected, 1f);
             }
             var label = GetLabel(btn);
             if (label != null)
             {
                 label.color = !enabled ? TextDisabled : (selected ? TextPrimary : TextSecondary);
-                label.fontStyle = selected && enabled ? FontStyle.Bold : FontStyle.Normal;
+                SetButtonWeight(label, selected && enabled);
             }
             btn.interactable = enabled;
         }

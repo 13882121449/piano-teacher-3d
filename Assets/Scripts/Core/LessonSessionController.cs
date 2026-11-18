@@ -365,6 +365,7 @@ namespace PianoTeacher3D.Core
             }
             else if (_timeline.State == PlaybackState.Playing)
             {
+                _audio?.SetTimelineClock(current, _timeline.PlaybackSpeed);
                 _scheduler.Tick(current);
                 _audio?.SetSustain(IsPedalDown(current));
             }

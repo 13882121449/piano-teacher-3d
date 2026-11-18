@@ -85,6 +85,7 @@ namespace PianoTeacher3D.UI
         private float _layoutWidth;
         private GameObject _overlay;
         private GameObject _overlayTrigger;
+        private MenuStageBackdrop _room;
 
         private void Start()
         {
@@ -122,9 +123,21 @@ namespace PianoTeacher3D.UI
 
             BuildStage();
 
-            var header = UITheme.CreateRect(_canvas.transform, "MenuHeader", Vector2.zero, Vector2.zero,
-                MenuStagePalette.Ink);
-            UITheme.StretchTop(header, 0f, 0f, 0f, HeaderHeight);
+            RectTransform header;
+            if (_room != null)
+            {
+                // 实时舞台上方：与课程顶栏一致的毛玻璃条，标题和按钮在任何背景上都清楚
+                header = UITheme.CreatePanel(_canvas.transform, "MenuHeader", Vector2.zero, Vector2.zero,
+                    UITheme.PanelBgDeep, UITheme.RadiusLarge);
+                header.GetComponent<Image>().raycastTarget = false;
+                UITheme.StretchTop(header, UITheme.Space16, UITheme.Space16, 4f, HeaderHeight - 4f);
+            }
+            else
+            {
+                header = UITheme.CreateRect(_canvas.transform, "MenuHeader", Vector2.zero, Vector2.zero,
+                    MenuStagePalette.Ink);
+                UITheme.StretchTop(header, 0f, 0f, 0f, HeaderHeight);
+            }
             _headerGroup = header.gameObject.AddComponent<CanvasGroup>();
 
             var title = UIKit.Label(header, "钢琴 3D 教学", UITheme.FontSubtitle, MenuStagePalette.Text,
@@ -156,6 +169,13 @@ namespace PianoTeacher3D.UI
 
         private void BuildStage()
         {
+            // 2026-11-18 精修：主菜单背景改为实时 3D 海底舞台（与课程同一座），毛玻璃面板透出它；
+            // 没有相机时退回原来的三角琴静态图。
+            _room = MenuStageBackdrop.Create(_preferences != null
+                ? _preferences.ResolveQualityTier()
+                : QualityProfile.DetectRecommended());
+            if (_room != null) return;
+
             var backdrop = UITheme.CreateRect(_canvas.transform, "Backdrop", Vector2.zero, Vector2.zero,
                 MenuStagePalette.Ink);
             UITheme.StretchAll(backdrop, 0f, 0f, 0f, 0f);
@@ -198,8 +218,8 @@ namespace PianoTeacher3D.UI
         private void UpdateMotion()
         {
             bool reduced = PlayerPrefs.GetInt(PrefReduceMotion, 0) == 1;
-            var ribbon = _ribbon.GetComponent<MenuKeyRibbon>();
-            ribbon.SetReducedMotion(reduced);
+            if (_ribbon != null) _ribbon.GetComponent<MenuKeyRibbon>().SetReducedMotion(reduced);
+            if (_room != null) _room.SetReducedMotion(reduced);
             UITheme.SetButtonLabel(_motionToggle, reduced ? "减少动效：开" : "减少动效：关");
         }
 
@@ -211,6 +231,12 @@ namespace PianoTeacher3D.UI
             float inset = _layoutWidth >= 920f ? 48f : 12f;
             float width = Mathf.Min(520f, _layoutWidth - inset - UITheme.Space24);
             int titleFont = _layoutWidth >= 880f ? 80 : 60;
+
+            // iOS 式玻璃卡：标题、课程名和三个入口放在同一块毛玻璃上，任何背景下都清楚
+            var heroCard = UITheme.CreatePanel(hero, "PracticeHeroCard", Vector2.zero, Vector2.zero,
+                UITheme.PanelBgGlass, UITheme.RadiusLarge);
+            heroCard.GetComponent<Image>().raycastTarget = false;
+            UITheme.PlaceTopLeft(heroCard, Mathf.Max(0f, inset - 28f), 76f, width + 56f, 286f);
             var title = UIKit.Label(hero, "钢琴练习室", titleFont, MenuStagePalette.Text,
                 TextAnchor.MiddleLeft, FontStyle.Bold, "PracticeTitle");
             UITheme.PlaceTopLeft(title.rectTransform, inset, 98f, width, 124f);
@@ -462,13 +488,10 @@ namespace PianoTeacher3D.UI
 
         private void BuildLibrarySection(List<string> songs, List<string> missing)
         {
-            var shelf = UITheme.CreateRect(_content, "LibraryShelf", Vector2.zero, Vector2.zero,
-                MenuStagePalette.Library);
-            UITheme.StretchAll(shelf, -UITheme.Space32, -UITheme.Space32, -UITheme.Space24, LibraryTop - 12f);
+            var shelf = UITheme.CreatePanel(_content, "LibraryShelf", Vector2.zero, Vector2.zero,
+                UITheme.PanelBg, UITheme.RadiusLarge);
+            UITheme.StretchAll(shelf, -UITheme.Space16, -UITheme.Space16, -UITheme.Space8, LibraryTop - 16f);
             shelf.GetComponent<Image>().raycastTarget = false;
-            var rule = UITheme.CreateRect(shelf, "LibraryRule", Vector2.zero, Vector2.zero, MenuStagePalette.Rule);
-            UITheme.StretchTop(rule, 0f, 0f, 0f, 1f);
-            rule.GetComponent<Image>().raycastTarget = false;
 
             var header = UIKit.SectionHeader(_content, "曲库");
             header.fontSize = UITheme.FontTitle;
@@ -527,7 +550,7 @@ namespace PianoTeacher3D.UI
                     new Vector2(cardWidth, SongRowHeight), () => LoadLesson(songPath), songName,
                     fontSize: UITheme.FontBody);
                 row.gameObject.name = "Card_" + songName;
-                row.targetGraphic.color = MenuStagePalette.Row;
+                row.targetGraphic.color = UITheme.Control;
                 UITheme.PlaceTopLeft(row.GetComponent<RectTransform>(), x, y, cardWidth, SongRowHeight);
                 var label = UITheme.GetLabel(row);
                 label.alignment = TextAnchor.MiddleLeft;

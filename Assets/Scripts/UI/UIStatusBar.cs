@@ -421,8 +421,7 @@ namespace PianoTeacher3D.UI
             if (avatarChip.targetGraphic is Image avImg)
             {
                 avImg.color = UITheme.Transparent;
-                var sprite = UITheme.GetRoundedSprite(UITheme.RadiusSmall);
-                if (sprite != null) { avImg.sprite = sprite; avImg.type = Image.Type.Sliced; }
+                UITheme.SetRoundedSprite(avImg, UITheme.RadiusSmall);
                 UITheme.SetOutline(avImg, true, UITheme.Divider, 1f);
             }
             UITheme.ApplyFlatLook(avatarChip);
@@ -690,8 +689,7 @@ namespace PianoTeacher3D.UI
                 var rowImg = row.targetGraphic as Image;
                 if (rowImg != null)
                 {
-                    var sprite = UITheme.GetRoundedSprite(UITheme.RadiusMedium);
-                    if (sprite != null) { rowImg.sprite = sprite; rowImg.type = Image.Type.Sliced; }
+                    UITheme.SetRoundedSprite(rowImg, UITheme.RadiusMedium);
                     UITheme.SetOutline(rowImg, !missing, UITheme.Divider, 1f);
                 }
 

@@ -97,21 +97,29 @@ namespace PianoTeacher3D.Tests
             int previous = PlayerPrefs.GetInt(pref, -1);
             try
             {
-                var stage = GameObject.Find("MenuStageArt");
+                // 2026-11-18 精修：首页背景改为实时 3D 海底舞台（毛玻璃界面透出它），替代原静态三角琴图
+                var room = Object.FindFirstObjectByType<MenuStageBackdrop>();
                 var toggle = GameObject.Find("MenuMotionToggle");
-                Assert.IsNotNull(stage, "首页展示三角琴背景");
+                Assert.IsNotNull(room, "首页展示实时舞台背景");
                 Assert.IsNotNull(toggle, "首页提供减少动效开关");
+                Assert.IsNotNull(room.Environment, "背景复用课程场景的舞台环境");
+                Assert.IsNotNull(room.transform.Find("SceneEnvironment/UnderwaterHabitat"), "背景是海底舞台");
+                Assert.IsNotNull(room.GetComponentInChildren<PianoTeacher3D.Piano.PianoKeyMap>(), "舞台上有三角琴");
 
-                Assert.IsNotNull(stage.GetComponent<RawImage>().texture, "首页美术资产需要随构建加载");
-                var ribbon = stage.transform.Find("MenuKeyRibbon");
-                Assert.IsNotNull(ribbon, "三角琴旁有独立的螺旋琴键层");
                 var button = toggle.GetComponent<Button>();
                 button.onClick.Invoke();
                 Assert.AreEqual(previous == 1 ? 0 : 1, PlayerPrefs.GetInt(pref),
                     "切换减少动效时记住选择");
                 Assert.AreEqual("减少动效：" + (previous == 1 ? "关" : "开"),
                     UITheme.GetLabel(button).text);
-                Assert.IsTrue(ribbon.gameObject.activeSelf, "减少动效时保留静态琴键图案");
+                Assert.AreEqual(previous != 1, room.IsMotionReduced, "减少动效时镜头停止漂移");
+
+                var cam = Camera.main.transform;
+                Vector3 before = cam.position;
+                yield return null;
+                yield return null;
+                if (room.IsMotionReduced)
+                    Assert.AreEqual(0f, Vector3.Distance(before, cam.position), 1e-5f, "减少动效时镜头保持静止");
             }
             finally
             {

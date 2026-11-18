@@ -107,7 +107,7 @@
 <!-- SECTION:resource-load:BEGIN -->
 ### 资源加载采样（方案 11.4「资源加载耗时和失败率采样」）
 
-- 时间：2026-11-16 12:19:09
+- 时间：2026-11-18 16:28:37
 - Unity：2022.3.22f1c1
 - 图形设备：Null（Null Device）
 - 分辨率：640×480 @ 96 dpi
@@ -115,11 +115,11 @@
 - 平台 / 系统：WindowsEditor / Windows 11  (10.0.26200) 64bit
 
 - 曲目目录：`StreamingAssets/Songs`；曲目数：1
-- 最慢单曲：16.3 ms；失败数：0
+- 最慢单曲：9.7 ms；失败数：0
 
 | 曲目 | 加载耗时 (ms) | 结果 |
 |---|---|---|
-| demo.mid | 16.3 | 成功 |
+| demo.mid | 9.7 | 成功 |
 
 **口径说明**：耗时用 `System.Diagnostics.Stopwatch` 包裹 `LessonSessionController.LoadSong`，包含校验 + 解析 + 一次性提交；示例曲为毫秒级，5 秒上限只用于捕获卡死，不代表目标设备上的加载性能。
 <!-- SECTION:resource-load:END -->
@@ -127,39 +127,7 @@
 <!-- SECTION:player-play:BEGIN -->
 ### 真实 Windows Player 基线（scenario = play）
 
-- 机器：Intel(R) Core(TM) i9-14900HX（32 线程 / 15997 MB）
-- 系统：Windows 11  (10.0.26200) 64bit
-- GPU / 图形 API：NVIDIA GeForce RTX 4060 Laptop GPU / Direct3D11
-- 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
-- Unity / 画质档：2022.3.22f1c1 / High
-- 采样窗口：预热 2.0 s + 采样 20.0 s（1200 帧）
-
-| 指标 | 数值 |
-|---|---|
-| 平均帧时间 | 16.68 ms |
-| p50 帧时间 | 16.67 ms |
-| p95 帧时间 | 16.71 ms |
-| p99 帧时间 | 16.90 ms |
-| 最大帧时间 | 19.65 ms |
-| 平均 FPS | 60.0 |
-| 1% low FPS | 58.0 |
-| 托管内存（GC.GetTotalMemory） | 9.5 → 10.0 MB（增量 +0.54 MB） |
-| Mono 已用 / 总分配 | 10.0 / 66.3 MB |
-| Mesh / Material / AudioClip / GameObject | 161 / 83 / 17 / 534 |
-
-**口径说明**
-
-- 本表来自 **Development Build 的独立 Player**（真实图形设备），不是 Editor 批处理数据。
-- 帧时间取 `Time.unscaledDeltaTime`，逐帧采样；p50/p95/p99 取排序后的最近秩。
-- 1% low FPS = 最慢 1% 帧的平均帧时间的倒数。
-- 资源计数为 `Resources.FindObjectsOfTypeAll` 的运行时总数（含内置对象），只用于同机版本间趋势对比。
-- 结论边界：Development Build + 真实图形设备；Editor 批处理数据不可与之混用。
-<!-- SECTION:player-play:END -->
-
-<!-- SECTION:player-switch:BEGIN -->
-### 真实 Windows Player 基线（scenario = switch）
-
-- 机器：Intel(R) Core(TM) i9-14900HX（32 线程 / 15997 MB）
+- 机器：13th Gen Intel(R) Core(TM) i9-13900HX（32 线程 / 40653 MB）
 - 系统：Windows 11  (10.0.26200) 64bit
 - GPU / 图形 API：NVIDIA GeForce RTX 4060 Laptop GPU / Direct3D11
 - 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
@@ -171,13 +139,13 @@
 | 平均帧时间 | 16.67 ms |
 | p50 帧时间 | 16.67 ms |
 | p95 帧时间 | 16.68 ms |
-| p99 帧时间 | 16.78 ms |
-| 最大帧时间 | 19.65 ms |
+| p99 帧时间 | 16.70 ms |
+| 最大帧时间 | 20.64 ms |
 | 平均 FPS | 60.0 |
-| 1% low FPS | 57.9 |
-| 托管内存（GC.GetTotalMemory） | 9.5 → 4.4 MB（增量 -5.02 MB） |
-| Mono 已用 / 总分配 | 4.4 / 67.1 MB |
-| Mesh / Material / AudioClip / GameObject | 161 / 78 / 17 / 645 |
+| 1% low FPS | 58.6 |
+| 托管内存（GC.GetTotalMemory） | 10.0 → 10.2 MB（增量 +0.22 MB） |
+| Mono 已用 / 总分配 | 10.2 / 114.2 MB |
+| Mesh / Material / AudioClip / GameObject | 213 / 106 / 9 / 550 |
 
 **口径说明**
 
@@ -185,7 +153,39 @@
 - 帧时间取 `Time.unscaledDeltaTime`，逐帧采样；p50/p95/p99 取排序后的最近秩。
 - 1% low FPS = 最慢 1% 帧的平均帧时间的倒数。
 - 资源计数为 `Resources.FindObjectsOfTypeAll` 的运行时总数（含内置对象），只用于同机版本间趋势对比。
-- 结论边界：Development Build + 真实图形设备；Editor 批处理数据不可与之混用。
+- 结论边界：开发版、真实图形设备
+<!-- SECTION:player-play:END -->
+
+<!-- SECTION:player-switch:BEGIN -->
+### 真实 Windows Player 基线（scenario = switch）
+
+- 机器：13th Gen Intel(R) Core(TM) i9-13900HX（32 线程 / 40653 MB）
+- 系统：Windows 11  (10.0.26200) 64bit
+- GPU / 图形 API：NVIDIA GeForce RTX 4060 Laptop GPU / Direct3D11
+- 分辨率 / VSync / targetFrameRate：1280×720 / 0 / 60
+- Unity / 画质档：2022.3.22f1c1 / High
+- 采样窗口：预热 2.0 s + 采样 20.0 s（1200 帧）
+
+| 指标 | 数值 |
+|---|---|
+| 平均帧时间 | 16.67 ms |
+| p50 帧时间 | 16.67 ms |
+| p95 帧时间 | 16.68 ms |
+| p99 帧时间 | 16.73 ms |
+| 最大帧时间 | 19.32 ms |
+| 平均 FPS | 60.0 |
+| 1% low FPS | 58.8 |
+| 托管内存（GC.GetTotalMemory） | 10.0 → 10.2 MB（增量 +0.12 MB） |
+| Mono 已用 / 总分配 | 10.2 / 108.2 MB |
+| Mesh / Material / AudioClip / GameObject | 200 / 96 / 9 / 650 |
+
+**口径说明**
+
+- 本表来自 **Development Build 的独立 Player**（真实图形设备），不是 Editor 批处理数据。
+- 帧时间取 `Time.unscaledDeltaTime`，逐帧采样；p50/p95/p99 取排序后的最近秩。
+- 1% low FPS = 最慢 1% 帧的平均帧时间的倒数。
+- 资源计数为 `Resources.FindObjectsOfTypeAll` 的运行时总数（含内置对象），只用于同机版本间趋势对比。
+- 结论边界：开发版、真实图形设备
 <!-- SECTION:player-switch:END -->
 
 <!-- SECTION:player-soak:BEGIN -->
