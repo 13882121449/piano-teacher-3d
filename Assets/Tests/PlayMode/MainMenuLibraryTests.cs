@@ -130,6 +130,72 @@ namespace PianoTeacher3D.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator MainMenu_WithMotionEnabled_PanelsStayInBoundsWithoutOverlapOrDuplicates()
+        {
+            UIMotion.Override = false;
+            try
+            {
+                string demoForward = Path.Combine(Application.streamingAssetsPath, "Songs/demo.mid").Replace('\\', '/');
+                string demoBack = Path.GetFullPath(demoForward);
+                string tideForward = Path.Combine(Application.streamingAssetsPath, "Songs/cinematic/cinematic_tide.mid").Replace('\\', '/');
+                string tideBack = Path.GetFullPath(tideForward);
+                MainMenuUI.NotifySongOpened(demoForward);
+                MainMenuUI.NotifySongOpened(demoBack);
+                MainMenuUI.NotifySongOpened(tideForward);
+                MainMenuUI.NotifySongOpened(tideBack);
+
+                SceneManager.LoadScene("MainMenu");
+                yield return null;
+                yield return new WaitForSecondsRealtime(0.95f);
+
+                var canvasGo = GameObject.Find("MainMenuCanvas");
+                var headerGo = GameObject.Find("MenuHeader");
+                var heroCardGo = GameObject.Find("PracticeHeroCard");
+                var shelfGo = GameObject.Find("LibraryShelf");
+                var viewportGo = GameObject.Find("LibraryViewport");
+                Assert.IsNotNull(canvasGo);
+                Assert.IsNotNull(headerGo);
+                Assert.IsNotNull(heroCardGo);
+                Assert.IsNotNull(shelfGo);
+                Assert.IsNotNull(viewportGo);
+
+                Rect canvasRect = ScreenBounds(canvasGo.GetComponent<RectTransform>());
+                Rect headerRect = ScreenBounds(headerGo.GetComponent<RectTransform>());
+                Rect heroRect = ScreenBounds(heroCardGo.GetComponent<RectTransform>());
+                Rect shelfRect = ScreenBounds(shelfGo.GetComponent<RectTransform>());
+                Rect viewportRect = ScreenBounds(viewportGo.GetComponent<RectTransform>());
+
+                Assert.GreaterOrEqual(headerRect.yMin, canvasRect.yMin - 1f);
+                Assert.LessOrEqual(headerRect.yMax, canvasRect.yMax + 1f);
+                Assert.LessOrEqual(heroRect.yMax, headerRect.yMin + 1f, "主卡片不得上飘压住顶栏");
+                Assert.GreaterOrEqual(heroRect.yMin, shelfRect.yMax - 1f, "曲库面板不得上飘压住主卡片");
+                Assert.GreaterOrEqual(viewportRect.yMin, shelfRect.yMin - 1f, "曲库列表应留在曲库面板内部");
+                Assert.LessOrEqual(viewportRect.yMax, shelfRect.yMax + 1f);
+
+                var cards = FindSongCards();
+                var seenCardNames = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                foreach (var card in cards)
+                {
+                    Assert.IsTrue(seenCardNames.Add(card.gameObject.name),
+                        $"曲库出现重复曲目条目：{card.gameObject.name}");
+                }
+            }
+            finally
+            {
+                UIMotion.Override = null;
+            }
+        }
+
+        private static Rect ScreenBounds(RectTransform rt)
+        {
+            var corners = new Vector3[4];
+            rt.GetWorldCorners(corners);
+            float minX = corners[0].x, maxX = corners[2].x;
+            float minY = corners[0].y, maxY = corners[2].y;
+            return Rect.MinMaxRect(minX, minY, maxX, maxY);
+        }
+
         private static System.Collections.Generic.List<Button> FindSongCards()
         {
             var result = new System.Collections.Generic.List<Button>();

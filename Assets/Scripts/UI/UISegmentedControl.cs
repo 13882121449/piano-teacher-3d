@@ -93,7 +93,8 @@ namespace PianoTeacher3D.UI
             _pill = pillGo.AddComponent<Image>();
             _pill.raycastTarget = false;
             _pill.color = UITheme.Selected;
-            UITheme.SetRoundedSprite(_pill, UITheme.RadiusSmall);
+            UITheme.SetRoundedSprite(_pill, Mathf.Max(4, UITheme.RadiusSmall - 2));
+            UITheme.SetOutline(_pill, true, UITheme.BorderSelected, 1f);
             var prt = _pill.rectTransform;
             prt.anchorMin = new Vector2(0f, 0f);
             prt.anchorMax = new Vector2(0f, 1f);

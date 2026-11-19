@@ -1244,8 +1244,8 @@ namespace PianoTeacher3D.Avatar
                 speedScale *= Mathf.Lerp(HandLeadSpeedScale, 1.15f, travel);
             }
 
-            if (!leftHand && fitted && thumbPad &&
-                (hasTarget ? Assignment.GetPitch(false, 0) >= 0 : upcomingTime - _currentTime <= 0.09f))
+            if (fitted && thumbPad &&
+                (hasTarget ? Assignment.GetPitch(leftHand, 0) >= 0 : upcomingTime - _currentTime <= 0.09f))
             {
                 // 手掌还离目标较远时才加快换位，贴键后回到普通阻尼，保留单帧安全上限。
                 float travel = Mathf.InverseLerp(0.036f, 0.15f, Mathf.Abs(rawTarget.x - current.x));
@@ -1540,8 +1540,8 @@ namespace PianoTeacher3D.Avatar
                 var tip = rig.GetFingertip(finger);
                 if (tip == null) continue;
                 bool thumbPad = finger == 0 && hand is IThumbContactRig { HasThumbPad: true };
-                float lift = thumbPad && !leftHand
-                    ? RightThumbApproachHeight(hand, approach, 0.65f)
+                float lift = thumbPad
+                    ? ThumbApproachHeight(hand, approach, 0.65f)
                     : ContactPadHeight(hand, finger) + 0.008f * Mathf.Sin(approach * Mathf.PI);
                 targets[finger] = Vector3.Lerp(tip.position, (thumbPad ? key.ThumbPress : key.Press) + Vector3.up * lift, blend);
                 has[finger] = true;
@@ -1566,8 +1566,8 @@ namespace PianoTeacher3D.Avatar
             float approach = 1f - Mathf.Clamp01(lead / FingerPreparationSeconds);
             // 先给指腹一个小弧线。力度影响抬指高度，接近发声时回落到键面上方。
             bool thumbPad = finger == 0 && hand is IThumbContactRig { HasThumbPad: true };
-            float lift = thumbPad && !leftHand
-                ? RightThumbApproachHeight(hand, approach, velocity)
+            float lift = thumbPad
+                ? ThumbApproachHeight(hand, approach, velocity)
                 : 0.005f + Mathf.Sin(approach * Mathf.PI) * Mathf.Lerp(0.005f, 0.016f, velocity);
             var target = (thumbPad ? touch.ThumbPress : touch.Press) + Vector3.up * lift;
             float reach = rig.GetFingerLength(finger);
@@ -1587,7 +1587,7 @@ namespace PianoTeacher3D.Avatar
             return (leftHand ? _upcomingLeftTime : _upcomingRightTime) - _currentTime;
         }
 
-        private static float RightThumbApproachHeight(IHandRig hand, float phase, float velocity)
+        private static float ThumbApproachHeight(IHandRig hand, float phase, float velocity)
         {
             // 拇指从略高于键面的弧线贴近指腹接触点，落键帧沿用实时键面高度。
             float arch = Mathf.Sin(phase * Mathf.PI);
@@ -2184,8 +2184,8 @@ namespace PianoTeacher3D.Avatar
             }
             if (count == 0) return false;
             bool thumbSolo = count == 1 && _contactFitFingers[0] == 0 && hand is IThumbContactRig { HasThumbPad: true };
-            // 右拇指提前对齐压键时的腕位。起音后只用指节跟随键程，腕位不再换目标。
-            bool bridgeThumbStroke = thumbSolo && !leftHand;
+            // 双手拇指均提前对齐压键时的腕位。起音后只用指节跟随键程，腕位不再换目标。
+            bool bridgeThumbStroke = thumbSolo;
             if (thumbSolo && pressed && !bridgeThumbStroke) noteSet |= 1L << 35;
             if (fit.NoteSet != noteSet)
             {

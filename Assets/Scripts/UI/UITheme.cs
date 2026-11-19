@@ -59,86 +59,86 @@ namespace PianoTeacher3D.UI
         // 深色分段控件的 #636366。对比度测试只看 RGB，因此色调 RGB 保持足够深。
 
         /// <summary>
-        /// 底：场景背景（最深）。由 <c>Core/LessonSessionController</c> 直接使用，务必保留。
+        /// 底：深海黑曜石场景背景（最深）。由 <c>Core/LessonSessionController</c> 直接使用，务必保留。
         /// </summary>
-        public static readonly Color SceneBg = new Color32(11, 11, 13, 255);
+        public static readonly Color SceneBg = new Color32(6, 10, 18, 255);
 
-        /// <summary>面：玻璃面板色调（石墨灰，接近 iOS systemThinMaterialDark）。</summary>
-        public static readonly Color PanelBg = new Color32(30, 30, 34, 245);
+        /// <summary>面：深海黑曜石主面板色调。</summary>
+        public static readonly Color PanelBg = new Color32(15, 22, 34, 242);
 
-        /// <summary>浮：控件填充（iOS tertiarySystemFill 在深色玻璃上的等效色，略透出玻璃）。</summary>
-        public static readonly Color Control = new Color32(62, 62, 68, 220);
+        /// <summary>浮：幽蓝黑曜石控件填充。</summary>
+        public static readonly Color Control = new Color32(30, 41, 60, 220);
 
         /// <summary>控件悬停色（比常态更亮一档）。</summary>
-        public static readonly Color ControlHover = new Color32(82, 82, 89, 230);
+        public static readonly Color ControlHover = new Color32(42, 56, 82, 235);
 
         /// <summary>控件按下色（比常态更暗，与悬停形成两个方向）。</summary>
-        public static readonly Color ControlPressed = new Color32(46, 46, 51, 220);
+        public static readonly Color ControlPressed = new Color32(24, 33, 49, 232);
 
-        // ==================== 强调色（iOS 媒体控件式的白色主按钮） ====================
+        // ==================== 强调色（香槟鎏金，高级克制与对比度兼具） ====================
 
-        public static readonly Color Accent = new Color32(242, 242, 247, 255);
-        public static readonly Color AccentBright = new Color32(255, 255, 255, 255);
-        public static readonly Color AccentDim = new Color32(142, 142, 147, 255);
+        public static readonly Color Accent = new Color32(224, 198, 138, 255);
+        public static readonly Color AccentBright = new Color32(242, 221, 168, 255);
+        public static readonly Color AccentDim = new Color32(181, 151, 92, 255);
 
-        // ==================== 文字（iOS label / secondaryLabel 在深色玻璃上的等效色） ====================
+        // ==================== 文字（象牙暖丝绸与雾银，消除刺眼纯白） ====================
 
-        public static readonly Color TextPrimary = new Color32(255, 255, 255, 255);
-        public static readonly Color TextSecondary = new Color32(200, 200, 208, 255);
-        public static readonly Color TextOnAccent = new Color32(14, 14, 16, 255);
+        public static readonly Color TextPrimary = new Color32(244, 241, 234, 255);
+        public static readonly Color TextSecondary = new Color32(176, 184, 198, 255);
+        public static readonly Color TextOnAccent = new Color32(12, 16, 24, 255);
 
         public static readonly Color Walnut = new Color32(77, 53, 44, 255);
         public static readonly Color PianoIvory = new Color32(238, 231, 214, 255);
         public static readonly Color PianoIvoryShadow = new Color32(187, 176, 155, 255);
         public static readonly Color PianoFelt = new Color32(113, 47, 48, 255);
 
-        /// <summary>弹窗遮罩：玻璃弹窗自带层次，遮罩只需轻压背景。</summary>
-        public static readonly Color ModalShade = new Color32(0, 0, 0, 110);
+        /// <summary>弹窗遮罩：压暗背景以衬托黑曜石玻璃浮层。</summary>
+        public static readonly Color ModalShade = new Color32(4, 7, 13, 148);
 
         // ==================== 状态色（iOS systemRed / systemGreen 的深色版） ====================
 
         public static readonly Color Error = new Color32(255, 105, 97, 255);
         public static readonly Color Success = new Color32(48, 209, 88, 255);
 
-        // ==================== 层次 / 分割 / 状态（方案 3.3 / 审查 2.2A） ====================
+        // ==================== 层次 / 分割 / 状态 ====================
 
         /// <summary>抬升面板色调：弹窗、次级卡片（比 <see cref="PanelBg"/> 亮一档）。</summary>
-        public static readonly Color PanelBgRaised = new Color32(44, 44, 48, 250);
+        public static readonly Color PanelBgRaised = new Color32(21, 29, 44, 250);
 
-        /// <summary>可点击卡片的色调（iOS secondarySystemGroupedBackground 深色版）。</summary>
-        public static readonly Color CardBg = new Color32(40, 40, 44, 240);
+        /// <summary>可点击卡片的色调。</summary>
+        public static readonly Color CardBg = new Color32(19, 27, 41, 238);
 
-        /// <summary>卡片描边：白色低透明发丝线（玻璃边缘的高光）。</summary>
-        public static readonly Color CardBorder = new Color(1f, 1f, 1f, 0.12f);
+        /// <summary>卡片描边：极细暖金微光发丝线。</summary>
+        public static readonly Color CardBorder = new Color(0.94f, 0.87f, 0.72f, 0.14f);
 
         /// <summary>顶栏 / 底栏色调（比普通面板更深，压住 3D 画面又不抢眼）。</summary>
-        public static readonly Color PanelBgDeep = new Color32(20, 20, 23, 250);
+        public static readonly Color PanelBgDeep = new Color32(10, 15, 24, 248);
 
         /// <summary>
-        /// 浮在 3D 画面上的轻玻璃卡（左上视角提示卡）。比 <see cref="PanelBg"/> 更透。
+        /// 浮在 3D 画面上的深海黑曜石玻璃卡（左上视角提示卡）。比 <see cref="PanelBg"/> 更透。
         /// </summary>
-        public static readonly Color PanelBgGlass = new Color32(28, 28, 32, 224);
+        public static readonly Color PanelBgGlass = new Color32(13, 19, 31, 224);
 
-        /// <summary>玻璃面板的高光描边（iOS 材质边缘的 0.5～1px 亮线）。</summary>
-        public static readonly Color GlassStroke = new Color(1f, 1f, 1f, 0.14f);
+        /// <summary>玻璃面板的高光描边（1px 香槟暖调光学切割线）。</summary>
+        public static readonly Color GlassStroke = new Color(0.94f, 0.87f, 0.72f, 0.18f);
 
-        /// <summary>分割线（iOS separator 深色版）。</summary>
-        public static readonly Color Divider = new Color(1f, 1f, 1f, 0.12f);
+        /// <summary>分割线。</summary>
+        public static readonly Color Divider = new Color(0.94f, 0.87f, 0.72f, 0.12f);
 
         /// <summary>
-        /// 选中态底色（分段选择器选中项 / 开关开启项）：iOS 液态玻璃里激活开关的实心系统蓝，
-        /// 取略深的 #0071E3，与 <see cref="TextPrimary"/> 的对比度约 4.7:1。
+        /// 选中态底色（分段选择器选中项 / 开关开启项）：深海翡翠青，
+        /// 摆脱刺眼电光蓝，与 <see cref="TextPrimary"/> 的对比度约 5.8:1。
         /// </summary>
-        public static readonly Color Selected = new Color32(0, 113, 227, 255);
+        public static readonly Color Selected = new Color32(17, 102, 122, 255);
 
         /// <summary>警告色（iOS systemOrange 深色版）。</summary>
         public static readonly Color Warning = new Color32(255, 179, 64, 255);
 
         /// <summary>禁用底色。</summary>
-        public static readonly Color Disabled = new Color32(38, 38, 42, 200);
+        public static readonly Color Disabled = new Color32(22, 29, 42, 200);
 
         /// <summary>禁用文字色。</summary>
-        public static readonly Color TextDisabled = new Color32(112, 112, 118, 255);
+        public static readonly Color TextDisabled = new Color32(112, 120, 134, 255);
 
         /// <summary>错误文字色（比底色更亮，保证暗色面板上的对比度）。</summary>
         public static readonly Color TextError = new Color(0.949f, 0.639f, 0.639f, 1f);
@@ -149,14 +149,14 @@ namespace PianoTeacher3D.UI
         /// <summary>危险 / 破坏性操作底色（需配合确认弹窗）。</summary>
         public static readonly Color DangerBg = new Color(0.545f, 0.216f, 0.216f, 1f);
 
-        /// <summary>进度条轨道：白色低透明，压在玻璃上像 iOS 媒体进度条。</summary>
-        public static readonly Color TrackBg = new Color(1f, 1f, 1f, 0.20f);
+        /// <summary>进度条轨道：低透明细轨。</summary>
+        public static readonly Color TrackBg = new Color(1f, 1f, 1f, 0.16f);
 
         /// <summary>完全透明（纯布局容器，不参与渲染与射线检测）。</summary>
         public static readonly Color Transparent = new Color(0f, 0f, 0f, 0f);
 
-        /// <summary>选中态、焦点态描边（颜色之外的第二重区分）。</summary>
-        public static readonly Color BorderSelected = new Color(1f, 1f, 1f, 0.45f);
+        /// <summary>选中态、焦点态描边（香槟鎏金微光，颜色之外的第二重区分）。</summary>
+        public static readonly Color BorderSelected = new Color(0.91f, 0.80f, 0.56f, 0.55f);
 
         // ==================== 教学语义色（审查 2.3「颜色语义不变」） ====================
 
@@ -222,17 +222,17 @@ namespace PianoTeacher3D.UI
         public const float Space24 = 24f;
         public const float Space32 = 32f;
 
-        // ==================== 圆角等级（面板 28 / 按钮 20 / chip 16 / 进度条 3，iOS 液态玻璃） ====================
-        // chip（32 高）与按钮（40 高）的圆角都达到半高，即胶囊形；面板用大圆角模块。
+        // ==================== 圆角等级（面板 16 / 按钮 10 / chip 8 / 进度条 3，建筑感克制微圆角） ====================
+        // 采用深海黑曜石玻璃精密微倒角比例，彻底摒弃臃肿廉价的全胶囊边角。
 
-        /// <summary>圆角：chip / 分段项 / 状态标签（16，32 高时为胶囊）。</summary>
-        public const int RadiusSmall = 16;
+        /// <summary>圆角：chip / 分段项 / 状态标签（8px 克制微圆角）。</summary>
+        public const int RadiusSmall = 8;
 
-        /// <summary>圆角：按钮 / 输入类控件（20，40 高时为胶囊）。</summary>
-        public const int RadiusMedium = 20;
+        /// <summary>圆角：按钮 / 输入类控件（10px 精致切角）。</summary>
+        public const int RadiusMedium = 10;
 
-        /// <summary>圆角：玻璃面板 / 卡片 / 浮层（28，液态玻璃模块式大圆角）。</summary>
-        public const int RadiusLarge = 28;
+        /// <summary>圆角：玻璃面板 / 卡片 / 浮层（16px 建筑感大卡圆角）。</summary>
+        public const int RadiusLarge = 16;
 
         /// <summary>圆角：进度条轨道 / 填充（3，接近直角的细线感）。</summary>
         public const int RadiusBar = 3;
@@ -1030,13 +1030,25 @@ namespace PianoTeacher3D.UI
                 {
                     var shader = Shader.Find(GlassShaderName);
                     if (shader != null)
+                    {
                         _glassMaterial = new Material(shader) { name = "UITheme_LiquidGlass" };
+                        _glassMaterial.SetFloat("_TintStrength", 0.62f);
+                        _glassMaterial.SetFloat("_Saturation", 1.22f);
+                        _glassMaterial.SetFloat("_Brightness", 0.72f);
+                        _glassMaterial.SetFloat("_Lift", -0.02f);
+                        _glassMaterial.SetFloat("_RimIntensity", 0.48f);
+                        _glassMaterial.SetColor("_RimColor", new Color(0.94f, 0.87f, 0.72f, 1f));
+                        _glassMaterial.SetFloat("_Frost", 0f);
+                        _glassMaterial.SetFloat("_Refraction", 4.5f);
+                        _glassMaterial.SetFloat("_Grain", 0.012f);
+                        _glassMaterial.SetFloat("_TopSheen", 0.045f);
+                    }
                 }
                 return _glassMaterial;
             }
         }
 
-        /// <summary>液态玻璃控件材质：按钮 / chip 常态。比面板更亮，色调更足，折射更小。</summary>
+        /// <summary>液态玻璃控件材质：深海黑曜石控件常态，极细香槟暖金切割高光边缘。</summary>
         public static Material GlassControlMaterial
         {
             get
@@ -1047,12 +1059,16 @@ namespace PianoTeacher3D.UI
                     if (shader != null)
                     {
                         _glassControlMaterial = new Material(shader) { name = "UITheme_LiquidGlassControl" };
-                        _glassControlMaterial.SetFloat("_TintStrength", 0.34f);
-                        _glassControlMaterial.SetFloat("_Brightness", 1.12f);
-                        _glassControlMaterial.SetFloat("_Lift", 0.02f);
-                        _glassControlMaterial.SetFloat("_RimIntensity", 0.62f);
-                        _glassControlMaterial.SetFloat("_Refraction", 6f);
-                        _glassControlMaterial.SetFloat("_Frost", 0.09f);
+                        _glassControlMaterial.SetFloat("_TintStrength", 0.68f);
+                        _glassControlMaterial.SetFloat("_Saturation", 1.18f);
+                        _glassControlMaterial.SetFloat("_Brightness", 0.82f);
+                        _glassControlMaterial.SetFloat("_Lift", 0f);
+                        _glassControlMaterial.SetFloat("_RimIntensity", 0.56f);
+                        _glassControlMaterial.SetColor("_RimColor", new Color(0.95f, 0.88f, 0.74f, 1f));
+                        _glassControlMaterial.SetFloat("_Frost", 0f);
+                        _glassControlMaterial.SetFloat("_Refraction", 3.0f);
+                        _glassControlMaterial.SetFloat("_Grain", 0.010f);
+                        _glassControlMaterial.SetFloat("_TopSheen", 0.055f);
                     }
                 }
                 return _glassControlMaterial;
@@ -1086,7 +1102,7 @@ namespace PianoTeacher3D.UI
             int texSize = size * supersample;
             float r = Mathf.Min(radius * CornerScale, size * 0.5f) * supersample;
             int border = Mathf.CeilToInt(r) + supersample;
-            float band = Mathf.Clamp(radius * 0.55f, 5f, 16f) * supersample;
+            float band = Mathf.Clamp(radius * 0.30f, 3.0f, 5.0f) * supersample;
             band = Mathf.Min(band, r - supersample);
 
             // 编码数据必须按线性值采样（项目是 Linear 色彩空间，sRGB 贴图会把 0.5 变成 0.21）

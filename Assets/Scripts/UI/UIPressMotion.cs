@@ -19,8 +19,8 @@ namespace PianoTeacher3D.UI
     public sealed class UIPressMotion : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler,
         IPointerDownHandler, IPointerUpHandler, IPointerMoveHandler, IUIMotionTickable
     {
-        private const float HoverScale = 1.035f;
-        private const float PressScale = 0.955f;
+        private const float HoverScale = 1.018f;
+        private const float PressScale = 0.972f;
 
         private Button _button;
         private RectTransform _rt;
@@ -137,7 +137,7 @@ namespace PianoTeacher3D.UI
             if (this == null || _rt == null) return false;
             bool live = Interactable;
             float scaleTarget = !live ? 1f : (_down ? PressScale : (_over ? HoverScale : 1f));
-            float sheenTarget = live && _over && !UIMotion.Reduced ? (_down ? 0.10f : 0.17f) : 0f;
+            float sheenTarget = live && _over && !UIMotion.Reduced ? (_down ? 0.08f : 0.13f) : 0f;
 
             if (UIMotion.Reduced)
             {
@@ -146,9 +146,9 @@ namespace PianoTeacher3D.UI
             }
             else
             {
-                // 按下更快更「实」（阻尼大），松开 / 悬停带轻微回弹
-                float freq = _down ? 14f : 9f;
-                float damping = _down ? 0.9f : 0.55f;
+                // 按下干脆微阻尼，悬停/回弹克制收拢，呈现优雅精密机械手感
+                float freq = _down ? 14f : 10f;
+                float damping = _down ? 0.92f : 0.78f;
                 UIMotion.Spring(ref _scale, ref _scaleVel, scaleTarget, freq, damping, dt);
             }
             _rt.localScale = new Vector3(_scale, _scale, 1f);
@@ -161,7 +161,7 @@ namespace PianoTeacher3D.UI
                 float size = Mathf.Min(_rt.rect.width, _rt.rect.height) * 1.5f;
                 _sheen.rectTransform.sizeDelta = new Vector2(size, size);
                 _sheen.rectTransform.anchoredPosition = _sheenPos;
-                _sheen.color = new Color(1f, 1f, 1f, Mathf.Clamp01(_sheenAlpha));
+                _sheen.color = new Color(0.96f, 0.90f, 0.78f, Mathf.Clamp01(_sheenAlpha));
             }
             if (_ripple != null && _rippleTime >= 0f)
             {
@@ -170,7 +170,7 @@ namespace PianoTeacher3D.UI
                 float eased = 1f - (1f - t) * (1f - t) * (1f - t);
                 float size = Mathf.Max(_rt.rect.width, _rt.rect.height) * Mathf.Lerp(0.15f, 1.5f, eased);
                 _ripple.rectTransform.sizeDelta = new Vector2(size, size);
-                _ripple.color = new Color(1f, 1f, 1f, 0.22f * (1f - t));
+                _ripple.color = new Color(0.96f, 0.90f, 0.78f, 0.16f * (1f - t));
                 if (t >= 1f) _rippleTime = -1f;
             }
 

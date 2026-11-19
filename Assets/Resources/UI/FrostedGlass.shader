@@ -15,14 +15,16 @@ Shader "PianoTeacher3D/UI/FrostedGlass"
     {
         [PerRendererData] _MainTex ("Glass Sprite", 2D) = "white" {}
         _Color ("Tint", Color) = (1,1,1,1)
-        _TintStrength ("Tint Strength", Range(0, 1)) = 0.22
-        _Saturation ("Saturation", Range(0, 2.5)) = 1.4
-        _Brightness ("Brightness", Range(0.5, 1.6)) = 1.14
-        _Lift ("Brightness Lift", Range(-0.2, 0.3)) = 0.015
-        _RimIntensity ("Rim Highlight", Range(0, 2)) = 0.75
-        _Frost ("Frost (white lift)", Range(0, 0.3)) = 0.06
-        _Refraction ("Edge Refraction (px)", Range(0, 40)) = 14
-        _Grain ("Grain", Range(0, 0.06)) = 0.008
+        _TintStrength ("Tint Strength", Range(0, 1)) = 0.62
+        _Saturation ("Saturation", Range(0, 2.5)) = 1.25
+        _Brightness ("Brightness", Range(0.5, 1.6)) = 0.72
+        _Lift ("Brightness Lift", Range(-0.2, 0.3)) = -0.02
+        _RimIntensity ("Rim Highlight", Range(0, 2)) = 0.55
+        _RimColor ("Rim Color", Color) = (0.94, 0.87, 0.72, 1)
+        _Frost ("Frost (white lift)", Range(0, 0.3)) = 0.0
+        _Refraction ("Edge Refraction (px)", Range(0, 40)) = 5
+        _Grain ("Grain", Range(0, 0.06)) = 0.012
+        _TopSheen ("Top Specular Sheen", Range(0, 0.3)) = 0.045
 
         _StencilComp ("Stencil Comparison", Float) = 8
         _Stencil ("Stencil ID", Float) = 0
@@ -109,9 +111,11 @@ Shader "PianoTeacher3D/UI/FrostedGlass"
             half _Brightness;
             half _Lift;
             half _RimIntensity;
+            fixed4 _RimColor;
             half _Frost;
             half _Refraction;
             half _Grain;
+            half _TopSheen;
 
             v2f vert(appdata_t v)
             {
@@ -155,23 +159,24 @@ Shader "PianoTeacher3D/UI/FrostedGlass"
                 normal = normalLength > 1e-3h ? normal / normalLength : half2(0.0h, 0.0h);
 
                 float2 uv = IN.screenPos.xy / max(IN.screenPos.w, 1e-5);
-                // 折射：边缘带内沿法线向内偏移采样，越靠外沿偏得越多（二次曲线，像透镜边缘）
+                // 折射：边缘带内沿法线向内偏移采样，越靠外沿偏得越多
                 float2 pixel = 1.0 / max(_ScreenParams.xy, 1.0);
                 float2 refracted = uv - normal * (edge * edge) * _Refraction * pixel;
                 half3 behind = SampleBehind(refracted);
 
                 half3 glass = lerp(behind, IN.color.rgb, _TintStrength);
-                // 磨砂：整体略向白色抬起，玻璃比背后的画面稍亮，像 iOS 控制中心的模块
                 glass = lerp(glass, half3(1.0h, 1.0h, 1.0h), _Frost);
 
-                // 边缘高光：主光来自左上，右下有一道回光；最外沿一条细亮线
-                half2 light = half2(-0.62h, 0.78h);
-                half facing = dot(normal, light);
-                // 边缘带取平方衰减：高光比细线更宽、更柔，像厚玻璃的内发光
-                half band = edge * edge;
-                half rim = band * (0.22h + 0.78h * saturate(facing)) + band * 0.45h * saturate(-facing);
-                half lip = smoothstep(0.86h, 1.0h, edge) * 0.35h;
-                glass += (rim + lip) * _RimIntensity;
+                // 顶部极淡高光掠影：9-slice 面板中心 UV.y=0.5 不受影响，仅在顶倒角/上部渐现受光层次
+                half topGlow = smoothstep(0.55h, 0.98h, saturate(IN.texcoord.y)) * _TopSheen;
+                glass += _RimColor.rgb * topGlow;
+
+                // 边缘高光：1.3~2.0px 光学切割微光（主光来自左上，香槟金暖调）
+                half2 light = half2(-0.55h, 0.83h);
+                half facing = saturate(dot(normal, light));
+                half lip = smoothstep(0.55h, 0.96h, edge);
+                half rim = lip * (0.28h + 0.72h * pow(facing, 1.5h));
+                glass += _RimColor.rgb * (rim * _RimIntensity);
 
                 // 细颗粒：避免大面积平滑渐变在 8 位缓冲里出现色带
                 half n = frac(sin(dot(IN.vertex.xy, float2(12.9898, 78.233))) * 43758.5453);

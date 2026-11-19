@@ -6,13 +6,13 @@ namespace PianoTeacher3D.UI
     /// <summary>首页专用色板。冷白用于首要动作，乐谱和教学的左右手提示继续使用原有色板。</summary>
     internal static class MenuStagePalette
     {
-        public static readonly Color Ink = new Color32(8, 11, 19, 255);
-        public static readonly Color Library = new Color32(12, 16, 26, 252);
-        public static readonly Color Row = new Color32(23, 31, 49, 255);
-        public static readonly Color Text = new Color32(242, 246, 252, 255);
-        public static readonly Color Secondary = new Color32(179, 194, 220, 255);
-        public static readonly Color Action = new Color32(213, 229, 255, 255);
-        public static readonly Color Rule = new Color32(124, 146, 187, 80);
+        public static readonly Color Ink = new Color32(6, 10, 18, 255);
+        public static readonly Color Library = new Color32(13, 19, 31, 236);
+        public static readonly Color Row = new Color32(21, 29, 44, 245);
+        public static readonly Color Text = new Color32(244, 241, 234, 255);
+        public static readonly Color Secondary = new Color32(176, 184, 198, 255);
+        public static readonly Color Action = new Color32(224, 198, 138, 255);
+        public static readonly Color Rule = new Color(0.94f, 0.87f, 0.72f, 0.16f);
     }
 
     /// <summary>朝画面右侧收束的琴键带，按固定频率更新高光。</summary>

@@ -57,8 +57,6 @@ namespace PianoTeacher3D.Avatar
         private static readonly int[] LeftAscending = { 4, 3, 2, 1, 0, 2, 1, 0 };
         private static readonly int[] MajorScaleIntervals = { 2, 2, 1, 2, 2, 2, 1 };
         private const int UnknownFinger = -2;
-        private const int PianoFingerCount = 5;
-        private const int MaxChordSpan = 14;
         private const float SameOnsetSeconds = 0.02f;
         private const float PhraseGapSeconds = 0.40f;
 
@@ -126,150 +124,14 @@ namespace PianoTeacher3D.Avatar
             PlanScales(left, true, _leftPlan);
             PlanScales(right, false, _rightPlan);
             if (!UsePreparedPhrases) return;
-            PlanPhrases(left, true, _leftPlan);
-            PlanPhrases(right, false, _rightPlan);
+            MergeSolved(PianoFingeringSolver.SolveHand(left, true, _leftPlan), _leftPlan);
+            MergeSolved(PianoFingeringSolver.SolveHand(right, false, _rightPlan), _rightPlan);
         }
 
-        private void PlanPhrases(List<MidiNoteEvent> notes, bool leftHand,
-            Dictionary<(int Pitch, float Start), int> output)
+        private static void MergeSolved(Dictionary<(int Pitch, float Start), int> solved,
+            Dictionary<(int Pitch, float Start), int> target)
         {
-            var provider = _provider ?? (_provider = new HeuristicFingeringProvider());
-            var activeFingers = new int[128];
-            var activeUntil = new float[128];
-            var sounding = new List<int>(PianoFingerCount);
-            var recent = new List<int>(8);
-            ClearArray(activeFingers);
-            var lastFinger = new int[128];
-            var lastNoteEnd = new float[128];
-            ClearArray(lastFinger);
-            float previousEnd = -1f;
-            for (int start = 0; start < notes.Count;)
-            {
-                float onset = notes[start].StartTime;
-                int end = start + 1;
-                while (end < notes.Count && notes[end].StartTime <= onset + 0.0001f) end++;
-
-                sounding.Clear();
-                for (int pitch = 0; pitch < activeUntil.Length; pitch++)
-                    if (activeUntil[pitch] > onset + 0.0001f && activeFingers[pitch] >= 0)
-                        sounding.Add(pitch);
-                for (int i = start; i < end; i++)
-                {
-                    int pitch = notes[i].Pitch;
-                    if (!sounding.Contains(pitch)) sounding.Add(pitch);
-                }
-                sounding.Sort();
-                if (onset - previousEnd > PhraseGapSeconds + 0.0001f)
-                {
-                    recent.Clear();
-                }
-                var context = new FingeringContext(leftHand, sounding, recent, onset);
-                var preferred = provider.Assign(in context)?.FingerByPitch;
-                int minPitch = sounding[0];
-                int maxPitch = sounding[sounding.Count - 1];
-                if (sounding.Count <= PianoFingerCount && maxPitch - minPitch <= MaxChordSpan)
-                {
-                    if (sounding.Count == 1)
-                    {
-                        int pitch = sounding[0];
-                        int chosen = onset - lastNoteEnd[pitch] <= PhraseGapSeconds + 0.0001f
-                            ? lastFinger[pitch] : -1;
-                        if (activeUntil[pitch] > onset) chosen = activeFingers[pitch];
-                        if (output.TryGetValue((pitch, onset), out int scaleFinger)) chosen = scaleFinger;
-                        if (chosen < 0 && preferred != null && preferred.Length > 0) chosen = preferred[0];
-                        if (end < notes.Count && notes[end].StartTime < notes[start].EndTime
-                            && !output.ContainsKey((pitch, onset)))
-                        {
-                            int nextPitch = notes[end].Pitch;
-                            if (leftHand ? nextPitch < pitch : nextPitch > pitch) chosen = Mathf.Min(chosen, 3);
-                            else if (nextPitch != pitch) chosen = Mathf.Max(chosen, 1);
-                        }
-                        for (int i = start; i < end; i++) output[(pitch, notes[i].StartTime)] = chosen;
-                    }
-                    else
-                    {
-                        int mask = PickChordMask(sounding, preferred, activeFingers, activeUntil, onset, leftHand);
-                        for (int i = start; i < end; i++)
-                        {
-                            int pitch = notes[i].Pitch;
-                            int rank = sounding.BinarySearch(pitch);
-                            output[(pitch, notes[i].StartTime)] = mask == 0 ? -1 : FingerAtRank(mask, rank, leftHand);
-                        }
-                    }
-                }
-                else
-                {
-                    // 保留已经按住的音。当前新增音组过宽或多于五指时，整组不硬塞给空闲指。
-                    for (int i = start; i < end; i++)
-                    {
-                        var note = notes[i];
-                        output[(note.Pitch, note.StartTime)] = activeUntil[note.Pitch] > onset
-                            ? activeFingers[note.Pitch] : -1;
-                    }
-                }
-
-                for (int i = start; i < end; i++)
-                {
-                    var note = notes[i];
-                    int finger = output[(note.Pitch, note.StartTime)];
-                    activeUntil[note.Pitch] = Mathf.Max(activeUntil[note.Pitch], note.EndTime);
-                    activeFingers[note.Pitch] = finger;
-                    lastFinger[note.Pitch] = finger;
-                    lastNoteEnd[note.Pitch] = note.EndTime;
-                    previousEnd = Mathf.Max(previousEnd, note.EndTime);
-                    recent.Add(note.Pitch);
-                    if (recent.Count > 8) recent.RemoveAt(0);
-                }
-                // 后一个起音进入保持期前，已占用的手指保持原分配。
-                start = end;
-            }
-        }
-
-        private static int PickChordMask(List<int> pitches, int[] preferred,
-            int[] active, float[] activeUntil, float onset, bool leftHand)
-        {
-            int bestMask = 0;
-            float bestCost = float.PositiveInfinity;
-            for (int mask = 1; mask < 1 << PianoFingerCount; mask++)
-            {
-                int count = 0;
-                for (int f = 0; f < PianoFingerCount; f++) count += (mask >> f) & 1;
-                if (count != pitches.Count) continue;
-
-                float cost = 0f;
-                for (int i = 0; i < pitches.Count; i++)
-                {
-                    int finger = FingerAtRank(mask, i, leftHand);
-                    int pitch = pitches[i];
-                    if (activeUntil[pitch] > onset + 0.0001f && active[pitch] != finger)
-                    {
-                        cost = float.PositiveInfinity;
-                        break;
-                    }
-                    if (preferred != null && i < preferred.Length) cost += 0.6f * Mathf.Abs(finger - preferred[i]);
-                    if (PianoNoteFilter.IsBlackKey(pitch) && finger == 0) cost += 1.3f;
-                    if (i > 0)
-                    {
-                        int step = Mathf.Abs(finger - FingerAtRank(mask, i - 1, leftHand));
-                        cost += Mathf.Abs((pitches[i] - pitches[i - 1]) - step * 2.5f) * 0.3f;
-                    }
-                }
-                if (cost >= bestCost) continue;
-                bestMask = mask;
-                bestCost = cost;
-            }
-            return bestMask;
-        }
-
-        private static int FingerAtRank(int mask, int rank, bool leftHand)
-        {
-            for (int f = 0; f < PianoFingerCount; f++)
-            {
-                int finger = leftHand ? PianoFingerCount - 1 - f : f;
-                if ((mask & (1 << finger)) == 0) continue;
-                if (rank-- == 0) return finger;
-            }
-            return -1;
+            foreach (var pair in solved) target[pair.Key] = pair.Value;
         }
 
         private static void PlanScales(List<MidiNoteEvent> notes, bool leftHand,

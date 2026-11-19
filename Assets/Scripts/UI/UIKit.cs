@@ -215,6 +215,17 @@ namespace PianoTeacher3D.UI
             {
                 UITheme.SetRoundedSprite(img, UITheme.RadiusMedium);
                 UITheme.SetOutline(img, false, UITheme.BorderSelected, 1f);
+                var highlightGo = new GameObject("TopHighlight", typeof(RectTransform));
+                highlightGo.transform.SetParent(btn.transform, false);
+                var hl = highlightGo.AddComponent<Image>();
+                hl.raycastTarget = false;
+                hl.color = new Color(1f, 0.98f, 0.90f, 0.28f);
+                var hrt = hl.rectTransform;
+                hrt.anchorMin = new Vector2(0f, 1f);
+                hrt.anchorMax = new Vector2(1f, 1f);
+                hrt.pivot = new Vector2(0.5f, 1f);
+                hrt.anchoredPosition = new Vector2(0f, 0f);
+                hrt.sizeDelta = new Vector2(-12f, 1f);
             }
             var text = UITheme.GetLabel(btn);
             if (text != null)

@@ -33,22 +33,23 @@ namespace PianoTeacher3D.UI
 
         private RectTransform _rt;
         private CanvasGroup _group;
-        private Vector2 _home;
-        private bool _homeCaptured;
+        private Vector2 _appliedOffset;
         private float _t, _tVel;        // 0 = 收起，1 = 完全展开
         private float _target;
         private float _wait;
         private Action _onHidden;
 
-        /// <summary>挂到面板上（重复调用安全）。</summary>
+        /// <summary>挂到面板上（重复调用安全；在布局完成后调用以应用入场参数）。</summary>
         public static UIAppear Attach(GameObject panel, float delay = 0f, float fromScale = 0.94f, Vector2? fromOffset = null)
         {
             if (panel == null) return null;
             var appear = panel.GetComponent<UIAppear>();
             if (appear == null) appear = panel.AddComponent<UIAppear>();
+            appear.RevertOffset();
             appear.Delay = delay;
             appear.FromScale = fromScale;
             appear.FromOffset = fromOffset ?? Vector2.zero;
+            if (panel.activeInHierarchy) appear.BeginAppear();
             return appear;
         }
 
@@ -83,13 +84,13 @@ namespace PianoTeacher3D.UI
 
         private void OnEnable()
         {
+            BeginAppear();
+        }
+
+        private void BeginAppear()
+        {
             if (_rt == null) Awake();
-            // 每次显示都重新记录最终位置：隐藏期间布局代码可能已经移动过面板
-            if (_rt != null)
-            {
-                _home = _rt.anchoredPosition;
-                _homeCaptured = true;
-            }
+            RevertOffset();
             _onHidden = null;
             _target = 1f;
             if (UIMotion.Reduced)
@@ -106,22 +107,26 @@ namespace PianoTeacher3D.UI
             UIMotionTicker.Add(this);
         }
 
+        private void RevertOffset()
+        {
+            if (_rt != null && _appliedOffset != Vector2.zero)
+            {
+                _rt.anchoredPosition -= _appliedOffset;
+                _appliedOffset = Vector2.zero;
+            }
+        }
+
         private void OnDisable()
         {
             UIMotionTicker.Remove(this);
-            if (_rt != null)
-            {
-                if (_homeCaptured && FromOffset != Vector2.zero) _rt.anchoredPosition = _home;
-                _rt.localScale = Vector3.one;
-            }
+            RevertOffset();
+            if (_rt != null) _rt.localScale = Vector3.one;
             if (_group != null) _group.alpha = 1f;
         }
 
-        /// <summary>布局变化后（例如窗口尺寸改变）重新记录「最终位置」。</summary>
+        /// <summary>保留兼容签名：改用相对位移后布局变化不再漂移。</summary>
         public void RecaptureHome()
         {
-            if (_rt == null) return;
-            _home = _rt.anchoredPosition - FromOffset * (1f - _t);
         }
 
         public bool Tick(float dt)
@@ -154,13 +159,20 @@ namespace PianoTeacher3D.UI
 
         private void Apply()
         {
+            if (_rt == null) return;
             float t = _t;
             float alpha = Mathf.Clamp01(t * 1.6f);
             float scale = Mathf.LerpUnclamped(FromScale, 1f, t);
             if (_group != null) _group.alpha = alpha;
             _rt.localScale = new Vector3(scale, scale, 1f);
-            if (FromOffset != Vector2.zero)
-                _rt.anchoredPosition = _home + FromOffset * (1f - Mathf.Clamp(t, 0f, 1.2f));
+            Vector2 wanted = FromOffset != Vector2.zero
+                ? FromOffset * (1f - Mathf.Clamp(t, 0f, 1.2f))
+                : Vector2.zero;
+            if (wanted != _appliedOffset)
+            {
+                _rt.anchoredPosition += wanted - _appliedOffset;
+                _appliedOffset = wanted;
+            }
         }
     }
 }

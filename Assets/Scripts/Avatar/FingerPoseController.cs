@@ -557,7 +557,7 @@ namespace PianoTeacher3D.Avatar
                     if ((UseAnatomicalContact || thumbPad) && finger == proximal && hand is IHandOrientationRig basis)
                     {
                         UpdateAnatomicalFinger(hand, basis, jointRig, f, proximal, intermediate, distal,
-                            worldTarget, hasTarget, pressed, leftHand, span > 0, held[f]);
+                            worldTarget, hasTarget, pressed, leftHand, span > 0, held[f], phase == FingerPhase.Release);
                     }
                     else
                     {
@@ -580,7 +580,8 @@ namespace PianoTeacher3D.Avatar
 
         private void UpdateAnatomicalFinger(IHandRig hand, IHandOrientationRig basis, IFingerJointRig rig,
             int fingerIndex, Transform proximal, Transform intermediate, Transform distal,
-            Vector3 target, bool hasTarget, bool pressed, bool leftHand, bool chord, float heldSeconds)
+            Vector3 target, bool hasTarget, bool pressed, bool leftHand, bool chord, float heldSeconds,
+            bool releasing = false)
         {
             // 侧摆仅发生在掌指关节，铰链方向随侧摆共同旋转。中节与末节只允许沿自己的轴屈伸。
             var parent = proximal.parent;
@@ -588,7 +589,7 @@ namespace PianoTeacher3D.Avatar
             // 落键后短时间内指腹仍在目标附近时，保留现有手型。
             // 避免解算器在多个等价弯曲姿势间折返。腕位变化让指腹离开接触区后自然恢复追踪。
             bool thumb = fingerIndex == 0 && hand is IThumbContactRig { HasThumbPad: true };
-            float contactTolerance = thumb ? 0.001f : 0.003f;
+            float contactTolerance = thumb ? 0f : 0.003f;
             if (!thumb && chord && UseDampedJointMotion && pressed && hasTarget && tip != null)
             {
                 var error = tip.position - target;
@@ -605,52 +606,52 @@ namespace PianoTeacher3D.Avatar
             float side = sides[fingerIndex];
             var angles = _jointScratch;
             var curls = leftHand ? _leftJointAngle : _rightJointAngle;
-            bool rightThumb = thumb && !leftHand;
+            var primed = leftHand ? _leftJointPrimed : _rightJointPrimed;
             // 进音时目标若已换到另一键，留出侧摆和触键所需的速度。
-            bool reaching = rightThumb && pressed && hasTarget && tip != null &&
+            bool reaching = thumb && pressed && hasTarget && tip != null &&
                 Vector3.ProjectOnPlane(tip.position - target, Vector3.up).sqrMagnitude > 0.0004f;
-            var previousAngles = rightThumb && !reaching && _rightJointPrimed[0] ? curls : null;
-            if (rightThumb && hasTarget && tip != null && !reaching)
+            var previousAngles = thumb && !reaching && primed[0] ? curls : null;
+            if (thumb && hasTarget && tip != null && !reaching)
             {
                 // 指腹进键前末节轻弯，下压后松开一部分。位置不足以同时达到时优先保证触键。
                 float load = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(heldSeconds / Mathf.Max(0.01f, HoldSettleSeconds)));
                 float bend = pressed ? Mathf.Lerp(11f, 8f, load) : 13f;
                 Vector3 contact = FitAnatomicalFinger(hand, basis, fingerIndex, proximal, intermediate, distal,
-                    tip, target, angles, ref side, previousAngles, bend);
+                    tip, target, angles, ref side, previousAngles, bend, releasing);
                 if ((contact - target).sqrMagnitude > 0.00000625f)
                 {
                     side = sides[fingerIndex];
                     FitAnatomicalFinger(hand, basis, fingerIndex, proximal, intermediate, distal,
-                        tip, target, angles, ref side, previousAngles);
+                        tip, target, angles, ref side, previousAngles, 6f, releasing);
                 }
             }
             else
             {
                 FitAnatomicalFinger(hand, basis, fingerIndex, proximal, intermediate, distal,
-                    hasTarget ? tip : null, target, angles, ref side, previousAngles);
+                    hasTarget ? tip : null, target, angles, ref side, previousAngles, 6f, releasing);
             }
             Vector3 sideAxis = parent.InverseTransformDirection(hand.Wrist.TransformDirection(basis.BackNormalLocal));
 
             float dt = Time.deltaTime;
-            bool preparingThumb = rightThumb && !pressed && hasTarget;
-            float sideTarget = rightThumb && !pressed
+            bool preparingThumb = thumb && !pressed && hasTarget;
+            float sideTarget = thumb && !pressed
                 ? Mathf.Lerp(sides[fingerIndex], side, 1f - Mathf.Exp(-dt / (preparingThumb ? 0.023f : 0.063f)))
                 : side;
-            float sideStep = (pressed ? (rightThumb && !reaching ? 360f : 540f) : preparingThumb ? 380f : 250f) * dt;
-            sides[fingerIndex] = rightThumb && !_rightJointPrimed[0]
+            float sideStep = (pressed ? (thumb && !reaching ? 360f : 540f) : preparingThumb ? 380f : 250f) * dt;
+            sides[fingerIndex] = thumb && !primed[0]
                 ? side : Mathf.MoveTowards(sides[fingerIndex], sideTarget, sideStep);
             bool trackContact = pressed && hasTarget;
             float extension = thumb ? -13f : 0f;
-            float contactSpeed = rightThumb && !reaching ? 410f : 540f;
+            float contactSpeed = thumb && !reaching ? 410f : 540f;
             // 预备要跟上将到的音符，离键之后再让指节缓慢回到放松姿态。
-            float relaxSeconds = preparingThumb ? 0.034f : rightThumb ? 0.062f : 0.082f;
+            float relaxSeconds = preparingThumb ? 0.034f : thumb ? 0.062f : 0.082f;
             float relaxSpeed = preparingThumb ? 380f : 250f;
             ApplyJoint(proximal, 0, angles[0], MaxMcpDegrees, leftHand, fingerIndex, !pressed, trackContact,
                 extension, contactSpeed, relaxSeconds, relaxSpeed);
             ApplyJoint(intermediate, 1, angles[1], MaxPipDegrees, leftHand, fingerIndex, !pressed, trackContact,
-                rightThumb ? 4f : 0f, contactSpeed, relaxSeconds, relaxSpeed);
+                thumb ? 4f : 0f, contactSpeed, relaxSeconds, relaxSpeed);
             ApplyJoint(distal, 2, angles[2], MaxDipDegrees, leftHand, fingerIndex, !pressed, trackContact,
-                rightThumb ? 6f : 0f, contactSpeed, relaxSeconds, relaxSpeed);
+                thumb ? 6f : 0f, contactSpeed, relaxSeconds, relaxSpeed);
             Quaternion flexion = UseDampedJointMotion ? JointAxes.CurlLocalRotation(proximal, 0, curls[fingerIndex * 3])
                 : proximal.localRotation;
             var appliedSide = Quaternion.AngleAxis(sides[fingerIndex], sideAxis);
@@ -667,7 +668,7 @@ namespace PianoTeacher3D.Avatar
                 float before = curls[slot];
                 float bestY = tip.position.y;
                 var sideRotation = j == 0 ? appliedSide : Quaternion.identity;
-                float open = j == 0 ? extension : rightThumb ? (j == 1 ? 4f : 6f) : 0f;
+                float open = j == 0 ? extension : thumb ? (j == 1 ? 4f : 6f) : 0f;
                 joint.localRotation = sideRotation * JointAxes.CurlLocalRotation(joint, j, open);
                 if (tip.position.y <= bestY)
                 {
@@ -707,11 +708,11 @@ namespace PianoTeacher3D.Avatar
 
         private Vector3 FitAnatomicalFinger(IHandRig hand, IHandOrientationRig basis, int fingerIndex,
             Transform proximal, Transform intermediate, Transform distal, Transform tip, Vector3 target,
-            float[] angles, ref float side, float[] previous = null, float thumbDistalBend = 6f)
+            float[] angles, ref float side, float[] previous = null, float thumbDistalBend = 6f,
+            bool releasing = false)
         {
             bool thumb = fingerIndex == 0 && hand is IThumbContactRig { HasThumbPad: true };
             float sideLimit = thumb ? 35f : fingerIndex == 0 ? 25f : 15f;
-            bool rightThumb = thumb && basis.SideSign < 0f;
             Vector3 palmNormal = hand.Wrist.TransformDirection(basis.BackNormalLocal);
             var parent = proximal.parent;
             Vector3 sideAxis = parent.InverseTransformDirection(palmNormal);
@@ -721,14 +722,20 @@ namespace PianoTeacher3D.Avatar
             angles[0] = rest * McpWeight / sum;
             angles[1] = rest * PipWeight / sum;
             angles[2] = rest * DipWeight / sum;
-            if (rightThumb && tip == null)
+            if (thumb && tip == null)
             {
-                // 拇指回到半松开的对掌手型，腕下的三段不沿用四指的 C 形弯曲量。
+                // 双手拇指对称回到半松开的对掌手型，腕下的三段不沿用四指的 C 形弯曲量。
                 angles[0] = 8f;
                 angles[1] = 10f;
                 angles[2] = 12f;
-                side = -7f;
+                side = 7f * basis.SideSign;
                 return target;
+            }
+            if (!thumb && tip == null && releasing)
+            {
+                angles[0] *= 0.72f;
+                angles[1] *= 0.72f;
+                angles[2] *= 0.72f;
             }
 
             if (tip != null)
@@ -740,7 +747,7 @@ namespace PianoTeacher3D.Avatar
                 angles[0] *= 0.40f;
                 angles[1] *= 0.40f;
                 angles[2] *= 0.40f;
-                if (rightThumb)
+                if (thumb)
                 {
                     // 对掌时保留末节的轻弯，并从上一帧开始微调，避免近节独自拉直整根拇指。
                     angles[0] = previous == null ? 8f : previous[0];
@@ -769,7 +776,7 @@ namespace PianoTeacher3D.Avatar
                     intermediate.localRotation = JointAxes.CurlLocalRotation(intermediate, 1, angles[1]);
                     distal.localRotation = JointAxes.CurlLocalRotation(distal, 2, angles[2]);
 
-                    for (int i = 0, iterations = rightThumb ? 12 : 7; i < iterations; i++)
+                    for (int i = 0, iterations = thumb ? 12 : 7; i < iterations; i++)
                     {
                         float sideDelta = RotationToward(proximal.position, palmNormal, tip.position, target);
                         side = Mathf.Clamp(side + sideDelta, -sideLimit, sideLimit);
@@ -784,8 +791,8 @@ namespace PianoTeacher3D.Avatar
                             float max = j == 0 ? Mathf.Min(MaxMcpDegrees, 65f) : j == 1 ? Mathf.Min(MaxPipDegrees, 72f) : Mathf.Min(MaxDipDegrees, 48f);
                             float delta = RotationToward(joint.position, axis, tip.position, target);
                             if (thumb && j == 0) max = Mathf.Min(max, 44f);
-                            float minimum = thumb && j == 0 ? -13f : rightThumb ? (j == 1 ? 4f : thumbDistalBend) : 0f;
-                            float preferredBend = rightThumb && j > 0
+                            float minimum = thumb && j == 0 ? -13f : thumb ? (j == 1 ? 4f : thumbDistalBend) : 0f;
+                            float preferredBend = thumb && j > 0
                                 ? ((j == 1 ? 8f : 11f) - angles[j]) * 0.12f : 0f;
                             angles[j] = Mathf.Clamp(angles[j] + delta * 0.8f + preferredBend, minimum, max);
                             // 拇指的指间关节与掌指关节不使用四指的中末节耦合。
@@ -798,7 +805,7 @@ namespace PianoTeacher3D.Avatar
                             Quaternion curl = JointAxes.CurlLocalRotation(joint, j, angles[j]);
                             joint.localRotation = j == 0 ? sideRotation * curl : curl;
                         }
-                        if ((tip.position - target).sqrMagnitude < (rightThumb ? 0.0000015f : 0.000004f)) break;
+                        if ((tip.position - target).sqrMagnitude < (thumb ? 0.0000015f : 0.000004f)) break;
                     }
                     Vector3 solved = tip.position;
                     proximal.localRotation = before0;

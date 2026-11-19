@@ -217,6 +217,203 @@ namespace PianoTeacher3D.Tests.EditMode
             Assert.Less(CountAssigned(service, false), 2, "一只手不能同时跨两个八度");
         }
 
+        [Test]
+        public void CinematicTide_RightAndLeftHandFingering_IsRealisticAndUsesThumb()
+        {
+            string path = System.IO.Path.Combine(UnityEngine.Application.streamingAssetsPath,
+                "Songs", "cinematic", "cinematic_tide.mid");
+            Assert.IsTrue(System.IO.File.Exists(path), $"找不到测试曲目: {path}");
+
+            var parsed = MidiParser.ParseFile(path);
+            Assert.IsTrue(parsed.Success, $"MIDI 解析失败: {parsed.Error}");
+            Assert.Greater(parsed.Notes.Count, 20);
+
+            var service = NewService();
+            service.PrepareSong(parsed.Notes);
+
+            CheckHandRealism("cinematic_tide RH", service, parsed.Notes, false, 4);
+            CheckHandRealism("cinematic_tide LH", service, parsed.Notes, true, 3);
+        }
+
+        [Test]
+        public void BlackKeyMelody_AvoidsThumbAndPinkyPecking()
+        {
+            string path = System.IO.Path.Combine(UnityEngine.Application.streamingAssetsPath,
+                "Songs", "bench", "bench_black_keys.mid");
+            Assert.IsTrue(System.IO.File.Exists(path), $"找不到基准曲目: {path}");
+
+            var parsed = MidiParser.ParseFile(path);
+            Assert.IsTrue(parsed.Success, $"MIDI 解析失败: {parsed.Error}");
+
+            var service = NewService();
+            service.PrepareSong(parsed.Notes);
+
+            int blackTotal = 0;
+            int blackLongFingers = 0;
+            int blackThumb = 0;
+            foreach (var note in parsed.Notes)
+            {
+                if (!PianoNoteFilter.IsBlackKey(note.Pitch)) continue;
+                bool leftHand = PianoNoteFilter.IsLeftHand(in note);
+                int finger = service.PreviewFinger(leftHand, note.Pitch, note.StartTime);
+                if (finger < 0) continue;
+                blackTotal++;
+                if (finger >= 1 && finger <= 3) blackLongFingers++;
+                if (finger == 0) blackThumb++;
+            }
+
+            Assert.Greater(blackTotal, 5);
+            float longRatio = (float)blackLongFingers / blackTotal;
+            float thumbRatio = (float)blackThumb / blackTotal;
+            UnityEngine.Debug.Log($"[FINGERING] bench_black_keys total={blackTotal} longRatio={longRatio:F3} thumbRatio={thumbRatio:F3}");
+            Assert.GreaterOrEqual(longRatio, 0.70f, "黑键应主要由 2/3/4 长指演奏");
+            Assert.LessOrEqual(thumbRatio, 0.15f, "黑键应尽量避开拇指连击");
+        }
+
+        [Test]
+        public void FiveFingerAndThumbUnderRun_ProducesTextbookFingering()
+        {
+            // 1) 先弹 C4 再上高八度 C5-G5，验证五指均参与而非全程卡在小指 (4)
+            var service = NewService();
+            var phrase = new System.Collections.Generic.List<MidiNoteEvent>
+            {
+                new MidiNoteEvent(60, 0f, 0.25f, 80, 0, 0),
+                new MidiNoteEvent(72, 0.8f, 0.25f, 80, 0, 0),
+                new MidiNoteEvent(74, 1.1f, 0.25f, 80, 0, 0),
+                new MidiNoteEvent(76, 1.4f, 0.25f, 80, 0, 0),
+                new MidiNoteEvent(77, 1.7f, 0.25f, 80, 0, 0),
+                new MidiNoteEvent(79, 2.0f, 0.25f, 80, 0, 0)
+            };
+            service.PrepareSong(phrase);
+            var highFingers = new System.Collections.Generic.HashSet<int>();
+            for (int i = 1; i < phrase.Count; i++)
+                highFingers.Add(service.PreviewFinger(false, phrase[i].Pitch, phrase[i].StartTime));
+            Assert.AreEqual(5, highFingers.Count, "高音区 C5-G5 五指进行必须自然用满 5 根手指");
+
+            // 2) 右手下行 C 大调音阶：C5..C4 必须有拇指参与且无连续同指异音
+            int[] descPitches = { 72, 71, 69, 67, 65, 64, 62, 60 };
+            var descNotes = new System.Collections.Generic.List<MidiNoteEvent>(descPitches.Length);
+            for (int i = 0; i < descPitches.Length; i++)
+                descNotes.Add(new MidiNoteEvent(descPitches[i], i * 0.25f, 0.20f, 80, 0, 0));
+            service.PrepareSong(descNotes);
+            var descDistinct = new System.Collections.Generic.HashSet<int>();
+            int prevDescFinger = -1;
+            bool descUsedThumb = false;
+            for (int i = 0; i < descNotes.Count; i++)
+            {
+                int f = service.PreviewFinger(false, descNotes[i].Pitch, descNotes[i].StartTime);
+                Assert.GreaterOrEqual(f, 0);
+                descDistinct.Add(f);
+                if (f == 0) descUsedThumb = true;
+                Assert.AreNotEqual(prevDescFinger, f, $"下行音阶第 {i} 音不应同指啄键");
+                prevDescFinger = f;
+            }
+            Assert.IsTrue(descUsedThumb, "右手下行音阶必须经过拇指穿/跨指");
+            Assert.GreaterOrEqual(descDistinct.Count, 4);
+
+            // 3) 左手低音区五指进行 C2-G2：必须用满 5 指且最高音 G2 由拇指 (0) 演奏
+            int[] lhPitches = { 36, 38, 40, 41, 43 };
+            var lhNotes = new System.Collections.Generic.List<MidiNoteEvent>(lhPitches.Length);
+            for (int i = 0; i < lhPitches.Length; i++)
+                lhNotes.Add(new MidiNoteEvent(lhPitches[i], i * 0.3f, 0.25f, 80, 0, 0));
+            var lhFirst = lhNotes[0];
+            Assert.IsTrue(PianoNoteFilter.IsLeftHand(in lhFirst));
+            service.PrepareSong(lhNotes);
+            var lhDistinct = new System.Collections.Generic.HashSet<int>();
+            for (int i = 0; i < lhNotes.Count; i++)
+            {
+                int f = service.PreviewFinger(true, lhNotes[i].Pitch, lhNotes[i].StartTime);
+                Assert.GreaterOrEqual(f, 0);
+                lhDistinct.Add(f);
+            }
+            Assert.AreEqual(5, lhDistinct.Count, "左手五指 C2-G2 应使用全部 5 根手指");
+            Assert.AreEqual(0, service.PreviewFinger(true, 43, 1.2f), "左手 C2-G2 最高音 G2 应由左手拇指 (0) 演奏");
+        }
+
+        private static void CheckHandRealism(string tag, FingerAssignmentService service,
+            System.Collections.Generic.IReadOnlyList<MidiNoteEvent> allNotes, bool leftHand,
+            int minDistinctFingers)
+        {
+            var handNotes = new System.Collections.Generic.List<MidiNoteEvent>();
+            for (int i = 0; i < allNotes.Count; i++)
+            {
+                var n = allNotes[i];
+                if (PianoNoteFilter.IsLeftHand(in n) == leftHand) handNotes.Add(n);
+            }
+            Assert.Greater(handNotes.Count, 20, $"{tag} 音符数过少");
+
+            handNotes.Sort((a, b) =>
+            {
+                int cmp = a.StartTime.CompareTo(b.StartTime);
+                return cmp != 0 ? cmp : a.Pitch.CompareTo(b.Pitch);
+            });
+
+            var counts = new int[FingerAssignmentService.MaxFingers];
+            var singleFlags = new bool[handNotes.Count];
+            for (int i = 0; i < handNotes.Count; i++)
+            {
+                bool inChord = (i > 0 && System.Math.Abs(handNotes[i].StartTime - handNotes[i - 1].StartTime) < 0.02f) ||
+                               (i + 1 < handNotes.Count && System.Math.Abs(handNotes[i + 1].StartTime - handNotes[i].StartTime) < 0.02f);
+                singleFlags[i] = !inChord;
+            }
+
+            int assigned = 0;
+            int stepTransitions = 0;
+            int stepSameFingerPecks = 0;
+            int prevSingleFinger = -1;
+            int prevSingleIndex = -1;
+
+            for (int i = 0; i < handNotes.Count; i++)
+            {
+                var n = handNotes[i];
+                int f = service.PreviewFinger(leftHand, n.Pitch, n.StartTime);
+                if (f < 0 || f >= FingerAssignmentService.MaxFingers) continue;
+                counts[f]++;
+                assigned++;
+
+                if (singleFlags[i])
+                {
+                    if (prevSingleIndex >= 0)
+                    {
+                        var prev = handNotes[prevSingleIndex];
+                        float dt = n.StartTime - prev.StartTime;
+                        int dp = System.Math.Abs(n.Pitch - prev.Pitch);
+                        if (dt >= 0.03f && dt < 0.65f && dp >= 1 && dp <= 4 &&
+                            PianoNoteFilter.IsBlackKey(n.Pitch) == PianoNoteFilter.IsBlackKey(prev.Pitch))
+                        {
+                            stepTransitions++;
+                            if (f == prevSingleFinger) stepSameFingerPecks++;
+                        }
+                    }
+                    prevSingleFinger = f;
+                    prevSingleIndex = i;
+                }
+                else
+                {
+                    prevSingleIndex = -1;
+                    prevSingleFinger = -1;
+                }
+            }
+
+            Assert.Greater(assigned, 20, $"{tag} 未分配足够指法");
+            Assert.Greater(counts[0], 0, $"{tag} 拇指不得全程闲置 ({counts[0]})");
+            int distinct = 0;
+            int maxSingle = 0;
+            for (int f = 0; f < counts.Length; f++)
+            {
+                if (counts[f] > 0) distinct++;
+                if (counts[f] > maxSingle) maxSingle = counts[f];
+            }
+            float dominance = (float)maxSingle / assigned;
+            float peckRatio = stepTransitions > 0 ? (float)stepSameFingerPecks / stepTransitions : 0f;
+            UnityEngine.Debug.Log(
+                $"[FINGERING] {tag} assigned={assigned} counts=[{counts[0]},{counts[1]},{counts[2]},{counts[3]},{counts[4]}] maxShare={dominance:F3} stepPeck={stepSameFingerPecks}/{stepTransitions}");
+            Assert.GreaterOrEqual(distinct, minDistinctFingers, $"{tag} 应合理动用至少 {minDistinctFingers} 根手指");
+            Assert.LessOrEqual(dominance, 0.55f, $"{tag} 不应长期由单一手指主控 ({dominance:F2})");
+            if (stepTransitions >= 8)
+                Assert.Less(peckRatio, 0.05f, $"{tag} 连贯级进乐句不应出现异音同指啄键 ({stepSameFingerPecks}/{stepTransitions})");
+        }
+
         private static int CountAssigned(FingerAssignmentService service, bool leftHand)
         {
             int n = 0;
